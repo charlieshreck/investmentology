@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "knowledge": {
+      "httpUrl": "http://knowledge-mcp.agentic.kernow.io/mcp",
+      "trust": true
+    },
+    "external": {
+      "httpUrl": "http://external-mcp.agentic.kernow.io/mcp",
+      "trust": true
+    }
+  }
+}
