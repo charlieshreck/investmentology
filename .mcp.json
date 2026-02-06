@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "knowledge": {
+      "type": "http",
+      "url": "http://knowledge-mcp.agentic.kernow.io/mcp"
+    },
+    "external": {
+      "type": "http",
+      "url": "http://external-mcp.agentic.kernow.io/mcp"
+    }
+  }
+}

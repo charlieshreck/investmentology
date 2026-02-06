@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Task", "Read", "Glob", "Grep", "Edit", "Write", "Skill",
+      "AskUserQuestion", "Bash",
+      "mcp__knowledge__*", "mcp__external__*"
+    ],
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "defaultMode": "acceptEdits"
+  },
+  "model": "opus"
+}
