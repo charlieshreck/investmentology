@@ -100,12 +100,14 @@ class AnalysisOrchestrator:
         self._competence = CompetenceFilter(gateway)
         self._moat = MoatAnalyzer(gateway)
 
-        # L3 agents
-        self._warren = WarrenAgent(gateway)
-        self._soros = SorosAgent(gateway)
-        self._simons = SimonsAgent(gateway)
-        self._auditor = AuditorAgent(gateway)
-        self._agents = [self._warren, self._soros, self._simons, self._auditor]
+        # L3 agents — skip any that can't be configured
+        self._agents = []
+        for agent_cls in [WarrenAgent, SorosAgent, SimonsAgent, AuditorAgent]:
+            try:
+                agent = agent_cls(gateway)
+                self._agents.append(agent)
+            except (ValueError, KeyError) as exc:
+                logger.warning("Skipping %s: %s", agent_cls.__name__, exc)
 
         # L3.5 debate
         self._debate = DebateOrchestrator(gateway) if enable_debate else None
