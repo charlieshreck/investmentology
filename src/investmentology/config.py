@@ -39,6 +39,7 @@ class AppConfig:
     auth_password_hash: str = ""
     auth_secret_key: str = ""
     auth_token_expiry_hours: int = 168
+    internal_api_token: str = ""
 
 
 def load_config() -> AppConfig:
@@ -69,4 +70,5 @@ def load_config() -> AppConfig:
         auth_password_hash=os.environ.get("AUTH_PASSWORD_HASH", ""),
         auth_secret_key=os.environ.get("AUTH_SECRET_KEY", ""),
         auth_token_expiry_hours=int(os.environ.get("AUTH_TOKEN_EXPIRY_HOURS", "168")),
+        internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
     )

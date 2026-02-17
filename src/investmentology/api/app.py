@@ -114,6 +114,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not config or not config.auth_secret_key:
             return await call_next(request)
 
+        # Internal token bypass (for trusted proxies like Tamar)
+        internal_token = request.headers.get("x-internal-token")
+        if internal_token and config.internal_api_token and internal_token == config.internal_api_token:
+            return await call_next(request)
+
         # Validate session cookie
         token = request.cookies.get("session")
         if not token or not verify_token(token, config.auth_secret_key):
