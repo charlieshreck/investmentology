@@ -1,0 +1,9 @@
+[Unit]
+Description=Investmentology Pre-Market Stop-Loss Timer
+
+[Timer]
+OnCalendar=Mon..Fri 08:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

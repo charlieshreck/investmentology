@@ -1,0 +1,12 @@
+[Unit]
+Description=Investmentology Weekly Screen
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/investmentology
+ExecStart=/usr/bin/python3 -m investmentology cron weekly-screen
+Environment=PYTHONPATH=/home/investmentology/src
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600

@@ -3,6 +3,8 @@
     "allow": [
       "Task", "Read", "Glob", "Grep", "Edit", "Write", "Skill",
       "AskUserQuestion", "Bash",
+      "TeamCreate", "TeamDelete", "SendMessage",
+      "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop",
       "mcp__knowledge__*", "mcp__external__*"
     ],
     "ask": [

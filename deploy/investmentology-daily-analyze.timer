@@ -1,0 +1,9 @@
+[Unit]
+Description=Investmentology Daily Watchlist Analysis Timer
+
+[Timer]
+OnCalendar=Mon..Fri 05:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

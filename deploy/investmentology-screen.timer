@@ -1,0 +1,9 @@
+[Unit]
+Description=Investmentology Weekly Screen Timer
+
+[Timer]
+OnCalendar=Sun 06:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

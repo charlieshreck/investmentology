@@ -1,0 +1,126 @@
+import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BottomNav } from "./components/layout/BottomNav";
+import { LayerOverlay } from "./components/layout/LayerOverlay";
+import { Portfolio } from "./views/Portfolio";
+import { QuantGate } from "./views/QuantGate";
+import { Watchlist } from "./views/Watchlist";
+import { Decisions } from "./views/Decisions";
+import { Analyse } from "./views/Analyse";
+import { Learning } from "./views/Learning";
+import { SystemHealth } from "./views/SystemHealth";
+import { Agents } from "./views/Agents";
+import { Recommendations } from "./views/Recommendations";
+import { Backtest } from "./views/Backtest";
+import { StockDeepDive } from "./views/StockDeepDive";
+import { Login } from "./views/Login";
+import { useAuth } from "./hooks/useAuth";
+import { useStore } from "./stores/useStore";
+
+// Intercept all fetch calls — on 401 force reload to show login
+const originalFetch = window.fetch;
+window.fetch = async (...args) => {
+  const res = await originalFetch(...args);
+  if (res.status === 401) {
+    const url = typeof args[0] === "string" ? args[0] : (args[0] as Request).url;
+    // Don't intercept auth endpoints themselves
+    if (!url.includes("/auth/")) {
+      window.location.reload();
+    }
+  }
+  return res;
+};
+
+export default function App() {
+  const overlayTicker = useStore((s) => s.overlayTicker);
+  const setOverlayTicker = useStore((s) => s.setOverlayTicker);
+  const { isAuthenticated, error, login, logout } = useAuth();
+  const [offline, setOffline] = useState(!navigator.onLine);
+
+  // Store logout in window for use by nav/settings
+  useEffect(() => {
+    (window as any).__logout = logout;
+  }, [logout]);
+
+  // Offline detection
+  useEffect(() => {
+    const goOffline = () => setOffline(true);
+    const goOnline = () => setOffline(false);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+    };
+  }, []);
+
+  // Still checking auth state
+  if (isAuthenticated === null) {
+    return (
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--color-base)",
+          color: "var(--color-text-muted)",
+          fontSize: "var(--text-sm)",
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
+  // Not authenticated — show login
+  if (!isAuthenticated) {
+    return <Login onLogin={login} error={error} />;
+  }
+
+  return (
+    <BrowserRouter>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        {offline && (
+          <div
+            style={{
+              background: "var(--color-warning, #f59e0b)",
+              color: "#000",
+              textAlign: "center",
+              padding: "6px",
+              fontSize: "12px",
+              fontWeight: 600,
+              zIndex: 100,
+            }}
+          >
+            Offline — showing cached data
+          </div>
+        )}
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <Routes>
+            <Route path="/" element={<Portfolio />} />
+            <Route path="/screener" element={<QuantGate />} />
+            <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/log" element={<Decisions />} />
+            <Route path="/analyze" element={<Analyse />} />
+            <Route path="/learning" element={<Learning />} />
+            <Route path="/recommendations" element={<Recommendations />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/backtest" element={<Backtest />} />
+            <Route path="/health" element={<SystemHealth />} />
+          </Routes>
+        </div>
+        <BottomNav />
+
+        {/* Stock deep-dive overlay */}
+        <LayerOverlay
+          isOpen={overlayTicker !== null}
+          onClose={() => setOverlayTicker(null)}
+          title={overlayTicker ?? ""}
+        >
+          {overlayTicker && <StockDeepDive ticker={overlayTicker} />}
+        </LayerOverlay>
+      </div>
+    </BrowserRouter>
+  );
+}

@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --color-black: #050509;
+  --color-crust: #0a0a12;
+  --color-base: #0d0d16;
+  --color-surface-0: #13131e;
+  --color-surface-1: #1a1a28;
+  --color-surface-2: #222234;
+  --color-surface-3: #2a2a40;
+  --color-text: #f5f5fa;
+  --color-text-secondary: rgba(245, 245, 250, 0.6);
+  --color-text-muted: rgba(245, 245, 250, 0.35);
+  --color-accent: #6366f1;
+  --color-accent-bright: #818cf8;
+  --color-accent-ghost: rgba(99, 102, 241, 0.10);
+  --color-accent-glow: rgba(99, 102, 241, 0.25);
+  --gradient-active: linear-gradient(135deg, #6366f1, #8b5cf6);
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-critical: #ef4444;
+  --color-info: #60a5fa;
+  --glass-bg: rgba(13, 13, 22, 0.65);
+  --glass-bg-elevated: rgba(20, 20, 30, 0.80);
+  --glass-blur: 12px;
+  --glass-border: rgba(245, 245, 250, 0.08);
+  --ring-subtle: 0 0 0 1px rgba(245, 245, 250, 0.06);
+  --ring-default: 0 0 0 1px rgba(245, 245, 250, 0.10);
+  --ring-accent: 0 0 0 1px rgba(99, 102, 241, 0.40);
+  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-smooth: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-bouncy: cubic-bezier(0.34, 1.8, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --nav-height: 60px;
+  --header-height: 56px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--color-base);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-surface-1); }
+::-webkit-scrollbar-thumb { background: var(--color-surface-3); border-radius: var(--radius-full); }

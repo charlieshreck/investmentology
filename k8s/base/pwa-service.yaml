@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: investmentology-pwa
+  namespace: investmentology
+  labels:
+    app: investmentology-pwa
+spec:
+  type: ClusterIP
+  selector:
+    app: investmentology-pwa
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
