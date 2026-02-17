@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 
 interface Fundamentals {
@@ -280,14 +281,13 @@ function FiftyTwoWeekBar({ low, high, current }: { low: number; high: number; cu
   );
 }
 
-const BUY_VERDICTS = new Set(["STRONG_BUY", "BUY", "ACCUMULATE"]);
-
 export function StockDeepDive({ ticker }: { ticker: string }) {
   const [data, setData] = useState<StockResponse | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
+  const [showPortfolioModal, setShowPortfolioModal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,29 +363,9 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
           {f && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatCap(f.market_cap)}</div>}
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
-          {data.verdict && BUY_VERDICTS.has(data.verdict.recommendation) && f && (
+          {f && (
             <button
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/invest/portfolio/positions", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      ticker: data.ticker,
-                      entry_price: f.price,
-                      shares: 100,
-                      position_type: "core",
-                      thesis: data.verdict?.reasoning?.slice(0, 200) || "",
-                    }),
-                  });
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  setAddStatus(`Added ${data.ticker} (100 shares @ $${f.price.toFixed(2)})`);
-                  setTimeout(() => setAddStatus(null), 3000);
-                } catch (err) {
-                  setAddStatus(`Error: ${err instanceof Error ? err.message : "failed"}`);
-                  setTimeout(() => setAddStatus(null), 3000);
-                }
-              }}
+              onClick={() => setShowPortfolioModal(true)}
               style={{
                 marginTop: "var(--space-xs)",
                 padding: "var(--space-xs) var(--space-md)",
@@ -666,6 +646,18 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
             No analysis data yet. Run the pipeline to analyze this stock.
           </p>
         </BentoCard>
+      )}
+
+      {/* Add to Portfolio Modal */}
+      {showPortfolioModal && f && (
+        <AddToPortfolioModal
+          ticker={data.ticker}
+          currentPrice={f.price}
+          defaultThesis={data.verdict?.reasoning || ""}
+          onClose={() => setShowPortfolioModal(false)}
+          onSuccess={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
+          onError={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
+        />
       )}
     </div>
   );

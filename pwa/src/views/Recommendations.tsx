@@ -3,6 +3,7 @@ import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { MarketStatus } from "../components/shared/MarketStatus";
+import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 import type { Recommendation, AgentStance } from "../types/models";
@@ -23,171 +24,6 @@ function sentimentBar(s: number): { width: string; color: string } {
   const pct = Math.abs(s) * 100;
   const color = s >= 0 ? "var(--color-success)" : "var(--color-error)";
   return { width: `${Math.max(pct, 8)}%`, color };
-}
-
-function AddToPortfolioModal({
-  rec,
-  onClose,
-  onSubmit,
-}: {
-  rec: Recommendation;
-  onClose: () => void;
-  onSubmit: (data: { ticker: string; entry_price: number; shares: number; position_type: string; thesis: string }) => void;
-}) {
-  const [entryPrice, setEntryPrice] = useState(rec.currentPrice.toString());
-  const [shares, setShares] = useState("100");
-  const [posType, setPosType] = useState("core");
-  const [thesis, setThesis] = useState(rec.reasoning?.slice(0, 200) || "");
-
-  const price = parseFloat(entryPrice) || 0;
-  const qty = parseFloat(shares) || 0;
-  const totalCost = price * qty;
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, zIndex: 100,
-        background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "var(--space-lg)",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--color-surface-1)", borderRadius: "var(--radius-lg)",
-          padding: "var(--space-xl)", width: "100%", maxWidth: 400,
-          display: "flex", flexDirection: "column", gap: "var(--space-md)",
-        }}
-      >
-        <div style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>
-          Add {rec.ticker} to Portfolio
-        </div>
-
-        {/* Price + Shares side by side */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
-          <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
-            Price per share
-            <input
-              type="number"
-              step="0.01"
-              value={entryPrice}
-              onChange={(e) => setEntryPrice(e.target.value)}
-              style={{
-                width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
-                background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-                borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
-                fontFamily: "var(--font-mono)",
-              }}
-            />
-          </label>
-          <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
-            Shares
-            <input
-              type="number"
-              value={shares}
-              onChange={(e) => setShares(e.target.value)}
-              style={{
-                width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
-                background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-                borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
-                fontFamily: "var(--font-mono)",
-              }}
-            />
-          </label>
-        </div>
-
-        {/* Cost summary */}
-        {price > 0 && qty > 0 && (
-          <div style={{
-            padding: "var(--space-md)",
-            background: "var(--color-surface-0)",
-            borderRadius: "var(--radius-sm)",
-            display: "flex", flexDirection: "column", gap: "var(--space-xs)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-              <span>{qty} shares @ {formatPrice(price)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>Total cost</span>
-              <span style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
-                {totalCost.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
-              </span>
-            </div>
-          </div>
-        )}
-
-        <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
-          Position Type
-          <select
-            value={posType}
-            onChange={(e) => setPosType(e.target.value)}
-            style={{
-              width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
-              background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-              borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
-            }}
-          >
-            <option value="core">Core</option>
-            <option value="tactical">Tactical</option>
-            <option value="permanent">Permanent</option>
-          </select>
-        </label>
-
-        <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
-          Thesis
-          <textarea
-            value={thesis}
-            onChange={(e) => setThesis(e.target.value)}
-            rows={2}
-            style={{
-              width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
-              background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-              borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
-              fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", resize: "vertical",
-            }}
-          />
-        </label>
-
-        <div style={{ display: "flex", gap: "var(--space-md)", marginTop: "var(--space-sm)" }}>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1, padding: "var(--space-sm) var(--space-md)",
-              background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-              borderRadius: "var(--radius-sm)", color: "var(--color-text-secondary)", cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              if (price > 0 && qty > 0) {
-                onSubmit({
-                  ticker: rec.ticker,
-                  entry_price: price,
-                  shares: qty,
-                  position_type: posType,
-                  thesis,
-                });
-              }
-            }}
-            style={{
-              flex: 1, padding: "var(--space-sm) var(--space-md)",
-              background: price > 0 && qty > 0 ? "var(--gradient-active)" : "var(--color-surface-2)",
-              border: "none",
-              borderRadius: "var(--radius-sm)",
-              color: price > 0 && qty > 0 ? "#fff" : "var(--color-text-muted)",
-              cursor: price > 0 && qty > 0 ? "pointer" : "default",
-              fontWeight: 600,
-            }}
-          >
-            Add Position
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function RecCard({
@@ -308,25 +144,6 @@ export function Recommendations() {
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const [portfolioTarget, setPortfolioTarget] = useState<Recommendation | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
-
-  const handleAddToPortfolio = async (data: {
-    ticker: string; entry_price: number; shares: number; position_type: string; thesis: string;
-  }) => {
-    try {
-      const res = await fetch("/api/invest/portfolio/positions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setAddStatus(`Added ${data.ticker} (${data.shares} shares)`);
-      setPortfolioTarget(null);
-      setTimeout(() => setAddStatus(null), 3000);
-    } catch (err) {
-      setAddStatus(`Error: ${err instanceof Error ? err.message : "failed"}`);
-      setTimeout(() => setAddStatus(null), 3000);
-    }
-  };
 
   if (loading) {
     return (
@@ -450,9 +267,12 @@ export function Recommendations() {
       {/* Add to Portfolio Modal */}
       {portfolioTarget && (
         <AddToPortfolioModal
-          rec={portfolioTarget}
+          ticker={portfolioTarget.ticker}
+          currentPrice={portfolioTarget.currentPrice}
+          defaultThesis={portfolioTarget.reasoning || ""}
           onClose={() => setPortfolioTarget(null)}
-          onSubmit={handleAddToPortfolio}
+          onSuccess={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
+          onError={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
         />
       )}
     </div>
