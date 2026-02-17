@@ -13,3 +13,11 @@ dist/
 build/
 .ruff_cache/
 .pytest_cache/
+pwa/
+deploy/
+k8s/
+scripts/
+.claude/
+.gemini/
+.mcp.json
+=0.23.0
