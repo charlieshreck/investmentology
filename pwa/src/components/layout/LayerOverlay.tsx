@@ -13,9 +13,7 @@ export function LayerOverlay({
   title,
   children,
 }: LayerOverlayProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
   const startY = useRef(0);
-  const wasAtTop = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -28,16 +26,14 @@ export function LayerOverlay({
     };
   }, [isOpen]);
 
-  // Only allow swipe-to-close when content is scrolled to the top
+  // Swipe-to-close ONLY on drag handle area
   const handleTouchStart = (e: React.TouchEvent) => {
     startY.current = e.touches[0].clientY;
-    wasAtTop.current = (contentRef.current?.scrollTop ?? 0) <= 0;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!wasAtTop.current) return;
     const deltaY = e.changedTouches[0].clientY - startY.current;
-    if (deltaY > 120) {
+    if (deltaY > 80) {
       onClose();
     }
   };
@@ -52,7 +48,6 @@ export function LayerOverlay({
         zIndex: 50,
         display: "flex",
         flexDirection: "column",
-        justifyContent: "flex-end",
       }}
     >
       {/* Backdrop */}
@@ -66,36 +61,32 @@ export function LayerOverlay({
         }}
       />
 
-      {/* Panel */}
+      {/* Panel — full height minus safe area, scrolls independently */}
       <div
-        ref={contentRef}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
         style={{
-          position: "relative",
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          top: "5vh",
+          display: "flex",
+          flexDirection: "column",
           background: "var(--glass-bg-elevated)",
-          backdropFilter: `blur(${`var(--glass-blur)`})`,
+          backdropFilter: `blur(var(--glass-blur))`,
           WebkitBackdropFilter: `blur(var(--glass-blur))`,
           borderTop: "1px solid var(--glass-border)",
           borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
           animation: "slideUp var(--duration-normal) var(--ease-out)",
-          paddingBottom: "calc(var(--safe-bottom) + var(--nav-height))",
         }}
       >
-        {/* Drag handle */}
+        {/* Drag handle — ONLY this area triggers swipe-to-close */}
         <div
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
           style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            background: "var(--glass-bg-elevated)",
-            backdropFilter: `blur(var(--glass-blur))`,
-            WebkitBackdropFilter: `blur(var(--glass-blur))`,
-            borderBottom: "1px solid var(--glass-border)",
-            borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
+            flexShrink: 0,
+            cursor: "grab",
+            touchAction: "none",
           }}
         >
           <div
@@ -119,6 +110,7 @@ export function LayerOverlay({
           <div
             style={{
               padding: "0 var(--space-xl) var(--space-lg)",
+              borderBottom: "1px solid var(--glass-border)",
             }}
           >
             <h2
@@ -133,8 +125,19 @@ export function LayerOverlay({
           </div>
         </div>
 
-        {/* Content */}
-        <div style={{ padding: "var(--space-xl)" }}>{children}</div>
+        {/* Scrollable content — independent scroll, no touch interference */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            overflowX: "hidden",
+            WebkitOverflowScrolling: "touch",
+            padding: "var(--space-xl)",
+            paddingBottom: "calc(var(--safe-bottom) + var(--nav-height) + var(--space-xl))",
+          }}
+        >
+          {children}
+        </div>
       </div>
 
       <style>{`

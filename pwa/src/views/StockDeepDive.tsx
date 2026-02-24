@@ -3,6 +3,7 @@ import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { PriceChart } from "../components/charts/PriceChart";
+import { MarketStatus } from "../components/shared/MarketStatus";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 
 interface Fundamentals {
@@ -361,6 +362,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           </div>
         </div>
         <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-xs)" }}>
+          <MarketStatus />
           {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
           {f && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatCap(f.market_cap)}</div>}
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
