@@ -5,7 +5,7 @@ import { Badge } from "../components/shared/Badge";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalyze } from "../hooks/useAnalyze";
 import { useStore } from "../stores/useStore";
-import { verdictColor } from "../utils/verdictHelpers";
+
 import type { WatchlistItem, AgentStance } from "../types/models";
 
 function formatCap(cap: number): string {
