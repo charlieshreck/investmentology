@@ -621,6 +621,72 @@ class Registry:
         )
         return [r["ticker"] for r in rows]
 
+    def get_watch_verdicts_enriched(self) -> list[dict]:
+        """Get WATCHLIST verdicts enriched with entry price, current price, and price history.
+
+        For each ticker with a WATCHLIST verdict:
+        - entry_price: price closest to verdict date
+        - current_price: latest price
+        - price_history: daily prices as JSON array [{date, price}, ...]
+        """
+        return self._db.execute("""
+            WITH latest_watchlist_verdicts AS (
+                SELECT DISTINCT ON (v.ticker)
+                    v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
+                    v.reasoning, v.agent_stances, v.risk_flags,
+                    v.auditor_override, v.munger_override, v.created_at
+                FROM invest.verdicts v
+                WHERE v.verdict = 'WATCHLIST'
+                ORDER BY v.ticker, v.created_at DESC
+            )
+            SELECT
+                lw.id, lw.ticker, lw.verdict, lw.confidence, lw.consensus_score,
+                lw.reasoning, lw.agent_stances, lw.risk_flags,
+                lw.auditor_override, lw.munger_override, lw.created_at,
+                s.name, s.sector, s.industry,
+                cur.price AS current_price, cur.market_cap,
+                entry.price AS entry_price,
+                w.state AS watchlist_state,
+                w.entered_at AS watchlist_entered,
+                ph.history AS price_history
+            FROM latest_watchlist_verdicts lw
+            LEFT JOIN invest.stocks s ON s.ticker = lw.ticker
+            LEFT JOIN LATERAL (
+                SELECT price, market_cap
+                FROM invest.fundamentals_cache fc
+                WHERE fc.ticker = lw.ticker
+                ORDER BY fc.fetched_at DESC LIMIT 1
+            ) cur ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT price
+                FROM invest.fundamentals_cache fc
+                WHERE fc.ticker = lw.ticker
+                  AND fc.price > 0
+                  AND fc.fetched_at <= lw.created_at + interval '1 day'
+                ORDER BY fc.fetched_at DESC LIMIT 1
+            ) entry ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT state, entered_at
+                FROM invest.watchlist wl
+                WHERE wl.ticker = lw.ticker
+                ORDER BY wl.updated_at DESC LIMIT 1
+            ) w ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT json_agg(
+                    json_build_object('date', dt::text, 'price', p)
+                    ORDER BY dt
+                ) AS history
+                FROM (
+                    SELECT DISTINCT ON (fc.fetched_at::date)
+                        fc.fetched_at::date AS dt, fc.price AS p
+                    FROM invest.fundamentals_cache fc
+                    WHERE fc.ticker = lw.ticker AND fc.price > 0
+                    ORDER BY fc.fetched_at::date, fc.fetched_at DESC
+                ) daily
+            ) ph ON TRUE
+            ORDER BY lw.confidence DESC NULLS LAST
+        """)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

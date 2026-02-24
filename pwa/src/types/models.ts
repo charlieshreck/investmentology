@@ -122,6 +122,8 @@ export interface WatchlistItem {
   verdict: WatchlistVerdict | null;
   notes?: string;
   successProbability: number | null;
+  changePct?: number;
+  priceHistory?: { date: string; price: number }[];
 }
 
 export interface QuantGateResult {

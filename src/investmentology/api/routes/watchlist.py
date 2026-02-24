@@ -9,18 +9,9 @@ from investmentology.registry.queries import Registry
 
 router = APIRouter()
 
-WATCH_VERDICTS = {"WATCHLIST"}
-
 
 def _success_probability(row: dict) -> float | None:
-    """Blended success probability (0.0-1.0) — how close to graduating to Recommend.
-
-    Components (weights renormalized when data is missing):
-        35% verdict confidence
-        25% consensus score (normalized -1..+1 to 0..1)
-        20% agent alignment (fraction of agents with positive sentiment)
-        20% risk-adjusted (penalized by risk flag count)
-    """
+    """Blended success probability (0.0-1.0) — how close to graduating to Recommend."""
     components: list[tuple[float, float]] = []
 
     vc = row.get("confidence")
@@ -54,17 +45,27 @@ def _success_probability(row: dict) -> float | None:
 
 
 def _format_watch_item(row: dict) -> dict:
-    """Format a verdict row into a WatchlistItem-shaped dict."""
-    stances = row.get("agent_stances")
+    """Format an enriched WATCHLIST verdict row."""
+    entry_price = float(row["entry_price"]) if row.get("entry_price") else 0.0
+    current_price = float(row["current_price"]) if row.get("current_price") else 0.0
+    change_pct = (
+        ((current_price - entry_price) / entry_price * 100)
+        if entry_price > 0 else 0.0
+    )
+
+    # Price history for sparkline: [{date, price}, ...]
+    history = row.get("price_history") or []
+
     return {
         "ticker": row["ticker"],
         "name": row.get("name") or row["ticker"],
         "sector": row.get("sector") or "",
         "state": row.get("watchlist_state") or "WATCHLIST",
-        "addedAt": str(row["created_at"]) if row.get("created_at") else "",
+        "addedAt": str(row.get("watchlist_entered") or row["created_at"]),
         "lastAnalysis": str(row["created_at"]) if row.get("created_at") else None,
-        "priceAtAdd": 0.0,
-        "currentPrice": float(row["current_price"]) if row.get("current_price") else 0.0,
+        "priceAtAdd": entry_price,
+        "currentPrice": current_price,
+        "changePct": round(change_pct, 2),
         "marketCap": float(row["market_cap"]) if row.get("market_cap") else 0,
         "compositeScore": None,
         "piotroskiScore": None,
@@ -76,12 +77,13 @@ def _format_watch_item(row: dict) -> dict:
             "confidence": float(row["confidence"]) if row.get("confidence") else None,
             "consensusScore": float(row["consensus_score"]) if row.get("consensus_score") else None,
             "reasoning": row.get("reasoning"),
-            "agentStances": stances,
+            "agentStances": row.get("agent_stances"),
             "riskFlags": row.get("risk_flags"),
             "verdictDate": str(row["created_at"]) if row.get("created_at") else None,
         },
         "notes": None,
         "successProbability": _success_probability(row),
+        "priceHistory": history,
     }
 
 
@@ -89,18 +91,16 @@ def _format_watch_item(row: dict) -> dict:
 def get_watchlist(registry: Registry = Depends(get_registry)) -> dict:
     """Stocks tagged WATCHLIST by agents — close but not yet meeting buy criteria.
 
-    Uses the same verdicts source as recommendations, filtered to WATCHLIST.
-    This is the stepping stone between Screen and Recommend.
+    Each item includes entry price, current price, change %, and price history
+    for a sparkline chart.
     """
-    rows = registry.get_all_actionable_verdicts()
-
-    watch_rows = [r for r in rows if r.get("verdict") in WATCH_VERDICTS]
-    items = [_format_watch_item(r) for r in watch_rows]
+    rows = registry.get_watch_verdicts_enriched()
+    items = [_format_watch_item(r) for r in rows]
 
     # Sort by success probability descending
     items.sort(key=lambda x: x.get("successProbability") or 0, reverse=True)
 
-    # Group by sector for meaningful grouping
+    # Group by sector
     grouped: dict[str, list[dict]] = {}
     for item in items:
         key = item["sector"] or "Other"

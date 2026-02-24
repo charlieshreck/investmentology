@@ -20,10 +20,28 @@ function formatPrice(n: number): string {
   return n > 0 ? `$${n.toFixed(2)}` : "\u2014";
 }
 
+function pnlColor(n: number): string {
+  if (n > 0) return "var(--color-success)";
+  if (n < 0) return "var(--color-error)";
+  return "var(--color-text-secondary)";
+}
+
 function sentimentBar(s: number): { width: string; color: string } {
   const pct = Math.abs(s) * 100;
   const color = s >= 0 ? "var(--color-success)" : "var(--color-error)";
   return { width: `${Math.max(pct, 8)}%`, color };
+}
+
+function relativeDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const days = Math.floor(diffMs / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "1d ago";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
 }
 
 function successRing(probability: number | null) {
@@ -63,6 +81,41 @@ function successRing(probability: number | null) {
   );
 }
 
+/** SVG sparkline from price history data points. */
+function Sparkline({ data, changePct }: { data: { date: string; price: number }[]; changePct: number }) {
+  if (!data || data.length < 2) return null;
+  const prices = data.map((d) => d.price).filter((p) => p > 0);
+  if (prices.length < 2) return null;
+
+  const w = 80;
+  const h = 24;
+  const pad = 1;
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const range = max - min || 1;
+
+  const points = prices.map((p, i) => {
+    const x = pad + (i / (prices.length - 1)) * (w - pad * 2);
+    const y = pad + (1 - (p - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  const color = changePct >= 0 ? "var(--color-success)" : "var(--color-error)";
+
+  return (
+    <svg width={w} height={h} style={{ display: "block" }}>
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ItemCard({
   item,
   onClick,
@@ -77,14 +130,14 @@ function ItemCard({
   const v = item.verdict;
   const stances = (v?.agentStances || []) as AgentStance[];
   const riskFlags = v?.riskFlags as string[] | null | undefined;
-  const confPct = v?.confidence != null ? `${(v.confidence * 100).toFixed(0)}% conf` : null;
+  const changePct = item.changePct ?? 0;
 
   return (
     <div
       onClick={onClick}
       style={{
         display: "grid",
-        gridTemplateColumns: "auto 1fr auto auto",
+        gridTemplateColumns: "auto 1fr auto auto auto",
         alignItems: "center",
         gap: "var(--space-md)",
         padding: "var(--space-md)",
@@ -104,9 +157,9 @@ function ItemCard({
           <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
             {item.ticker}
           </span>
-          {confPct && (
-            <span style={{ fontSize: "var(--text-xs)", color: verdictColor["WATCHLIST"] || "var(--color-text-muted)" }}>
-              {confPct}
+          {item.addedAt && (
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+              {relativeDate(item.addedAt)}
             </span>
           )}
         </div>
@@ -145,9 +198,29 @@ function ItemCard({
         )}
       </div>
 
-      {/* Price */}
-      <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
-        {formatPrice(item.currentPrice)}
+      {/* Sparkline */}
+      <div style={{ flexShrink: 0 }}>
+        <Sparkline data={item.priceHistory || []} changePct={changePct} />
+      </div>
+
+      {/* Price column: entry → current + change % */}
+      <div style={{ textAlign: "right", minWidth: 70 }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontWeight: 600 }}>
+          {formatPrice(item.currentPrice)}
+        </div>
+        {item.priceAtAdd > 0 && (
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
+            from {formatPrice(item.priceAtAdd)}
+          </div>
+        )}
+        {item.priceAtAdd > 0 && (
+          <div style={{
+            fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", fontWeight: 600,
+            color: pnlColor(changePct),
+          }}>
+            {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
+          </div>
+        )}
       </div>
 
       {/* Re-analyze button */}
@@ -212,7 +285,7 @@ export function Watchlist() {
     <div style={{ height: "100%", overflowY: "auto" }}>
       <ViewHeader
         title="Watch"
-        subtitle={`${totalItems} stock${totalItems !== 1 ? "s" : ""} tagged by agents · stepping stone to Recommend`}
+        subtitle={`${totalItems} stock${totalItems !== 1 ? "s" : ""} tagged by agents`}
       />
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
