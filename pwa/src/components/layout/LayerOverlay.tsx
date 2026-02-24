@@ -13,8 +13,9 @@ export function LayerOverlay({
   title,
   children,
 }: LayerOverlayProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const startY = useRef(0);
+  const wasAtTop = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -27,13 +28,16 @@ export function LayerOverlay({
     };
   }, [isOpen]);
 
+  // Only allow swipe-to-close when content is scrolled to the top
   const handleTouchStart = (e: React.TouchEvent) => {
     startY.current = e.touches[0].clientY;
+    wasAtTop.current = (contentRef.current?.scrollTop ?? 0) <= 0;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!wasAtTop.current) return;
     const deltaY = e.changedTouches[0].clientY - startY.current;
-    if (deltaY > 100) {
+    if (deltaY > 120) {
       onClose();
     }
   };
@@ -64,7 +68,7 @@ export function LayerOverlay({
 
       {/* Panel */}
       <div
-        ref={panelRef}
+        ref={contentRef}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
         style={{
@@ -74,46 +78,59 @@ export function LayerOverlay({
           WebkitBackdropFilter: `blur(var(--glass-blur))`,
           borderTop: "1px solid var(--glass-border)",
           borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
-          maxHeight: "85vh",
+          maxHeight: "90vh",
           overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
           animation: "slideUp var(--duration-normal) var(--ease-out)",
-          paddingBottom: "var(--safe-bottom)",
+          paddingBottom: "calc(var(--safe-bottom) + var(--nav-height))",
         }}
       >
         {/* Drag handle */}
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            padding: "var(--space-md) 0",
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            background: "var(--glass-bg-elevated)",
+            backdropFilter: `blur(var(--glass-blur))`,
+            WebkitBackdropFilter: `blur(var(--glass-blur))`,
+            borderBottom: "1px solid var(--glass-border)",
+            borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
           }}
         >
           <div
             style={{
-              width: 36,
-              height: 4,
-              borderRadius: "var(--radius-full)",
-              background: "var(--color-surface-3)",
-            }}
-          />
-        </div>
-
-        {/* Header */}
-        <div
-          style={{
-            padding: "0 var(--space-xl) var(--space-lg)",
-            borderBottom: "1px solid var(--glass-border)",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "var(--text-lg)",
-              fontWeight: 600,
+              display: "flex",
+              justifyContent: "center",
+              padding: "var(--space-md) 0",
             }}
           >
-            {title}
-          </h2>
+            <div
+              style={{
+                width: 36,
+                height: 4,
+                borderRadius: "var(--radius-full)",
+                background: "var(--color-surface-3)",
+              }}
+            />
+          </div>
+
+          {/* Header */}
+          <div
+            style={{
+              padding: "0 var(--space-xl) var(--space-lg)",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "var(--text-lg)",
+                fontWeight: 600,
+              }}
+            >
+              {title}
+            </h2>
+          </div>
         </div>
 
         {/* Content */}
