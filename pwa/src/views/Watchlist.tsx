@@ -10,19 +10,24 @@ import type { WatchlistItem } from "../types/models";
 
 function stateVariant(state: string): "accent" | "success" | "warning" | "error" | "neutral" {
   const map: Record<string, "accent" | "success" | "warning" | "error" | "neutral"> = {
-    UNIVERSE: "neutral",
     CANDIDATE: "neutral",
     ASSESSED: "accent",
-    CONVICTION_BUY: "success",
     WATCHLIST_EARLY: "accent",
     WATCHLIST_CATALYST: "warning",
-    POSITION_HOLD: "success",
-    POSITION_TRIM: "warning",
-    POSITION_SELL: "warning",
     CONFLICT_REVIEW: "error",
-    REJECTED: "error",
   };
   return map[state] ?? "neutral";
+}
+
+function stateLabel(state: string): string {
+  const map: Record<string, string> = {
+    CANDIDATE: "Candidate",
+    ASSESSED: "Assessed",
+    WATCHLIST_EARLY: "Early Watch",
+    WATCHLIST_CATALYST: "Catalyst Watch",
+    CONFLICT_REVIEW: "Conflict Review",
+  };
+  return map[state] ?? state.replace(/_/g, " ");
 }
 
 function pnlColor(n: number): string {
@@ -67,6 +72,43 @@ function formatCap(cap: number): string {
   return `$${cap.toLocaleString()}`;
 }
 
+function successRing(probability: number | null) {
+  if (probability == null) return null;
+  const pct = Math.round(probability * 100);
+  const color =
+    pct >= 70 ? "var(--color-success)" : pct >= 40 ? "var(--color-warning)" : "var(--color-error)";
+  const size = 40;
+  const stroke = 3;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - probability);
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="var(--color-surface-2)" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke={color} strokeWidth={stroke}
+          strokeDasharray={circumference} strokeDashoffset={offset}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", color,
+      }}>
+        {pct}%
+      </div>
+    </div>
+  );
+}
+
 function ItemCard({
   item,
   onClick,
@@ -82,7 +124,6 @@ function ItemCard({
     ? ((item.currentPrice - item.priceAtAdd) / item.priceAtAdd) * 100
     : 0;
   const hasVerdict = item.verdict != null;
-  const vColor = hasVerdict ? verdictColor[item.verdict!.recommendation] ?? "var(--color-text-muted)" : undefined;
   const vLabel = hasVerdict ? verdictLabel[item.verdict!.recommendation] ?? item.verdict!.recommendation : undefined;
   const vVariant = hasVerdict ? verdictBadgeVariant[item.verdict!.recommendation] ?? "neutral" : undefined;
 
@@ -91,7 +132,7 @@ function ItemCard({
       onClick={onClick}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr auto auto auto",
+        gridTemplateColumns: "auto 1fr auto auto auto",
         alignItems: "center",
         gap: "var(--space-md)",
         padding: "var(--space-md)",
@@ -102,7 +143,10 @@ function ItemCard({
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-1)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
     >
-      {/* Left: ticker / name / sector + scores */}
+      {/* Success probability ring */}
+      {successRing(item.successProbability)}
+
+      {/* Ticker / name / sector + scores */}
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
           <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>{item.ticker}</span>
@@ -135,7 +179,10 @@ function ItemCard({
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
             <Badge variant={vVariant!}>{vLabel}</Badge>
             {item.verdict!.confidence != null && (
-              <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: vColor }}>
+              <span style={{
+                fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)",
+                color: verdictColor[item.verdict!.recommendation] ?? "var(--color-text-muted)",
+              }}>
                 {(item.verdict!.confidence * 100).toFixed(0)}%
               </span>
             )}
@@ -197,7 +244,7 @@ export function Watchlist() {
   if (loading) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Watchlist" />
+        <ViewHeader title="Watch" />
         <div style={{ padding: "var(--space-xl)" }}>
           <p style={{ color: "var(--color-text-muted)" }}>Loading watchlist...</p>
         </div>
@@ -208,7 +255,7 @@ export function Watchlist() {
   if (error) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Watchlist" />
+        <ViewHeader title="Watch" />
         <div style={{ padding: "var(--space-xl)" }}>
           <BentoCard>
             <p style={{ color: "var(--color-error)" }}>Failed to load watchlist: {error}</p>
@@ -228,8 +275,8 @@ export function Watchlist() {
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
       <ViewHeader
-        title="Watchlist"
-        subtitle={`${totalItems} stocks · ${analyzedCount} analyzed`}
+        title="Watch"
+        subtitle={`${totalItems} stocks being evaluated · ${analyzedCount} analyzed`}
       />
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
@@ -239,15 +286,24 @@ export function Watchlist() {
             const stateAnalyzed = groupedByState[state].filter((i) => i.verdict != null).length;
             return (
               <Badge key={state} variant={stateVariant(state)}>
-                {state.replace(/_/g, " ")} ({stateAnalyzed}/{groupedByState[state].length})
+                {stateLabel(state)} ({stateAnalyzed}/{groupedByState[state].length})
               </Badge>
             );
           })}
         </div>
 
+        {/* Empty state */}
+        {totalItems === 0 && (
+          <BentoCard>
+            <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>
+              No stocks being watched yet. Promote candidates from the Screen.
+            </div>
+          </BentoCard>
+        )}
+
         {/* Grouped items */}
         {states.map((state) => (
-          <BentoCard key={state} title={state.replace(/_/g, " ")}>
+          <BentoCard key={state} title={stateLabel(state)}>
             <div style={{ display: "flex", flexDirection: "column" }}>
               {groupedByState[state].map((item) => (
                 <ItemCard

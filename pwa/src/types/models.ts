@@ -29,6 +29,7 @@ export interface Recommendation {
   auditorOverride: boolean;
   mungerOverride: boolean;
   analysisDate: string | null;
+  successProbability: number | null;
 }
 
 export interface AgentStance {
@@ -120,6 +121,7 @@ export interface WatchlistItem {
   altmanZScore: number | null;
   verdict: WatchlistVerdict | null;
   notes?: string;
+  successProbability: number | null;
 }
 
 export interface QuantGateResult {

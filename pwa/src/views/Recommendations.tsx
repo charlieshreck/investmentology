@@ -17,13 +17,50 @@ function formatCap(n: number): string {
 }
 
 function formatPrice(n: number): string {
-  return n > 0 ? `$${n.toFixed(2)}` : "—";
+  return n > 0 ? `$${n.toFixed(2)}` : "\u2014";
 }
 
 function sentimentBar(s: number): { width: string; color: string } {
   const pct = Math.abs(s) * 100;
   const color = s >= 0 ? "var(--color-success)" : "var(--color-error)";
   return { width: `${Math.max(pct, 8)}%`, color };
+}
+
+function successRing(probability: number | null) {
+  if (probability == null) return null;
+  const pct = Math.round(probability * 100);
+  const color =
+    pct >= 70 ? "var(--color-success)" : pct >= 40 ? "var(--color-warning)" : "var(--color-error)";
+  const size = 44;
+  const stroke = 3.5;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - probability);
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="var(--color-surface-2)" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke={color} strokeWidth={stroke}
+          strokeDasharray={circumference} strokeDashoffset={offset}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", color,
+      }}>
+        {pct}%
+      </div>
+    </div>
+  );
 }
 
 function RecCard({
@@ -42,7 +79,7 @@ function RecCard({
       onClick={onOpen}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr auto auto auto",
+        gridTemplateColumns: "auto 1fr auto auto auto",
         gap: "var(--space-md)",
         alignItems: "center",
         padding: "var(--space-md) var(--space-lg)",
@@ -54,7 +91,10 @@ function RecCard({
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-1)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-0)"; }}
     >
-      {/* Col 1: Ticker + info */}
+      {/* Success probability ring */}
+      {successRing(rec.successProbability)}
+
+      {/* Ticker + info */}
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
           <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "var(--text-base)" }}>
@@ -62,7 +102,7 @@ function RecCard({
           </span>
           {rec.confidence != null && (
             <span style={{ fontSize: "var(--text-xs)", color: verdictColor[rec.verdict] || "var(--color-text-muted)" }}>
-              {(rec.confidence * 100).toFixed(0)}%
+              {(rec.confidence * 100).toFixed(0)}% conf
             </span>
           )}
         </div>
@@ -101,7 +141,7 @@ function RecCard({
         )}
       </div>
 
-      {/* Col 2: Consensus */}
+      {/* Consensus */}
       <div style={{ textAlign: "right" }}>
         {rec.consensusScore != null && (
           <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
@@ -113,12 +153,12 @@ function RecCard({
         )}
       </div>
 
-      {/* Col 3: Price */}
+      {/* Price */}
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
         {formatPrice(rec.currentPrice)}
       </div>
 
-      {/* Col 4: Add button */}
+      {/* Add button */}
       <button
         onClick={(e) => { e.stopPropagation(); onAddToPortfolio(); }}
         style={{
@@ -148,7 +188,7 @@ export function Recommendations() {
   if (loading) {
     return (
       <div style={{ padding: "var(--space-xl)", paddingTop: "calc(var(--header-height) + var(--space-xl))" }}>
-        <ViewHeader title="Recommendations" />
+        <ViewHeader title="Recommend" />
         <p style={{ color: "var(--color-text-muted)" }}>Loading recommendations...</p>
       </div>
     );
@@ -157,7 +197,7 @@ export function Recommendations() {
   if (error) {
     return (
       <div style={{ padding: "var(--space-xl)", paddingTop: "calc(var(--header-height) + var(--space-xl))" }}>
-        <ViewHeader title="Recommendations" />
+        <ViewHeader title="Recommend" />
         <BentoCard>
           <p style={{ color: "var(--color-error)" }}>Failed to load: {error}</p>
         </BentoCard>
@@ -170,8 +210,8 @@ export function Recommendations() {
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
       <ViewHeader
-        title="Recommendations"
-        subtitle={`${totalCount} actionable signal${totalCount !== 1 ? "s" : ""}`}
+        title="Recommend"
+        subtitle={`${totalCount} stock${totalCount !== 1 ? "s" : ""} ready for portfolio action`}
         right={<MarketStatus />}
       />
 
@@ -221,7 +261,7 @@ export function Recommendations() {
         {totalCount === 0 && (
           <BentoCard>
             <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>
-              No recommendations yet. Run analysis on stocks from the Screener or Watchlist.
+              No recommendations yet. Stocks need Strong Buy, Buy, or Accumulate verdicts to appear here.
             </div>
           </BentoCard>
         )}
