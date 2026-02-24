@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { MarketStatus } from "../components/shared/MarketStatus";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalyze } from "../hooks/useAnalyze";
 import { useStore } from "../stores/useStore";
@@ -87,8 +88,8 @@ function Sparkline({ data, changePct }: { data: { date: string; price: number }[
   const prices = data.map((d) => d.price).filter((p) => p > 0);
   if (prices.length < 2) return null;
 
-  const w = 80;
-  const h = 24;
+  const w = 100;
+  const h = 28;
   const pad = 1;
   const min = Math.min(...prices);
   const max = Math.max(...prices);
@@ -108,7 +109,7 @@ function Sparkline({ data, changePct }: { data: { date: string; price: number }[
         points={points}
         fill="none"
         stroke={color}
-        strokeWidth={1.5}
+        strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -286,6 +287,7 @@ export function Watchlist() {
       <ViewHeader
         title="Watch"
         subtitle={`${totalItems} stock${totalItems !== 1 ? "s" : ""} tagged by agents`}
+        right={<MarketStatus />}
       />
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>

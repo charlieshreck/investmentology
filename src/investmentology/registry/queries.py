@@ -630,13 +630,18 @@ class Registry:
         - price_history: daily prices as JSON array [{date, price}, ...]
         """
         return self._db.execute("""
-            WITH latest_watchlist_verdicts AS (
+            WITH portfolio_tickers AS (
+                SELECT ticker FROM invest.portfolio_positions
+                WHERE is_closed = false AND shares > 0
+            ),
+            latest_watchlist_verdicts AS (
                 SELECT DISTINCT ON (v.ticker)
                     v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
                     v.reasoning, v.agent_stances, v.risk_flags,
                     v.auditor_override, v.munger_override, v.created_at
                 FROM invest.verdicts v
                 WHERE v.verdict = 'WATCHLIST'
+                  AND v.ticker NOT IN (SELECT ticker FROM portfolio_tickers)
                 ORDER BY v.ticker, v.created_at DESC
             )
             SELECT

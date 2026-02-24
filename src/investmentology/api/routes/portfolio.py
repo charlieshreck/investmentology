@@ -121,12 +121,25 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
                 "acknowledged": False,
             })
 
+    # Fetch cash from portfolio_budget
+    cash = Decimal("0")
+    try:
+        budget_rows = registry._db.execute(
+            "SELECT cash_reserve FROM invest.portfolio_budget LIMIT 1"
+        )
+        if budget_rows:
+            cash = Decimal(str(budget_rows[0]["cash_reserve"] or 0))
+    except Exception:
+        pass
+
+    portfolio_total = float(total_value + cash)
+
     return {
         "positions": items,
-        "totalValue": float(total_value),
+        "totalValue": portfolio_total,
         "dayPnl": 0.0,
         "dayPnlPct": 0.0,
-        "cash": 0.0,
+        "cash": float(cash),
         "alerts": alerts,
     }
 
