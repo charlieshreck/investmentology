@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
+import { PriceChart } from "../components/charts/PriceChart";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 
 interface Fundamentals {
@@ -384,6 +385,9 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           )}
         </div>
       </div>
+
+      {/* Price Chart */}
+      <PriceChart ticker={data.ticker} />
 
       {/* Business Summary */}
       {p?.businessSummary && (

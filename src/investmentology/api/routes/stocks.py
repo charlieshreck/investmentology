@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from investmentology.api.deps import get_registry
 from investmentology.data.profile import fetch_news_from_yfinance, get_or_fetch_profile
@@ -271,3 +272,49 @@ def get_stock_decisions(ticker: str, registry: Registry = Depends(get_registry))
             for d in decisions
         ],
     }
+
+
+# Period map: query param -> yfinance period/interval
+_CHART_PERIODS = {
+    "1w": ("5d", "15m"),
+    "1mo": ("1mo", "1d"),
+    "3mo": ("3mo", "1d"),
+    "6mo": ("6mo", "1d"),
+    "1y": ("1y", "1wk"),
+    "ytd": ("ytd", "1d"),
+}
+
+
+@router.get("/stock/{ticker}/chart")
+def get_stock_chart(
+    ticker: str,
+    period: str = Query("1mo", regex="^(1w|1mo|3mo|6mo|1y|ytd)$"),
+) -> dict:
+    """Price chart data from yfinance. Returns OHLCV time series."""
+    import yfinance as yf
+
+    ticker = ticker.upper()
+    yf_period, yf_interval = _CHART_PERIODS.get(period, ("1mo", "1d"))
+
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(period=yf_period, interval=yf_interval)
+        if hist.empty:
+            return {"ticker": ticker, "period": period, "data": []}
+
+        data = []
+        for dt, row in hist.iterrows():
+            ts = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+            data.append({
+                "date": ts,
+                "open": round(float(row["Open"]), 2),
+                "high": round(float(row["High"]), 2),
+                "low": round(float(row["Low"]), 2),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]),
+            })
+
+        return {"ticker": ticker, "period": period, "data": data}
+    except Exception as exc:
+        logger.warning("Chart fetch failed for %s: %s", ticker, exc)
+        return {"ticker": ticker, "period": period, "data": [], "error": str(exc)}
