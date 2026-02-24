@@ -45,7 +45,10 @@ async def spa_fallback(request: Request, full_path: str):
     file_path = PWA_DIR / full_path
     if full_path and file_path.is_file():
         return FileResponse(file_path)
-    return FileResponse(PWA_DIR / "index.html")
+    return FileResponse(
+        PWA_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if __name__ == "__main__":

@@ -32,6 +32,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
+        navigateFallback: "/index.html",
         runtimeCaching: [
           {
             // Cache API responses (except auth) with stale-while-revalidate
@@ -46,15 +50,16 @@ export default defineConfig({
             },
           },
           {
-            // Cache static assets with cache-first
+            // Cache static assets — NetworkFirst so new builds always win
             urlPattern: /\.(js|css|png|svg|woff2?)$/,
-            handler: "CacheFirst",
+            handler: "NetworkFirst",
             options: {
               cacheName: "static-cache",
               expiration: {
                 maxEntries: 100,
-                maxAgeSeconds: 604800, // 7 days
+                maxAgeSeconds: 86400, // 1 day
               },
+              networkTimeoutSeconds: 3,
             },
           },
         ],
