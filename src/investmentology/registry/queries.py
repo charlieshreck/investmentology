@@ -304,9 +304,9 @@ class Registry:
         self._db.execute(
             "INSERT INTO invest.portfolio_positions "
             "(ticker, entry_date, entry_price, current_price, shares, position_type, "
-            "weight, stop_loss, fair_value_estimate, thesis, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()) "
-            "ON CONFLICT (id) DO UPDATE SET "
+            "weight, stop_loss, fair_value_estimate, thesis, is_closed, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, NOW()) "
+            "ON CONFLICT (ticker) WHERE is_closed = false DO UPDATE SET "
             "current_price = EXCLUDED.current_price, "
             "shares = EXCLUDED.shares, "
             "weight = EXCLUDED.weight, "
