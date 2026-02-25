@@ -100,12 +100,61 @@ class AuditorAgent(BaseAgent):
         ]
 
         if request.portfolio_context:
+            pc = request.portfolio_context
             parts.append("")
-            parts.append("Portfolio Context:")
-            for k, v in request.portfolio_context.items():
-                parts.append(f"  {k}: {v}")
+            parts.append("Portfolio Risk Context:")
+            parts.append(f"  Total portfolio value: ${pc.get('total_value', 0):,.0f}")
+            parts.append(f"  Number of positions: {pc.get('position_count', 0)}")
+            # Concentration analysis
+            held = pc.get("held_tickers", [])
+            if request.ticker in held:
+                parts.append(f"  ALREADY HOLDS {request.ticker}:")
+                for pos in pc.get("positions", []):
+                    if pos.get("ticker") == request.ticker:
+                        parts.append(f"    Current weight: {pos.get('weight_pct', 0):.1f}%")
+                        parts.append(f"    P&L: {pos.get('pnl_pct', 0):+.1f}%")
+                        if pos.get("weight_pct", 0) > 10:
+                            parts.append("    WARNING: Position >10% of portfolio — concentration risk")
+                        break
+                parts.append("  Assess: Does adding more increase concentration risk unacceptably?")
+            # Sector concentration
+            se = pc.get("sector_exposure", {})
+            if se:
+                candidate_pct = se.get(request.sector, 0)
+                parts.append(f"  Sector exposure ({request.sector}): {candidate_pct:.0f}%")
+                if candidate_pct > 30:
+                    parts.append(f"  WARNING: {request.sector} at {candidate_pct:.0f}% — sector overweight risk")
+                # Show all sector weights for full picture
+                sorted_se = sorted(se.items(), key=lambda x: x[1], reverse=True)
+                if len(sorted_se) > 1:
+                    parts.append("  Full sector exposure:")
+                    for sector, pct in sorted_se:
+                        marker = " <<" if sector == request.sector else ""
+                        parts.append(f"    {sector}: {pct:.0f}%{marker}")
+            # Position-level risks
+            positions = pc.get("positions", [])
+            losers = [p for p in positions if p.get("pnl_pct", 0) < -10]
+            if losers:
+                parts.append(f"  Portfolio has {len(losers)} position(s) down >10%:")
+                for l in losers[:3]:
+                    parts.append(f"    {l['ticker']}: {l['pnl_pct']:+.1f}%")
 
-        # Insider transactions (governance/alignment signal)
+        # Social sentiment — risk signal (extreme sentiment = risk)
+        if request.social_sentiment:
+            agg = request.social_sentiment.get("aggregate", {})
+            if agg:
+                parts.append("")
+                parts.append("Social Sentiment Risk:")
+                bias = agg.get("bias", "unknown")
+                pos_ratio = agg.get("positive_ratio", "N/A")
+                mentions = agg.get("total_mentions", 0)
+                parts.append(f"  Bias: {bias}, Positive ratio: {pos_ratio}, Mentions: {mentions}")
+                if mentions > 100:
+                    parts.append("  HIGH social attention — potential for sentiment-driven volatility")
+                if pos_ratio and (float(pos_ratio) > 0.85 or float(pos_ratio) < 0.15):
+                    parts.append("  EXTREME sentiment reading — elevated risk of mean-reversion")
+
+                # Insider transactions (governance/alignment signal)
         if request.insider_context:
             parts.append("")
             parts.append("Insider Transactions (recent):")

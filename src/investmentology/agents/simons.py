@@ -129,6 +129,27 @@ class SimonsAgent(BaseAgent):
                 parts.append(f"  Total mentions: {agg.get('total_mentions', 0)}")
                 parts.append(f"  Positive ratio: {agg.get('positive_ratio', 'N/A')}")
 
+        # Portfolio context — timing relative to existing holdings
+        if request.portfolio_context:
+            pc = request.portfolio_context
+            parts.append("")
+            parts.append("Portfolio Timing Context:")
+            held = pc.get("held_tickers", [])
+            if request.ticker in held:
+                parts.append(f"  Already holding {request.ticker}")
+                for pos in pc.get("positions", []):
+                    if pos.get("ticker") == request.ticker:
+                        pnl = pos.get("pnl_pct", 0)
+                        parts.append(f"    Position P&L: {pnl:+.1f}%")
+                        if pnl > 20:
+                            parts.append("    Consider: Is this extended? Technical target for profit-taking?")
+                        elif pnl < -15:
+                            parts.append("    Consider: Is this breaking down? Support levels for stop-loss?")
+                        break
+            else:
+                parts.append(f"  New position — timing entry is critical")
+                parts.append(f"  Portfolio has {pc.get('position_count', 0)} positions")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

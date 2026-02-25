@@ -138,6 +138,53 @@ class WarrenAgent(BaseAgent):
                 shares = h.get("shares", 0)
                 parts.append(f"  {name}: {shares:,} shares")
 
+        # Social sentiment — contrarian signal for value investing
+        if request.social_sentiment:
+            agg = request.social_sentiment.get("aggregate", {})
+            if agg:
+                parts.append("")
+                parts.append("Social Sentiment (contrarian signal):")
+                bias = agg.get("bias", "unknown")
+                pos_ratio = agg.get("positive_ratio", "N/A")
+                mentions = agg.get("total_mentions", 0)
+                parts.append(f"  Overall bias: {bias}")
+                parts.append(f"  Positive ratio: {pos_ratio}")
+                parts.append(f"  Total mentions: {mentions}")
+                if bias == "bullish" and pos_ratio and float(pos_ratio) > 0.8:
+                    parts.append("  NOTE: Extreme social bullishness — Buffett would be cautious (contrarian)")
+                elif bias == "bearish" and pos_ratio and float(pos_ratio) < 0.3:
+                    parts.append("  NOTE: Social bearishness — potential value opportunity if fundamentals strong")
+
+                # Portfolio context — helps assess fit and concentration
+        if request.portfolio_context:
+            pc = request.portfolio_context
+            parts.append("")
+            parts.append("Current Portfolio Context:")
+            parts.append(f"  Total portfolio value: ${pc.get('total_value', 0):,.0f}")
+            parts.append(f"  Number of positions: {pc.get('position_count', 0)}")
+            held = pc.get("held_tickers", [])
+            if request.ticker in held:
+                parts.append(f"  NOTE: Already hold {request.ticker}")
+                # Find this position's details
+                for pos in pc.get("positions", []):
+                    if pos.get("ticker") == request.ticker:
+                        parts.append(f"    Current weight: {pos.get('weight_pct', 0):.1f}%")
+                        parts.append(f"    P&L: {pos.get('pnl_pct', 0):+.1f}%")
+                        break
+                parts.append("  Consider: Is this a good add, or would it over-concentrate?")
+            else:
+                parts.append(f"  This would be a NEW position (currently hold {pc.get('position_count', 0)} stocks)")
+            # Sector exposure
+            se = pc.get("sector_exposure", {})
+            if se:
+                candidate_sector_pct = se.get(request.sector, 0)
+                if candidate_sector_pct > 25:
+                    parts.append(f"  WARNING: {request.sector} already at {candidate_sector_pct:.0f}% of portfolio")
+                elif candidate_sector_pct > 0:
+                    parts.append(f"  {request.sector} exposure: {candidate_sector_pct:.0f}%")
+                else:
+                    parts.append(f"  {request.sector} is a NEW sector for the portfolio — adds diversification")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

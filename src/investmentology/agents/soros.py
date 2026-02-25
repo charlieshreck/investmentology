@@ -120,6 +120,31 @@ class SorosAgent(BaseAgent):
                 if s:
                     parts.append(f"  {source.capitalize()}: +{s.get('positive_mention', 0)} / -{s.get('negative_mention', 0)} mentions")
 
+        # Portfolio context — macro risk to existing exposure
+        if request.portfolio_context:
+            pc = request.portfolio_context
+            parts.append("")
+            parts.append("Portfolio Macro Risk Context:")
+            se = pc.get("sector_exposure", {})
+            if se:
+                # Show sector tilt for macro vulnerability assessment
+                sorted_sectors = sorted(se.items(), key=lambda x: x[1], reverse=True)
+                top_sectors = sorted_sectors[:3]
+                parts.append("  Largest sector exposures:")
+                for sector, pct in top_sectors:
+                    parts.append(f"    {sector}: {pct:.0f}%")
+                # Classify portfolio tilt
+                growth_pct = sum(se.get(s, 0) for s in ["Technology", "Communication Services", "Consumer Cyclical"])
+                defensive_pct = sum(se.get(s, 0) for s in ["Consumer Defensive", "Utilities", "Healthcare"])
+                cyclical_pct = sum(se.get(s, 0) for s in ["Financial Services", "Industrials", "Basic Materials", "Energy"])
+                parts.append(f"  Portfolio tilt: Growth {growth_pct:.0f}% / Defensive {defensive_pct:.0f}% / Cyclical {cyclical_pct:.0f}%")
+                if growth_pct > 50:
+                    parts.append("  NOTE: Portfolio is growth-heavy — vulnerable to rate hikes and risk-off rotation")
+                elif cyclical_pct > 40:
+                    parts.append("  NOTE: Portfolio is cyclical-heavy — vulnerable to economic slowdown")
+            parts.append(f"  Total value at risk: ${pc.get('total_value', 0):,.0f}")
+            parts.append(f"  Consider: How does adding {request.ticker} ({request.sector}) change macro vulnerability?")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

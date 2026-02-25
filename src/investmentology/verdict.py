@@ -167,6 +167,7 @@ def synthesize(
     compatibility: CompatibilityResult | None = None,
     adversarial: AdversarialResult | None = None,
     method: VotingMethod = VotingMethod.WEIGHTED_VOTE,
+    weights: dict[str, Decimal] | None = None,
 ) -> VerdictResult:
     """Synthesize all agent outputs into a single verdict.
 
@@ -190,8 +191,11 @@ def synthesize(
     stance_map = {s.name: s for s in stances}
 
     # Compute consensus based on method
+    # Use dynamic weights if provided, else default AGENT_WEIGHTS
+    active_weights = weights or AGENT_WEIGHTS
+
     weighted_sentiment, weighted_confidence, breakdown = _compute_consensus(
-        stances, method,
+        stances, method, active_weights,
     )
 
     # Auditor risk check — the devil's advocate has veto power
@@ -249,6 +253,7 @@ def synthesize(
 def _compute_consensus(
     stances: list[AgentStance],
     method: VotingMethod,
+    weights: dict[str, Decimal] | None = None,
 ) -> tuple[float, Decimal, ConsensusBreakdown]:
     """Compute consensus using the specified voting method.
 
@@ -265,23 +270,25 @@ def _compute_consensus(
         else:
             breakdown.neutral_count += 1
 
+    active_weights = weights or AGENT_WEIGHTS
     if method == VotingMethod.SUPERMAJORITY:
-        return _consensus_supermajority(stances, breakdown)
+        return _consensus_supermajority(stances, breakdown, active_weights)
     elif method == VotingMethod.CONVICTION_WEIGHTED:
-        return _consensus_conviction(stances, breakdown)
+        return _consensus_conviction(stances, breakdown, active_weights)
     else:
-        return _consensus_weighted(stances, breakdown)
+        return _consensus_weighted(stances, breakdown, active_weights)
 
 
 def _consensus_weighted(
     stances: list[AgentStance],
     breakdown: ConsensusBreakdown,
+    weights: dict[str, Decimal] | None = None,
 ) -> tuple[float, Decimal, ConsensusBreakdown]:
     """Default: weight * confidence as vote power."""
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
     for stance in stances:
-        weight = AGENT_WEIGHTS.get(stance.name, Decimal("0.25"))
+        weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
         vote_power = float(stance.confidence * weight)
         breakdown.votes[stance.name] = vote_power
         weighted_sentiment += stance.sentiment * float(weight)
@@ -292,6 +299,7 @@ def _consensus_weighted(
 def _consensus_supermajority(
     stances: list[AgentStance],
     breakdown: ConsensusBreakdown,
+    weights: dict[str, Decimal] | None = None,
 ) -> tuple[float, Decimal, ConsensusBreakdown]:
     """Need 3/4 agents agreeing for strong actions (BUY/REJECT).
 
@@ -307,7 +315,7 @@ def _consensus_supermajority(
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
     for stance in stances:
-        weight = AGENT_WEIGHTS.get(stance.name, Decimal("0.25"))
+        weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
         vote_power = float(stance.confidence * weight)
         breakdown.votes[stance.name] = vote_power
         weighted_sentiment += stance.sentiment * float(weight)
@@ -323,6 +331,7 @@ def _consensus_supermajority(
 def _consensus_conviction(
     stances: list[AgentStance],
     breakdown: ConsensusBreakdown,
+    weights: dict[str, Decimal] | None = None,
 ) -> tuple[float, Decimal, ConsensusBreakdown]:
     """Highest-confidence agent gets 2x weight on ties (2-2 split)."""
     # Check if it's a tie (equal bullish and bearish)
@@ -334,7 +343,7 @@ def _consensus_conviction(
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
     for stance in stances:
-        weight = AGENT_WEIGHTS.get(stance.name, Decimal("0.25"))
+        weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
         # Give 2x weight to highest-confidence on ties
         if is_tie and stance.name == most_confident.name:
             weight *= 2

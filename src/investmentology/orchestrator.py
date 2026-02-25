@@ -31,6 +31,8 @@ from investmentology.quant_gate.screener import _dict_to_snapshot
 from investmentology.compatibility.matrix import CompatibilityEngine, CompatibilityResult
 from investmentology.competence.circle import CompetenceFilter, CompetenceResult
 from investmentology.competence.moat import MoatAnalyzer, MoatAssessment
+from investmentology.learning.kelly_bootstrap import compute_kelly_params
+from investmentology.learning.predictions import PredictionManager
 from investmentology.learning.registry import DecisionLogger
 from investmentology.models.decision import DecisionType
 from investmentology.models.lifecycle import WatchlistState
@@ -98,6 +100,26 @@ class AnalysisOrchestrator:
         self._enricher = enricher
         self._yfinance = YFinanceClient(cache_ttl_hours=4)
         self._debate_enabled = enable_debate
+        self._prediction_mgr = PredictionManager(registry)
+        # Dynamic agent weights from attribution (P0.4)
+        self._dynamic_weights = None
+        try:
+            from investmentology.learning.attribution import AgentAttributionEngine
+            attr_engine = AgentAttributionEngine(registry)
+            report = attr_engine.compute_attribution()
+            if report is not None:
+                self._dynamic_weights = {
+                    k: Decimal(str(v)) for k, v in report.recommended_weights.items()
+                }
+                logger.info("Using dynamic agent weights: %s", self._dynamic_weights)
+        except Exception:
+            logger.debug("Attribution-based weights not available, using defaults")
+
+        # Kelly criterion from closed position history (P0.3)
+        kelly = compute_kelly_params(registry)
+        if kelly:
+            logger.info("Kelly criterion activated: half_kelly=%.3f", kelly.half_kelly())
+
 
         # L2 components
         self._competence = CompetenceFilter(gateway)
@@ -379,6 +401,7 @@ class AnalysisOrchestrator:
             compatibility=analysis.compatibility,
             adversarial=analysis.adversarial,
             method=VotingMethod.WEIGHTED_VOTE,
+            weights=self._dynamic_weights,
         )
 
         # Use supermajority for BUY/STRONG_BUY (higher bar for strong actions)
@@ -388,6 +411,7 @@ class AnalysisOrchestrator:
                 compatibility=analysis.compatibility,
                 adversarial=analysis.adversarial,
                 method=VotingMethod.SUPERMAJORITY,
+                weights=self._dynamic_weights,
             )
         else:
             analysis.verdict = initial_verdict
@@ -483,6 +507,56 @@ class AnalysisOrchestrator:
         self._update_watchlist(ticker, analysis)
 
         return analysis
+
+
+    def _log_predictions(self, ticker: str, analysis: "CandidateAnalysis") -> None:
+        """Log predictions from verdict for the learning feedback loop."""
+        if not analysis.verdict:
+            return
+
+        verdict_val = analysis.verdict.verdict.value
+        confidence = analysis.verdict.confidence
+
+        # Map verdict to directional prediction (1=bullish, -1=bearish, 0=neutral)
+        bullish_verdicts = {"STRONG_BUY", "BUY", "ACCUMULATE"}
+        bearish_verdicts = {"SELL", "AVOID", "DISCARD", "REDUCE"}
+
+        if verdict_val in bullish_verdicts:
+            direction = Decimal("1")
+            pred_type = "verdict_direction_up"
+        elif verdict_val in bearish_verdicts:
+            direction = Decimal("-1")
+            pred_type = "verdict_direction_down"
+        else:
+            return  # Skip HOLD/WATCHLIST — ambiguous for predictions
+
+        try:
+            self._prediction_mgr.log_prediction(
+                ticker=ticker,
+                prediction_type=pred_type,
+                predicted_value=direction,
+                confidence=confidence,
+                horizon_days=90,
+                source=f"orchestrator:{verdict_val}",
+            )
+            logger.info("Logged prediction for %s: %s conf=%s", ticker, pred_type, confidence)
+        except Exception:
+            logger.debug("Failed to log prediction for %s", ticker)
+
+        # Log target price prediction if any agent provided one
+        for resp in analysis.agent_responses:
+            if resp.target_price and resp.target_price > 0:
+                try:
+                    self._prediction_mgr.log_prediction(
+                        ticker=ticker,
+                        prediction_type=f"target_price_{resp.agent_name}",
+                        predicted_value=resp.target_price,
+                        confidence=resp.signal_set.confidence,
+                        horizon_days=90,
+                        source=f"{resp.agent_name}:{resp.model}",
+                    )
+                except Exception:
+                    logger.debug("Failed to log target price prediction for %s/%s", ticker, resp.agent_name)
 
     async def _run_agent(
         self, agent: WarrenAgent | SorosAgent | SimonsAgent | AuditorAgent,

@@ -192,6 +192,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         recommendations,
         stocks,
         system,
+        daily,
         watchlist,
     )
     from investmentology.api import ws
@@ -208,6 +209,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(analyse.router, prefix=prefix, tags=["analyse"])
     app.include_router(recommendations.router, prefix=prefix, tags=["recommendations"])
     app.include_router(backtest.router, prefix=prefix, tags=["backtest"])
+    app.include_router(daily.router, prefix=prefix, tags=["daily"])
     app.include_router(ws.router, prefix=prefix, tags=["websocket"])
 
     return app

@@ -9,8 +9,9 @@ import uuid
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from investmentology.api.deps import get_orchestrator
+from investmentology.api.deps import get_orchestrator, get_registry
 from investmentology.orchestrator import AnalysisOrchestrator
+from investmentology.registry.queries import Registry
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,19 @@ class AnalyseResponse(BaseModel):
 async def trigger_analysis(
     body: AnalyseRequest,
     orchestrator: AnalysisOrchestrator = Depends(get_orchestrator),
+    registry: Registry = Depends(get_registry),
 ) -> dict:
     """Trigger on-demand analysis for a list of tickers."""
     analysis_id = str(uuid.uuid4())
     tickers = [t.upper() for t in body.tickers]
 
-    result = await orchestrator.analyze_candidates(tickers)
+    # Build real portfolio context from current holdings
+    portfolio_context = _build_portfolio_context(registry)
+
+    result = await orchestrator.analyze_candidates(
+        tickers,
+        portfolio_context=portfolio_context,
+    )
 
     return {
         "analysis_id": analysis_id,

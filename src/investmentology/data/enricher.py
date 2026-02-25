@@ -60,12 +60,26 @@ class DataEnricher:
         return request
 
     def _enrich_macro(self, request: AnalysisRequest) -> None:
-        """Add FRED macro context (shared across all tickers in a batch)."""
+        """Add FRED macro context + pendulum reading (shared across all tickers in a batch)."""
         if not self._fred:
             return
         try:
             if self._macro_cache is None:
                 self._macro_cache = self._fred.get_macro_context()
+                # Inject pendulum reading into macro context
+                try:
+                    from investmentology.data.pendulum_feeds import auto_pendulum_reading
+                    reading = auto_pendulum_reading()
+                    if reading:
+                        self._macro_cache["pendulum_score"] = int(reading.score)
+                        self._macro_cache["pendulum_label"] = reading.label
+                        self._macro_cache["pendulum_sizing_multiplier"] = str(reading.sizing_multiplier)
+                        # Include component scores for deeper analysis
+                        if reading.components:
+                            for comp_name, comp_val in reading.components.items():
+                                self._macro_cache[f"pendulum_{comp_name}"] = str(comp_val)
+                except Exception:
+                    logger.debug("Pendulum enrichment failed, continuing without")
             # Merge with any existing macro_context (e.g. manually passed)
             if request.macro_context:
                 merged = dict(self._macro_cache)

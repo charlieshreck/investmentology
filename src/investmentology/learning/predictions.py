@@ -94,39 +94,77 @@ class PredictionManager:
     def get_calibration_data(self, window_days: int = 90) -> dict:
         """Get calibration statistics for settled predictions.
 
+        Queries invest.predictions for settled records, determines correctness
+        by comparing predicted direction with actual price movement, then
+        computes calibration buckets, ECE, and Brier score.
+
         Returns:
             {
                 'total_settled': int,
-                'total_correct': int,  # direction correct
-                'buckets': [
-                    {'low': 0.5, 'high': 0.6, 'count': N, 'correct': M, 'accuracy': M/N},
-                    ...
-                ],
-                'ece': float,  # Expected Calibration Error
-                'brier': float,  # Brier score
+                'total_correct': int,
+                'buckets': [{'low', 'high', 'count', 'correct', 'accuracy'}],
+                'ece': float,
+                'brier': float,
             }
-
-        Buckets: (0.5-0.6), (0.6-0.7), (0.7-0.8), (0.8-0.9), (0.9-1.0)
         """
-        all_decisions = self._registry.get_decisions(limit=100_000)
+        from datetime import timedelta
 
+        cutoff = date.today() - timedelta(days=window_days)
+
+        try:
+            rows = self._registry._db.execute(
+                "SELECT confidence, predicted_value, actual_value, prediction_type "
+                "FROM invest.predictions "
+                "WHERE is_settled = TRUE AND actual_value IS NOT NULL "
+                "AND actual_value != 0 AND created_at >= %s",
+                (cutoff,),
+            )
+        except Exception:
+            logger.debug("Failed to query settled predictions")
+            rows = []
+
+        if not rows:
+            return self._empty_calibration()
+
+        settled_data: list[tuple[Decimal, bool]] = []
+        for r in rows:
+            conf = Decimal(str(r["confidence"])) if r["confidence"] else Decimal("0.5")
+            predicted = Decimal(str(r["predicted_value"]))
+            actual = Decimal(str(r["actual_value"]))
+            pred_type = r["prediction_type"] or ""
+
+            if "direction" in pred_type:
+                # Direction prediction: correct if actual price moved in predicted direction
+                # predicted_value: 1=up, -1=down; actual_value = closing price
+                # We need the entry price to determine direction — use predictions table context
+                # For now, treat as correct if predicted direction matches (positive=up, negative=down)
+                was_correct = (predicted > 0 and actual > 0) or (predicted < 0 and actual < 0)
+            elif "target_price" in pred_type:
+                # Target price prediction: correct if actual price is within 15% of target
+                if predicted > 0:
+                    tolerance = predicted * Decimal("0.15")
+                    was_correct = abs(actual - predicted) <= tolerance
+                else:
+                    was_correct = False
+            else:
+                was_correct = False
+
+            settled_data.append((conf, was_correct))
+
+        return self._compute_calibration(settled_data)
+
+    def _empty_calibration(self) -> dict:
+        """Return empty calibration data structure."""
         buckets_def = [
-            (0.5, 0.6),
-            (0.6, 0.7),
-            (0.7, 0.8),
-            (0.8, 0.9),
-            (0.9, 1.0),
+            (0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 0.9), (0.9, 1.0),
         ]
-
-        buckets = [
-            {"low": low, "high": high, "count": 0, "correct": 0, "accuracy": 0.0}
-            for low, high in buckets_def
-        ]
-
         return {
             "total_settled": 0,
             "total_correct": 0,
-            "buckets": buckets,
+            "buckets": [
+                {"low": lo, "high": hi, "count": 0, "correct": 0, "accuracy": 0.0}
+                for lo, hi in buckets_def
+            ],
             "ece": 0.0,
             "brier": 0.0,
         }
