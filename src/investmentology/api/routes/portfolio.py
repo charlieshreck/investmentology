@@ -620,3 +620,219 @@ def get_portfolio_correlations(registry: Registry = Depends(get_registry)) -> di
     except Exception:
         logger.exception("Failed to compute correlations")
         return {"tickers": tickers, "correlations": []}
+
+
+@router.get("/portfolio/advisor")
+def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
+    """Portfolio advisor: actionable recommendations for the whole portfolio.
+
+    Combines sell engine signals, verdict flips, balance health, sizing guidance,
+    and cash deployment into a prioritized action list.
+    """
+    positions = registry.get_open_positions()
+    if not positions:
+        return {"actions": []}
+
+    actions: list[dict] = []
+
+    # Lookups
+    pos_by_ticker = {p.ticker: p for p in positions}
+    tickers = list(pos_by_ticker.keys())
+    total_value = sum(float(p.market_value) for p in positions)
+
+    # -- 1. Sell engine signals --
+    try:
+        from investmentology.sell.engine import SellEngine
+        from investmentology.sell.rules import SellUrgency
+        sell_engine = SellEngine()
+        for p in positions:
+            signals = sell_engine.evaluate_position(p)
+            for sig in signals:
+                if sig.urgency == SellUrgency.EXECUTE:
+                    actions.append({
+                        "type": "SELL",
+                        "ticker": p.ticker,
+                        "priority": "high",
+                        "title": f"Sell {p.ticker}",
+                        "detail": sig.detail,
+                        "reasoning": f"Sell engine: {sig.reason.value}. Urgency: EXECUTE.",
+                        "position_id": p.id,
+                        "current_shares": float(p.shares),
+                        "current_price": float(p.current_price),
+                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value else 0,
+                    })
+                elif sig.urgency == SellUrgency.SIGNAL:
+                    actions.append({
+                        "type": "TRIM",
+                        "ticker": p.ticker,
+                        "priority": "medium",
+                        "title": f"Trim {p.ticker}",
+                        "detail": sig.detail,
+                        "reasoning": f"Sell engine: {sig.reason.value}. Consider reducing position.",
+                        "position_id": p.id,
+                        "current_shares": float(p.shares),
+                        "current_price": float(p.current_price),
+                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value else 0,
+                        "suggested_shares": max(1, int(float(p.shares) * 0.5)),
+                    })
+    except Exception:
+        logger.warning("Sell engine failed in advisor", exc_info=True)
+
+    # -- 2. Verdict-based signals on held positions --
+    for ticker in tickers:
+        try:
+            verdict = registry.get_latest_verdict(ticker)
+            if not verdict:
+                # No analysis yet — suggest reanalyze
+                actions.append({
+                    "type": "REANALYZE",
+                    "ticker": ticker,
+                    "priority": "medium",
+                    "title": f"Analyze {ticker}",
+                    "detail": f"No AI verdict exists for held position {ticker}.",
+                    "reasoning": "Run the analysis pipeline to get buy/hold/sell guidance.",
+                })
+                continue
+
+            v = verdict.get("verdict", "")
+            conf = float(verdict.get("confidence", 0) or 0)
+            reasoning = verdict.get("reasoning", "") or ""
+
+            if v in ("SELL", "AVOID"):
+                # Check we didn't already add a sell engine signal
+                already_flagged = any(a["ticker"] == ticker and a["type"] in ("SELL", "TRIM") for a in actions)
+                if not already_flagged:
+                    p = pos_by_ticker[ticker]
+                    actions.append({
+                        "type": "SELL",
+                        "ticker": ticker,
+                        "priority": "high",
+                        "title": f"AI says Sell {ticker}",
+                        "detail": f"Latest verdict: {v} (confidence {conf:.0%})",
+                        "reasoning": reasoning[:200],
+                        "position_id": p.id,
+                        "current_shares": float(p.shares),
+                        "current_price": float(p.current_price),
+                    })
+            elif v == "REDUCE":
+                already_flagged = any(a["ticker"] == ticker and a["type"] in ("SELL", "TRIM") for a in actions)
+                if not already_flagged:
+                    p = pos_by_ticker[ticker]
+                    actions.append({
+                        "type": "TRIM",
+                        "ticker": ticker,
+                        "priority": "medium",
+                        "title": f"Reduce {ticker}",
+                        "detail": f"Latest verdict: REDUCE (confidence {conf:.0%})",
+                        "reasoning": reasoning[:200],
+                        "position_id": p.id,
+                        "current_shares": float(p.shares),
+                        "current_price": float(p.current_price),
+                        "suggested_shares": max(1, int(float(p.shares) * 0.66)),
+                    })
+            elif v in ("STRONG_BUY", "BUY", "ACCUMULATE") and conf >= 0.7:
+                p = pos_by_ticker[ticker]
+                weight = float(p.market_value) / total_value * 100 if total_value else 0
+                if weight < 8:  # Room to add more
+                    actions.append({
+                        "type": "ADD_MORE",
+                        "ticker": ticker,
+                        "priority": "low",
+                        "title": f"Add to {ticker}",
+                        "detail": f"Verdict: {v} ({conf:.0%} confidence). Current weight: {weight:.1f}%",
+                        "reasoning": reasoning[:200],
+                        "position_id": p.id,
+                        "current_shares": float(p.shares),
+                        "current_price": float(p.current_price),
+                        "current_weight": round(weight, 1),
+                    })
+        except Exception:
+            logger.debug("Advisor: verdict check failed for %s", ticker, exc_info=True)
+
+    # -- 3. Position type reclassification --
+    for p in positions:
+        ptype = p.position_type or "core"
+        pnl_pct = float(p.pnl_pct) if p.pnl_pct else 0
+        # Tactical winners graduating to core
+        if ptype == "tactical" and pnl_pct > 0.20:
+            actions.append({
+                "type": "RECLASSIFY",
+                "ticker": p.ticker,
+                "priority": "low",
+                "title": f"Promote {p.ticker} to Core",
+                "detail": f"Tactical position up {pnl_pct:.0%}. Consider promoting to core hold.",
+                "reasoning": "Strong performance suggests thesis validation — tighter stops as core.",
+                "position_id": p.id,
+                "current_position_type": ptype,
+                "suggested_position_type": "core",
+            })
+
+    # -- 4. Concentration / diversification --
+    stocks = {s["ticker"]: s for s in registry._db.execute(
+        "SELECT ticker, sector FROM invest.stocks WHERE ticker = ANY(%s)", (tickers,)
+    )}
+    sector_weights: dict[str, float] = {}
+    for p in positions:
+        sector = stocks.get(p.ticker, {}).get("sector", "Other") or "Other"
+        sector_weights[sector] = sector_weights.get(sector, 0) + (float(p.market_value) / total_value * 100 if total_value else 0)
+
+    for sector, weight in sector_weights.items():
+        if weight > 35:
+            sector_tickers = [t for t in tickers if stocks.get(t, {}).get("sector") == sector]
+            actions.append({
+                "type": "DIVERSIFY",
+                "ticker": None,
+                "priority": "medium",
+                "title": f"{sector} overweight ({weight:.0f}%)",
+                "detail": f"Sector at {weight:.0f}% of portfolio. Positions: {', '.join(sector_tickers)}",
+                "reasoning": "Consider trimming largest sector position or adding exposure to underweight sectors.",
+            })
+
+    # -- 5. Correlation risk --
+    high_corr_pairs = []
+    try:
+        corr_data = get_portfolio_correlations(registry)
+        for pair in corr_data.get("correlations", []):
+            if pair["value"] > 0.85:
+                high_corr_pairs.append(pair)
+    except Exception:
+        pass
+
+    for pair in high_corr_pairs[:3]:
+        actions.append({
+            "type": "CORRELATION_RISK",
+            "ticker": None,
+            "priority": "low",
+            "title": f"High correlation: {pair['ticker1']}/{pair['ticker2']}",
+            "detail": f"Correlation {pair['value']:.2f} — these positions move together.",
+            "reasoning": "High correlation reduces diversification benefit. Consider whether both are needed.",
+        })
+
+    # -- 6. Cash deployment --
+    try:
+        budget_row = registry._db.execute(
+            "SELECT total_capital, cash_reserve FROM invest.portfolio_budget LIMIT 1"
+        )
+        if budget_row:
+            cash = float(budget_row[0].get("cash_reserve", 0))
+            total_capital = float(budget_row[0].get("total_capital", 0))
+            if total_capital > 0:
+                cash_pct = cash / total_capital * 100
+                if cash_pct > 15:
+                    actions.append({
+                        "type": "DEPLOY_CASH",
+                        "ticker": None,
+                        "priority": "low",
+                        "title": f"Deploy cash ({cash_pct:.0f}% idle)",
+                        "detail": f"${cash:,.0f} cash available. Consider deploying into top-rated screener candidates.",
+                        "reasoning": "Excess cash drag reduces returns. Review Recs tab for buy candidates.",
+                    })
+    except Exception:
+        pass
+
+    # -- 7. Ideal portfolio snapshot --
+    # Sort: high priority first, then medium, then low
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    actions.sort(key=lambda a: priority_order.get(a["priority"], 99))
+
+    return {"actions": actions}
