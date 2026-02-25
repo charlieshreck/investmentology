@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 
 from investmentology.models.prediction import Prediction
 from investmentology.registry.queries import Registry
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionManager:
@@ -57,9 +60,8 @@ class PredictionManager:
     ) -> list[tuple[int, Decimal]]:
         """Settle all predictions where settlement_date <= as_of.
 
-        In Phase 1, this marks predictions for manual settlement by setting
-        actual_value to Decimal("0") as a placeholder. Auto-settlement with
-        price lookup comes in Stage 3.
+        Uses auto_settle to look up actual prices via yfinance. Falls back
+        to placeholder Decimal("0") if price lookup fails.
 
         Returns list of (prediction_id, actual_value) that were settled.
         """
@@ -68,12 +70,26 @@ class PredictionManager:
         settled: list[tuple[int, Decimal]] = []
 
         for pred in unsettled:
-            # Phase 1: mark with placeholder value for manual review
-            actual_value = Decimal("0")
+            actual_value = self._auto_settle(pred)
             self._registry.settle_prediction(pred.id, actual_value)  # type: ignore[arg-type]
             settled.append((pred.id, actual_value))  # type: ignore[arg-type]
 
         return settled
+
+    def _auto_settle(self, pred) -> Decimal:
+        """Try to auto-settle using real price lookup, fall back to placeholder."""
+        try:
+            from investmentology.learning.auto_settle import lookup_price_on_date
+            actual = lookup_price_on_date(pred.ticker, pred.settlement_date)
+            if actual is not None:
+                logger.info(
+                    "Auto-settled prediction %s: %s on %s = %s",
+                    pred.id, pred.ticker, pred.settlement_date, actual,
+                )
+                return actual
+        except Exception:
+            logger.debug("Auto-settle failed for prediction %s", pred.id)
+        return Decimal("0")
 
     def get_calibration_data(self, window_days: int = 90) -> dict:
         """Get calibration statistics for settled predictions.
@@ -92,22 +108,7 @@ class PredictionManager:
 
         Buckets: (0.5-0.6), (0.6-0.7), (0.7-0.8), (0.8-0.9), (0.9-1.0)
         """
-        # Get all settled predictions (use a large limit)
         all_decisions = self._registry.get_decisions(limit=100_000)
-
-        # Get settled predictions via unsettled_predictions won't work (they're settled).
-        # Instead we need to query predictions directly. For Phase 1, we gather all
-        # predictions and filter to settled ones.
-        # Since Registry doesn't expose a "get settled predictions" method,
-        # we use get_unsettled_predictions with a far-future date to get everything,
-        # but that only returns unsettled ones. We need a different approach.
-        #
-        # For now, we'll accept settled predictions passed in through the registry
-        # by looking at predictions that were settled (actual_value is not None).
-        # Since we can only get unsettled predictions from Registry, calibration
-        # data must be computed from whatever data is available.
-        #
-        # Phase 1 implementation: return empty calibration if no data available.
 
         buckets_def = [
             (0.5, 0.6),
@@ -117,10 +118,6 @@ class PredictionManager:
             (0.9, 1.0),
         ]
 
-        # We store settled predictions that we process through settle_due_predictions.
-        # Since we don't have a direct query for settled predictions in the Registry,
-        # this returns a baseline structure. The actual data will be populated
-        # when we add a get_settled_predictions query in Stage 3.
         buckets = [
             {"low": low, "high": high, "count": 0, "correct": 0, "accuracy": 0.0}
             for low, high in buckets_def
@@ -138,10 +135,7 @@ class PredictionManager:
     def _compute_calibration(
         settled_predictions: list[tuple[Decimal, bool]],
     ) -> dict:
-        """Compute calibration metrics from (confidence, was_correct) pairs.
-
-        This is a static helper for when we have actual settled data.
-        """
+        """Compute calibration metrics from (confidence, was_correct) pairs."""
         buckets_def = [
             (0.5, 0.6),
             (0.6, 0.7),

@@ -56,6 +56,7 @@ class DataEnricher:
         self._enrich_social(request)
         self._enrich_filings(request)
         self._enrich_holders(request)
+        self._enrich_technical(request)
         return request
 
     def _enrich_macro(self, request: AnalysisRequest) -> None:
@@ -122,3 +123,13 @@ class DataEnricher:
             request.institutional_context = self._edgar.get_institutional_holders(request.ticker)
         except Exception:
             logger.debug("Institutional holders enrichment failed for %s", request.ticker)
+
+    def _enrich_technical(self, request: AnalysisRequest) -> None:
+        """Compute technical indicators for Simons agent."""
+        if request.technical_indicators is not None:
+            return
+        try:
+            from investmentology.data.technical_indicators import compute_technical_indicators
+            request.technical_indicators = compute_technical_indicators(request.ticker)
+        except Exception:
+            logger.debug("Technical indicator enrichment failed for %s", request.ticker)
