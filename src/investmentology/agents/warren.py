@@ -269,6 +269,7 @@ class WarrenAgent(BaseAgent):
             signals=SignalSet(signals=[]),
             confidence=Decimal("0"),
             reasoning="Failed to parse LLM response",
+            parse_failed=True,
         )
 
     async def analyze(self, request: AnalysisRequest) -> AnalysisResponse:

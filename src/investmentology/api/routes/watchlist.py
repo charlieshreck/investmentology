@@ -5,43 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from investmentology.api.deps import get_registry
+from investmentology.api.routes.shared import success_probability as _success_probability
 from investmentology.registry.queries import Registry
 
 router = APIRouter()
-
-
-def _success_probability(row: dict) -> float | None:
-    """Blended success probability (0.0-1.0) — how close to graduating to Recommend."""
-    components: list[tuple[float, float]] = []
-
-    vc = row.get("confidence")
-    if vc is not None:
-        components.append((float(vc), 0.35))
-
-    cons = row.get("consensus_score")
-    if cons is not None:
-        components.append(((float(cons) + 1) / 2, 0.25))
-
-    stances = row.get("agent_stances")
-    if stances and isinstance(stances, list) and len(stances) > 0:
-        pos_count = sum(
-            1 for s in stances
-            if isinstance(s, dict) and s.get("sentiment", 0) > 0
-        )
-        alignment = pos_count / len(stances)
-        components.append((alignment, 0.20))
-
-    risk_flags = row.get("risk_flags")
-    risk_score = 1.0
-    if risk_flags and isinstance(risk_flags, list):
-        risk_score = max(0.0, 1.0 - len(risk_flags) * 0.15)
-    components.append((risk_score, 0.20))
-
-    if not components:
-        return None
-
-    total_weight = sum(w for _, w in components)
-    return round(sum(v * w for v, w in components) / total_weight, 4)
 
 
 def _format_watch_item(row: dict) -> dict:

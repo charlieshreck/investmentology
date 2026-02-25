@@ -18,7 +18,7 @@ WEIGHT_ALTMAN = Decimal("0.20")
 
 # Piotroski max possible is 9, but without prior-year data only 4 tests
 # are scoreable. We normalize against the number of tests that could fire.
-PIOTROSKI_MAX_WITHOUT_PRIOR = 4
+PIOTROSKI_MAX_WITHOUT_PRIOR = 3
 PIOTROSKI_MAX_WITH_PRIOR = 9
 
 # Altman zone scores

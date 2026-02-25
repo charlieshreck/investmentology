@@ -66,6 +66,11 @@ class CircuitBreaker:
             return 0.0
         return len(self._failures) / total
 
+    def reset(self) -> None:
+        """Clear all recorded successes and failures."""
+        self._successes.clear()
+        self._failures.clear()
+
 
 class YFinanceClient:
     """Client for fetching financial data from yfinance with caching and circuit breaking."""
@@ -182,7 +187,7 @@ class YFinanceClient:
                 )
                 time.sleep(60)
                 # Reset breaker to retry
-                self._circuit_breaker._failures.clear()
+                self._circuit_breaker.reset()
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = {
@@ -194,7 +199,8 @@ class YFinanceClient:
                         if result is not None:
                             results.append(result)
                     except Exception:
-                        pass
+                        ticker = futures[future]
+                        logger.warning("Thread failed for %s", ticker, exc_info=True)
 
             logger.info(
                 "Chunk %d/%d done — %d/%d succeeded so far",

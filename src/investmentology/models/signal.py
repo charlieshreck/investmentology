@@ -156,3 +156,4 @@ class AgentSignalSet:
     target_price: Decimal | None = None
     token_usage: dict | None = None
     latency_ms: int | None = None
+    parse_failed: bool = False

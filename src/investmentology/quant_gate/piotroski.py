@@ -56,9 +56,9 @@ def calculate_piotroski(
     # 1. Positive net income
     details["positive_net_income"] = current.net_income > ZERO
 
-    # 2. Positive operating cash flow (proxy: net_income as approximation)
-    # Without a cash flow statement, we use net_income > 0 as a rough proxy.
-    details["positive_ocf"] = current.net_income > ZERO
+    # 2. Positive operating cash flow (proxy: operating_income > 0)
+    # Without a cash flow statement, operating income is the best available proxy.
+    details["positive_ocf"] = current.operating_income > ZERO
 
     # 3. ROA improving
     if previous is not None and current.total_assets > ZERO and previous.total_assets > ZERO:

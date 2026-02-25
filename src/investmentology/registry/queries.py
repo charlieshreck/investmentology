@@ -567,31 +567,62 @@ class Registry:
         """Get the latest verdict for every ticker, enriched with stock info and prices.
 
         Returns only actionable verdicts (not DISCARD), one per ticker.
+        Includes price_history for sparkline charts.
         """
         return self._db.execute("""
-            SELECT DISTINCT ON (v.ticker)
-                v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
-                v.reasoning, v.agent_stances, v.risk_flags,
-                v.auditor_override, v.munger_override, v.created_at,
+            WITH latest_verdicts AS (
+                SELECT DISTINCT ON (v.ticker)
+                    v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
+                    v.reasoning, v.agent_stances, v.risk_flags,
+                    v.auditor_override, v.munger_override, v.created_at
+                FROM invest.verdicts v
+                WHERE v.verdict != 'DISCARD'
+                ORDER BY v.ticker, v.created_at DESC
+            )
+            SELECT
+                lv.id, lv.ticker, lv.verdict, lv.confidence, lv.consensus_score,
+                lv.reasoning, lv.agent_stances, lv.risk_flags,
+                lv.auditor_override, lv.munger_override, lv.created_at,
                 s.name, s.sector, s.industry,
                 f.price AS current_price, f.market_cap,
-                w.state AS watchlist_state
-            FROM invest.verdicts v
-            LEFT JOIN invest.stocks s ON s.ticker = v.ticker
+                w.state AS watchlist_state,
+                entry.price AS entry_price,
+                ph.history AS price_history
+            FROM latest_verdicts lv
+            LEFT JOIN invest.stocks s ON s.ticker = lv.ticker
             LEFT JOIN LATERAL (
                 SELECT price, market_cap
                 FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = v.ticker
+                WHERE fc.ticker = lv.ticker
                 ORDER BY fc.fetched_at DESC LIMIT 1
             ) f ON TRUE
             LEFT JOIN LATERAL (
                 SELECT state
                 FROM invest.watchlist wl
-                WHERE wl.ticker = v.ticker
+                WHERE wl.ticker = lv.ticker
                 ORDER BY wl.updated_at DESC LIMIT 1
             ) w ON TRUE
-            WHERE v.verdict != 'DISCARD'
-            ORDER BY v.ticker, v.created_at DESC
+            LEFT JOIN LATERAL (
+                SELECT price
+                FROM invest.fundamentals_cache fc
+                WHERE fc.ticker = lv.ticker
+                  AND fc.price > 0
+                  AND fc.fetched_at <= lv.created_at + interval '1 day'
+                ORDER BY fc.fetched_at DESC LIMIT 1
+            ) entry ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT json_agg(
+                    json_build_object('date', dt::text, 'price', p)
+                    ORDER BY dt
+                ) AS history
+                FROM (
+                    SELECT DISTINCT ON (fc.fetched_at::date)
+                        fc.fetched_at::date AS dt, fc.price AS p
+                    FROM invest.fundamentals_cache fc
+                    WHERE fc.ticker = lv.ticker AND fc.price > 0
+                    ORDER BY fc.fetched_at::date, fc.fetched_at DESC
+                ) daily
+            ) ph ON TRUE
         """)
 
     def get_watchlist_tickers_for_reanalysis(

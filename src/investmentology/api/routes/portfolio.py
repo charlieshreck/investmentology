@@ -70,8 +70,40 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
                 "pnl_pct": p.pnl_pct,
             }
 
+    # Fetch stock names and previous close prices
+    tickers = list(aggregated.keys())
+    stock_names: dict[str, str] = {}
+    prev_close: dict[str, float] = {}
+    if tickers:
+        try:
+            name_rows = registry._db.execute(
+                "SELECT ticker, name FROM invest.stocks WHERE ticker = ANY(%s)",
+                [tickers],
+            )
+            for row in name_rows:
+                if row.get("name"):
+                    stock_names[row["ticker"]] = row["name"]
+        except Exception:
+            logger.warning("Failed to fetch stock names for portfolio", exc_info=True)
+    if tickers:
+        try:
+            rows = registry._db.execute("""
+                SELECT DISTINCT ON (fc.ticker)
+                    fc.ticker, fc.price
+                FROM invest.fundamentals_cache fc
+                WHERE fc.ticker = ANY(%s)
+                  AND fc.price > 0
+                  AND fc.fetched_at::date < CURRENT_DATE
+                ORDER BY fc.ticker, fc.fetched_at DESC
+            """, [tickers])
+            for row in rows:
+                prev_close[row["ticker"]] = float(row["price"])
+        except Exception:
+            logger.warning("Failed to fetch previous close prices", exc_info=True)
+
     items = []
     total_value = Decimal("0")
+    total_day_pnl = 0.0
 
     for a in aggregated.values():
         mv = a["current_price"] * a["shares"]
@@ -80,17 +112,26 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         unrealised = float(mv - entry_cost)
         unrealised_pct = float((mv - entry_cost) / entry_cost * 100) if entry_cost else 0.0
 
+        # Day change from previous close
+        prev = prev_close.get(a["ticker"])
+        cur = float(a["current_price"])
+        day_change_per_share = (cur - prev) if prev and prev > 0 else 0.0
+        day_change_pct = (day_change_per_share / prev * 100) if prev and prev > 0 else 0.0
+        day_change_total = day_change_per_share * float(a["shares"])
+        total_day_pnl += day_change_total
+
         items.append({
             "id": a["id"],
             "ticker": a["ticker"],
+            "name": stock_names.get(a["ticker"]),
             "shares": float(a["shares"]),
             "avgCost": float(a["entry_price"]),
             "currentPrice": float(a["current_price"]),
             "marketValue": float(mv),
             "unrealizedPnl": unrealised,
             "unrealizedPnlPct": unrealised_pct,
-            "dayChange": 0.0,
-            "dayChangePct": 0.0,
+            "dayChange": round(day_change_total, 2),
+            "dayChangePct": round(day_change_pct, 2),
             "weight": float(a["weight"]),
         })
 
@@ -113,7 +154,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         if pnl < -0.15:
             alerts.append({
                 "id": f"dd-{p.ticker}",
-                "severity": "error",
+                "severity": "high",
                 "title": "Significant drawdown",
                 "message": f"{p.ticker} down {pnl:.1%} from entry",
                 "ticker": p.ticker,
@@ -130,15 +171,17 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         if budget_rows:
             cash = Decimal(str(budget_rows[0]["cash_reserve"] or 0))
     except Exception:
-        pass
+        logger.warning("Failed to fetch cash reserve from portfolio_budget", exc_info=True)
 
     portfolio_total = float(total_value + cash)
+
+    day_pnl_pct = (total_day_pnl / (portfolio_total - total_day_pnl) * 100) if portfolio_total - total_day_pnl > 0 else 0.0
 
     return {
         "positions": items,
         "totalValue": portfolio_total,
-        "dayPnl": 0.0,
-        "dayPnlPct": 0.0,
+        "dayPnl": round(total_day_pnl, 2),
+        "dayPnlPct": round(day_pnl_pct, 2),
         "cash": float(cash),
         "alerts": alerts,
     }
@@ -187,6 +230,26 @@ def get_portfolio_alerts(registry: Registry = Depends(get_registry)) -> dict:
             })
 
     # Sort by severity
+    # Sell engine signals
+    try:
+        from investmentology.sell.engine import SellEngine
+        from investmentology.sell.rules import SellUrgency
+        sell_engine = SellEngine()
+        for p in positions:
+            signals = sell_engine.evaluate_position(p)
+            for sig in signals:
+                severity = "critical" if sig.urgency == SellUrgency.EXECUTE else (
+                    "high" if sig.urgency == SellUrgency.SIGNAL else "medium"
+                )
+                alerts.append({
+                    "ticker": p.ticker,
+                    "severity": severity,
+                    "type": f"sell_{sig.reason.value.lower()}",
+                    "message": sig.detail,
+                })
+    except Exception:
+        logger.warning("Sell engine evaluation failed", exc_info=True)
+
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     alerts.sort(key=lambda a: severity_order.get(a["severity"], 99))
 

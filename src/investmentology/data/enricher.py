@@ -88,7 +88,7 @@ class DataEnricher:
             else:
                 request.macro_context = dict(self._macro_cache)
         except Exception:
-            logger.debug("FRED enrichment failed for %s", request.ticker)
+            logger.warning("FRED enrichment failed for %s", request.ticker)
 
     def _enrich_news(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.news_context is not None:
@@ -96,7 +96,7 @@ class DataEnricher:
         try:
             request.news_context = self._finnhub.get_news(request.ticker)
         except Exception:
-            logger.debug("News enrichment failed for %s", request.ticker)
+            logger.warning("News enrichment failed for %s", request.ticker)
 
     def _enrich_earnings(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.earnings_context is not None:
@@ -104,7 +104,7 @@ class DataEnricher:
         try:
             request.earnings_context = self._finnhub.get_earnings(request.ticker)
         except Exception:
-            logger.debug("Earnings enrichment failed for %s", request.ticker)
+            logger.warning("Earnings enrichment failed for %s", request.ticker)
 
     def _enrich_insider(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.insider_context is not None:
@@ -112,7 +112,7 @@ class DataEnricher:
         try:
             request.insider_context = self._finnhub.get_insider_transactions(request.ticker)
         except Exception:
-            logger.debug("Insider enrichment failed for %s", request.ticker)
+            logger.warning("Insider enrichment failed for %s", request.ticker)
 
     def _enrich_social(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.social_sentiment is not None:
@@ -120,7 +120,7 @@ class DataEnricher:
         try:
             request.social_sentiment = self._finnhub.get_social_sentiment(request.ticker)
         except Exception:
-            logger.debug("Social sentiment enrichment failed for %s", request.ticker)
+            logger.warning("Social sentiment enrichment failed for %s", request.ticker)
 
     def _enrich_filings(self, request: AnalysisRequest) -> None:
         if not self._edgar or request.filing_context is not None:
@@ -128,7 +128,7 @@ class DataEnricher:
         try:
             request.filing_context = self._edgar.get_filing_text(request.ticker)
         except Exception:
-            logger.debug("Filing enrichment failed for %s", request.ticker)
+            logger.warning("Filing enrichment failed for %s", request.ticker)
 
     def _enrich_holders(self, request: AnalysisRequest) -> None:
         if not self._edgar or request.institutional_context is not None:
@@ -136,7 +136,7 @@ class DataEnricher:
         try:
             request.institutional_context = self._edgar.get_institutional_holders(request.ticker)
         except Exception:
-            logger.debug("Institutional holders enrichment failed for %s", request.ticker)
+            logger.warning("Institutional holders enrichment failed for %s", request.ticker)
 
     def _enrich_technical(self, request: AnalysisRequest) -> None:
         """Compute technical indicators for Simons agent."""
@@ -146,4 +146,4 @@ class DataEnricher:
             from investmentology.data.technical_indicators import compute_technical_indicators
             request.technical_indicators = compute_technical_indicators(request.ticker)
         except Exception:
-            logger.debug("Technical indicator enrichment failed for %s", request.ticker)
+            logger.warning("Technical indicator enrichment failed for %s", request.ticker)

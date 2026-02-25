@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import asyncio
+import logging
+import threading
 
-from investmentology.api.deps import get_registry
+from fastapi import APIRouter, BackgroundTasks, Depends
+
+from investmentology.api.deps import app_state, get_registry
 from investmentology.registry.queries import Registry
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Screener run state (in-memory, single instance)
+_screener_state: dict = {"running": False, "progress": {"stage": "", "detail": "", "pct": 0}}
 
 
 @router.get("/quant-gate/latest")
@@ -115,3 +123,59 @@ def get_run_delta(registry: Registry = Depends(get_registry)) -> dict:
         "removed": sorted(previous_tickers - current_tickers),
         "retained": sorted(current_tickers & previous_tickers),
     }
+
+
+def _run_screener_background() -> None:
+    """Run the quant gate screener in a background thread."""
+    global _screener_state
+    try:
+        _screener_state = {"running": True, "progress": {"stage": "loading", "detail": "Loading stock universe...", "pct": 5}}
+
+        from investmentology.data.edgar_client import EdgarClient
+        from investmentology.data.yfinance_client import YFinanceClient
+        from investmentology.quant_gate.screener import QuantGateScreener
+
+        config = app_state.config
+        registry = app_state.registry
+        if not config or not registry:
+            logger.error("Screener: app not initialized")
+            return
+
+        yf_client = YFinanceClient()
+        edgar_client = EdgarClient() if config.use_edgar else None
+
+        _screener_state["progress"] = {"stage": "fetching", "detail": "Fetching fundamentals...", "pct": 20}
+
+        screener = QuantGateScreener(registry, yf_client, config, edgar_client=edgar_client)
+        result = screener.run()
+
+        _screener_state["progress"] = {
+            "stage": "complete",
+            "detail": f"Done: {len(result.top_results)} stocks passed from {result.data_quality.universe_size} universe",
+            "pct": 100,
+        }
+        logger.info("Screener run complete: run_id=%d, passed=%d", result.run_id, len(result.top_results))
+    except Exception:
+        logger.exception("Screener background run failed")
+        _screener_state["progress"] = {"stage": "error", "detail": "Screener run failed", "pct": 0}
+    finally:
+        _screener_state["running"] = False
+
+
+@router.get("/quant-gate/status")
+def get_screener_status() -> dict:
+    """Check if a screener run is in progress."""
+    return {"running": _screener_state["running"], "progress": _screener_state["progress"]}
+
+
+@router.post("/quant-gate/run")
+def trigger_screener_run(background_tasks: BackgroundTasks) -> dict:
+    """Trigger a new quant gate screener run in the background."""
+    if _screener_state["running"]:
+        return {"status": "already_running", "message": "A screener run is already in progress"}
+
+    _screener_state["running"] = True
+    _screener_state["progress"] = {"stage": "starting", "detail": "Initializing...", "pct": 0}
+    thread = threading.Thread(target=_run_screener_background, daemon=True)
+    thread.start()
+    return {"status": "started", "message": "Screener run started"}

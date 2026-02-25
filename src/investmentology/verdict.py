@@ -186,8 +186,19 @@ def synthesize(
             reasoning="No agent signals available — cannot form an opinion.",
         )
 
+    # Exclude agents that failed to parse LLM responses
+    valid_signals = [ss for ss in agent_signals if not ss.parse_failed]
+    if not valid_signals:
+        failed_names = [ss.agent_name for ss in agent_signals]
+        return VerdictResult(
+            verdict=Verdict.DISCARD,
+            confidence=Decimal("0"),
+            reasoning=f"All agents failed to parse: {', '.join(failed_names)}.",
+            risk_flags=["ALL_AGENTS_PARSE_FAILED"],
+        )
+
     # Distill each agent's stance
-    stances = [_distill_stance(ss) for ss in agent_signals]
+    stances = [_distill_stance(ss) for ss in valid_signals]
     stance_map = {s.name: s for s in stances}
 
     # Compute consensus based on method
@@ -284,15 +295,21 @@ def _consensus_weighted(
     breakdown: ConsensusBreakdown,
     weights: dict[str, Decimal] | None = None,
 ) -> tuple[float, Decimal, ConsensusBreakdown]:
-    """Default: weight * confidence as vote power."""
+    """Default: weight * confidence as vote power, normalized for partial agent sets."""
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
+    total_weight = Decimal("0")
     for stance in stances:
         weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
+        total_weight += weight
         vote_power = float(stance.confidence * weight)
         breakdown.votes[stance.name] = vote_power
         weighted_sentiment += stance.sentiment * float(weight)
         weighted_confidence += stance.confidence * weight
+    # Renormalize when fewer agents present (weights won't sum to 1.0)
+    if total_weight > 0 and total_weight != Decimal("1"):
+        weighted_sentiment /= float(total_weight)
+        weighted_confidence /= total_weight
     return weighted_sentiment, weighted_confidence, breakdown
 
 
@@ -314,12 +331,19 @@ def _consensus_supermajority(
     # Still compute weighted as base
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
+    total_weight = Decimal("0")
     for stance in stances:
         weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
+        total_weight += weight
         vote_power = float(stance.confidence * weight)
         breakdown.votes[stance.name] = vote_power
         weighted_sentiment += stance.sentiment * float(weight)
         weighted_confidence += stance.confidence * weight
+
+    # Renormalize for partial agent sets
+    if total_weight > 0 and total_weight != Decimal("1"):
+        weighted_sentiment /= float(total_weight)
+        weighted_confidence /= total_weight
 
     # If supermajority not met, dampen sentiment toward neutral
     if not breakdown.supermajority_met:
@@ -342,21 +366,22 @@ def _consensus_conviction(
 
     weighted_sentiment = 0.0
     weighted_confidence = Decimal("0")
+    total_weight = Decimal("0")
     for stance in stances:
         weight = (weights or AGENT_WEIGHTS).get(stance.name, Decimal("0.25"))
         # Give 2x weight to highest-confidence on ties
         if is_tie and stance.name == most_confident.name:
             weight *= 2
+        total_weight += weight
         vote_power = float(stance.confidence * weight)
         breakdown.votes[stance.name] = vote_power
         weighted_sentiment += stance.sentiment * float(weight)
         weighted_confidence += stance.confidence * weight
 
-    # Renormalize confidence if we inflated weights
-    if is_tie:
-        total_weight = sum(Decimal(str(v)) for v in breakdown.votes.values())
-        if total_weight > 0:
-            weighted_confidence = weighted_confidence / total_weight
+    # Renormalize both sentiment and confidence for inflated/partial weights
+    if total_weight > 0 and total_weight != Decimal("1"):
+        weighted_sentiment /= float(total_weight)
+        weighted_confidence /= total_weight
 
     return weighted_sentiment, weighted_confidence, breakdown
 

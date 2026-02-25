@@ -134,6 +134,12 @@ class AnalysisOrchestrator:
             except (ValueError, KeyError) as exc:
                 logger.warning("Skipping %s: %s", agent_cls.__name__, exc)
 
+        if len(self._agents) < 2:
+            raise RuntimeError(
+                f"Insufficient agents: {len(self._agents)} available, minimum 2 required. "
+                "Check provider API keys."
+            )
+
         # L3.5 debate
         self._debate = DebateOrchestrator(gateway) if enable_debate else None
 
@@ -304,7 +310,7 @@ class AnalysisOrchestrator:
             try:
                 self._enricher.enrich(request)
             except Exception:
-                logger.debug("Data enrichment failed for %s, continuing without", ticker)
+                logger.warning("Data enrichment failed for %s, continuing without", ticker)
 
         # Run all configured agents concurrently
         agent_tasks = [self._run_agent(agent, request) for agent in self._agents]
@@ -313,12 +319,12 @@ class AnalysisOrchestrator:
         # Collect initial responses
         initial_responses: list[AnalysisResponse] = []
         initial_agents: list = []
-        for i, resp in enumerate(responses):
+        for agent, resp in zip(self._agents, responses):
             if isinstance(resp, AnalysisResponse):
                 initial_responses.append(resp)
-                initial_agents.append(self._agents[i])
+                initial_agents.append(agent)
             elif isinstance(resp, Exception):
-                logger.error("Agent failed for %s: %s", ticker, resp)
+                logger.error("Agent %s failed for %s: %s", agent.name, ticker, resp)
 
         # --- L3.5: Debate Round ---
         if self._debate and len(initial_responses) >= 2:
@@ -435,29 +441,33 @@ class AnalysisOrchestrator:
                 portfolio_value = sum(
                     p.current_price * p.shares for p in positions
                 ) or Decimal("100000")
-                price = fundamentals.price if fundamentals.price > 0 else Decimal("100")
+                price = fundamentals.price
+                if price <= 0:
+                    logger.warning("No valid price for %s, skipping sizing", ticker)
+                    price = None
 
-                # Fetch live pendulum reading for sizing multiplier
-                pendulum_mult = Decimal("1.0")
-                try:
-                    from investmentology.data.pendulum_feeds import auto_pendulum_reading
-                    reading = auto_pendulum_reading()
-                    if reading is not None:
-                        pendulum_mult = reading.sizing_multiplier
-                        logger.info(
-                            "Pendulum reading: score=%d label=%s multiplier=%s",
-                            reading.score, reading.label, reading.sizing_multiplier,
-                        )
-                except Exception:
-                    logger.debug("Pendulum feed unavailable, using neutral multiplier")
+                if price is not None:
+                    # Fetch live pendulum reading for sizing multiplier
+                    pendulum_mult = Decimal("1.0")
+                    try:
+                        from investmentology.data.pendulum_feeds import auto_pendulum_reading
+                        reading = auto_pendulum_reading()
+                        if reading is not None:
+                            pendulum_mult = reading.sizing_multiplier
+                            logger.info(
+                                "Pendulum reading: score=%d label=%s multiplier=%s",
+                                reading.score, reading.label, reading.sizing_multiplier,
+                            )
+                    except Exception:
+                        logger.debug("Pendulum feed unavailable, using neutral multiplier")
 
-                analysis.sizing = self._sizer.calculate_size(
-                    portfolio_value=portfolio_value,
-                    price=price,
-                    current_position_count=len(positions),
-                    pendulum_multiplier=pendulum_mult,
-                    ticker=ticker,
-                )
+                    analysis.sizing = self._sizer.calculate_size(
+                        portfolio_value=portfolio_value,
+                        price=price,
+                        current_position_count=len(positions),
+                        pendulum_multiplier=pendulum_mult,
+                        ticker=ticker,
+                    )
             except Exception:
                 logger.exception("L5 sizing failed for %s", ticker)
 
@@ -587,7 +597,7 @@ class AnalysisOrchestrator:
                     ),
                 }
         except Exception:
-            logger.debug("Could not fetch QG data for %s", ticker)
+            logger.warning("Could not fetch QG data for %s", ticker)
         return {}
 
     def _save_verdict(self, ticker: str, verdict: VerdictResult) -> bool:
@@ -670,4 +680,4 @@ class AnalysisOrchestrator:
         try:
             self._registry.update_watchlist_state(ticker, new_state)
         except ValueError:
-            logger.debug("Could not transition %s to %s", ticker, new_state)
+            logger.warning("Could not transition %s to %s", ticker, new_state)

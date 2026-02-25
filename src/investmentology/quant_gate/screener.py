@@ -46,13 +46,23 @@ def _dict_to_snapshot(d: dict) -> FundamentalsSnapshot | None:
     Returns None if critical fields are missing.
     """
     try:
+        # Critical fields — reject snapshot if missing (prevents phantom scores)
+        market_cap = d.get("market_cap")
+        total_assets = d.get("total_assets")
+        if not market_cap or not total_assets:
+            logger.debug(
+                "Rejecting %s: missing critical field (market_cap=%s, total_assets=%s)",
+                d.get("ticker"), market_cap, total_assets,
+            )
+            return None
+
         # EDGAR provides net_ppe directly; yfinance uses net_tangible_assets as proxy
         net_ppe = d.get("net_ppe") or d.get("net_tangible_assets") or Decimal(0)
         return FundamentalsSnapshot(
             ticker=d["ticker"],
             fetched_at=datetime.fromisoformat(d["fetched_at"]) if isinstance(d["fetched_at"], str) else d["fetched_at"],
             operating_income=d.get("operating_income") or Decimal(0),
-            market_cap=d.get("market_cap") or Decimal(0),
+            market_cap=Decimal(str(market_cap)),
             total_debt=d.get("total_debt") or Decimal(0),
             cash=d.get("cash") or Decimal(0),
             current_assets=d.get("current_assets") or Decimal(0),
@@ -60,7 +70,7 @@ def _dict_to_snapshot(d: dict) -> FundamentalsSnapshot | None:
             net_ppe=net_ppe,
             revenue=d.get("revenue") or Decimal(0),
             net_income=d.get("net_income") or Decimal(0),
-            total_assets=d.get("total_assets") or Decimal(0),
+            total_assets=Decimal(str(total_assets)),
             total_liabilities=d.get("total_liabilities") or Decimal(0),
             shares_outstanding=int(d["shares_outstanding"]) if d.get("shares_outstanding") else 0,
             price=d.get("price") or Decimal(0),

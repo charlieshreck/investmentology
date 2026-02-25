@@ -56,9 +56,8 @@ class KellyCalculator:
         if b == 0:
             return 0.0
 
-        # Kelly formula: f* = (p*b - q*a) / (b*a)
-        # Simplified for win/loss: f* = p/a - q/b
-        kelly = (p * b - q * a) / (b * a) if (b * a) > 0 else 0.0
+        # Kelly formula: f* = (p*b - q*a) / b  (expected edge / win size)
+        kelly = (p * b - q * a) / b if b > 0 else 0.0
         return max(0.0, kelly)
 
     def half_kelly(self) -> float:

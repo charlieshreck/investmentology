@@ -27,6 +27,7 @@ class AltmanResult:
     ticker: str
     z_score: Decimal
     zone: str  # "safe" (>2.99), "grey" (1.81-2.99), "distress" (<1.81)
+    is_approximate: bool = False
 
 
 def _classify_zone(z_score: Decimal) -> str:
@@ -65,7 +66,9 @@ def calculate_altman(snapshot: FundamentalsSnapshot) -> AltmanResult | None:
     working_capital = snapshot.current_assets - snapshot.current_liabilities
     a = working_capital / ta
 
-    # B: Retained Earnings / Total Assets (approximation)
+    # B: Retained Earnings / Total Assets
+    # NOTE: Uses net_income as proxy — retained_earnings not available from yfinance/EDGAR bulk.
+    # This understates B for mature companies with large accumulated RE.
     b = snapshot.net_income / ta
 
     # C: EBIT / Total Assets
@@ -83,4 +86,5 @@ def calculate_altman(snapshot: FundamentalsSnapshot) -> AltmanResult | None:
         ticker=snapshot.ticker,
         z_score=z_score,
         zone=_classify_zone(z_score),
+        is_approximate=True,  # net_income proxy for retained_earnings
     )
