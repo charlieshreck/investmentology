@@ -263,12 +263,18 @@ class AuditorAgent(BaseAgent):
                 strength = "moderate"
             signals.append(Signal(tag=tag, strength=strength, detail=s.get("detail", "")))
 
-        confidence = Decimal(str(data.get("confidence", 0.5)))
-        confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+        try:
+            confidence = Decimal(str(data.get("confidence", 0.5)))
+            confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+        except Exception:
+            confidence = Decimal("0.5")
 
         target_price = data.get("target_price")
         if target_price is not None:
-            target_price = Decimal(str(target_price))
+            try:
+                target_price = Decimal(str(target_price))
+            except Exception:
+                target_price = None
 
         return AgentSignalSet(
             agent_name=self.name,
