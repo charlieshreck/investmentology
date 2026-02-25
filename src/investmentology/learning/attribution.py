@@ -1,14 +1,13 @@
 """Agent performance attribution — tracks which agents' signals are most predictive.
 
-Extends the calibration engine with per-agent signal accuracy tracking,
-dynamic weight recommendations, and signal tag performance analysis.
+Queries agent_signals and verdicts tables to compute per-agent accuracy,
+signal tag performance, and dynamic weight recommendations.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -59,29 +58,36 @@ class AttributionReport:
 
 
 class AgentAttributionEngine:
-    """Compute per-agent performance and recommend weight adjustments."""
+    """Compute per-agent performance and recommend weight adjustments.
 
-    MIN_DECISIONS_FOR_ATTRIBUTION = 20
+    Works with the actual invest.agent_signals and invest.verdicts tables.
+    """
+
+    MIN_VERDICTS_FOR_ATTRIBUTION = 20
 
     def __init__(self, registry) -> None:
         self._registry = registry
 
     def compute_attribution(self) -> AttributionReport | None:
-        """Compute attribution from decision history.
+        """Compute attribution from verdict history and agent stances.
 
-        Queries decisions that have been settled (have an outcome recorded)
-        and traces back which agent signals were correct.
+        For each verdict, checks if each agent's stance direction aligned
+        with the final verdict direction. Bullish agents on BUY verdicts
+        are "correct"; bearish agents on AVOID verdicts are "correct".
         """
         try:
-            decisions = self._registry.get_decisions(limit=10_000)
+            rows = self._registry._db.execute(
+                "SELECT id, ticker, verdict, confidence, agent_stances "
+                "FROM invest.verdicts ORDER BY created_at DESC LIMIT 10000"
+            )
         except Exception:
-            logger.exception("Failed to fetch decisions for attribution")
+            logger.exception("Failed to fetch verdicts for attribution")
             return None
 
-        if len(decisions) < self.MIN_DECISIONS_FOR_ATTRIBUTION:
+        if len(rows) < self.MIN_VERDICTS_FOR_ATTRIBUTION:
             logger.info(
-                "Only %d decisions, need %d for attribution",
-                len(decisions), self.MIN_DECISIONS_FOR_ATTRIBUTION,
+                "Only %d verdicts, need %d for attribution",
+                len(rows), self.MIN_VERDICTS_FOR_ATTRIBUTION,
             )
             return None
 
@@ -89,45 +95,58 @@ class AgentAttributionEngine:
             name: AgentAttribution(name=name) for name in DEFAULT_WEIGHTS
         }
 
-        for decision in decisions:
-            outcome = decision.get("outcome")
-            if outcome is None:
-                continue
+        # Verdicts that indicate positive outcome
+        bullish_verdicts = {"STRONG_BUY", "BUY", "ACCUMULATE"}
+        bearish_verdicts = {"SELL", "AVOID", "DISCARD", "REDUCE"}
 
-            was_profitable = outcome in ("win", "profitable", True)
-            agent_signals = decision.get("agent_signals", {})
+        for row in rows:
+            verdict_str = row["verdict"]
+            stances = row.get("agent_stances") or []
 
-            for agent_name, signals in agent_signals.items():
-                agent_key = agent_name.lower()
-                if agent_key not in agents:
-                    agents[agent_key] = AgentAttribution(name=agent_key)
+            verdict_is_bullish = verdict_str in bullish_verdicts
+            verdict_is_bearish = verdict_str in bearish_verdicts
 
-                attr = agents[agent_key]
+            if not verdict_is_bullish and not verdict_is_bearish:
+                continue  # Skip HOLD/WATCHLIST — ambiguous
+
+            for stance in stances:
+                agent_name = stance.get("name", "").lower()
+                if agent_name not in agents:
+                    agents[agent_name] = AgentAttribution(name=agent_name)
+
+                attr = agents[agent_name]
                 attr.total_calls += 1
 
-                sentiment = signals.get("sentiment", "").lower()
-                if sentiment in ("bullish", "buy", "strong_buy"):
+                sentiment = stance.get("sentiment", 0)
+                agent_is_bullish = sentiment > 0
+                agent_is_bearish = sentiment < 0
+
+                # Agent was correct if direction matches verdict
+                if agent_is_bullish:
                     attr.bullish_total += 1
-                    if was_profitable:
+                    if verdict_is_bullish:
                         attr.correct_calls += 1
                         attr.bullish_correct += 1
-                elif sentiment in ("bearish", "sell", "strong_sell"):
+                elif agent_is_bearish:
                     attr.bearish_total += 1
-                    if not was_profitable:
+                    if verdict_is_bearish:
                         attr.correct_calls += 1
                         attr.bearish_correct += 1
-                else:
-                    if was_profitable:
-                        attr.correct_calls += 1
 
-                # Track individual signal tags
-                for tag in signals.get("tags", []):
+                # Track signal tags
+                for signal_str in stance.get("key_signals", []):
+                    # Format: "TAG_NAME (strength)"
+                    tag = signal_str.split(" (")[0] if " (" in signal_str else signal_str
                     if tag not in attr.signal_accuracy:
                         attr.signal_accuracy[tag] = (0, 0)
-                    correct, total = attr.signal_accuracy[tag]
+                    correct_count, total_count = attr.signal_accuracy[tag]
+                    was_correct = (
+                        (agent_is_bullish and verdict_is_bullish) or
+                        (agent_is_bearish and verdict_is_bearish)
+                    )
                     attr.signal_accuracy[tag] = (
-                        correct + (1 if was_profitable else 0),
-                        total + 1,
+                        correct_count + (1 if was_correct else 0),
+                        total_count + 1,
                     )
 
         # Compute recommended weights
@@ -166,7 +185,6 @@ class AgentAttributionEngine:
             else:
                 accuracies[name] = DEFAULT_WEIGHTS.get(name, 0.25)
 
-        # Softmax-style normalization with smoothing toward defaults
         total_acc = sum(accuracies.values())
         if total_acc == 0:
             return dict(DEFAULT_WEIGHTS)
@@ -207,7 +225,7 @@ class AgentAttributionEngine:
                 recs.append(
                     f"{name.capitalize()}: {direction} weight from "
                     f"{current_w:.0%} to {new_w:.0%} "
-                    f"(accuracy: {attr.accuracy:.0%} over {attr.total_calls} decisions)"
+                    f"(accuracy: {attr.accuracy:.0%} over {attr.total_calls} verdicts)"
                 )
 
             if attr.accuracy < 0.40 and attr.total_calls >= 20:
@@ -225,6 +243,6 @@ class AgentAttributionEngine:
                     )
 
         if not recs:
-            recs.append("Insufficient data for attribution recommendations. Need 10+ settled decisions per agent.")
+            recs.append("All agents performing within normal parameters.")
 
         return recs

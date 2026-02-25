@@ -26,6 +26,8 @@ from investmentology.agents.simons import SimonsAgent
 from investmentology.agents.soros import SorosAgent
 from investmentology.agents.warren import WarrenAgent
 from investmentology.data.enricher import DataEnricher
+from investmentology.data.yfinance_client import YFinanceClient
+from investmentology.quant_gate.screener import _dict_to_snapshot
 from investmentology.compatibility.matrix import CompatibilityEngine, CompatibilityResult
 from investmentology.competence.circle import CompetenceFilter, CompetenceResult
 from investmentology.competence.moat import MoatAnalyzer, MoatAssessment
@@ -94,6 +96,7 @@ class AnalysisOrchestrator:
         self._decision_logger = decision_logger
         self._sizer = position_sizer
         self._enricher = enricher
+        self._yfinance = YFinanceClient(cache_ttl_hours=4)
         self._debate_enabled = enable_debate
 
         # L2 components
@@ -165,11 +168,17 @@ class AnalysisOrchestrator:
         """Run full pipeline for a single ticker."""
         analysis = CandidateAnalysis(ticker=ticker)
 
-        # Fetch fundamentals
+        # Fetch fundamentals — try DB cache first, then on-demand yfinance
         fundamentals = self._registry.get_latest_fundamentals(ticker)
         if fundamentals is None:
-            logger.warning("No fundamentals for %s, skipping", ticker)
-            return analysis
+            logger.info("No cached fundamentals for %s, trying on-demand yfinance fetch", ticker)
+            yf_data = self._yfinance.get_fundamentals(ticker)
+            if yf_data:
+                fundamentals = _dict_to_snapshot(yf_data)
+            if fundamentals is None:
+                logger.warning("No fundamentals for %s (yfinance fallback also failed), skipping", ticker)
+                return analysis
+            logger.info("Got on-demand fundamentals for %s via yfinance", ticker)
 
         # Get stock info for sector/industry
         stocks = self._registry.get_active_stocks()
@@ -275,13 +284,8 @@ class AnalysisOrchestrator:
             except Exception:
                 logger.debug("Data enrichment failed for %s, continuing without", ticker)
 
-        # Run all 4 agents concurrently
-        agent_tasks = [
-            self._run_agent(self._warren, request),
-            self._run_agent(self._soros, request),
-            self._run_agent(self._simons, request),
-            self._run_agent(self._auditor, request),
-        ]
+        # Run all configured agents concurrently
+        agent_tasks = [self._run_agent(agent, request) for agent in self._agents]
         responses = await asyncio.gather(*agent_tasks, return_exceptions=True)
 
         # Collect initial responses
@@ -408,10 +412,26 @@ class AnalysisOrchestrator:
                     p.current_price * p.shares for p in positions
                 ) or Decimal("100000")
                 price = fundamentals.price if fundamentals.price > 0 else Decimal("100")
+
+                # Fetch live pendulum reading for sizing multiplier
+                pendulum_mult = Decimal("1.0")
+                try:
+                    from investmentology.data.pendulum_feeds import auto_pendulum_reading
+                    reading = auto_pendulum_reading()
+                    if reading is not None:
+                        pendulum_mult = reading.sizing_multiplier
+                        logger.info(
+                            "Pendulum reading: score=%d label=%s multiplier=%s",
+                            reading.score, reading.label, reading.sizing_multiplier,
+                        )
+                except Exception:
+                    logger.debug("Pendulum feed unavailable, using neutral multiplier")
+
                 analysis.sizing = self._sizer.calculate_size(
                     portfolio_value=portfolio_value,
                     price=price,
                     current_position_count=len(positions),
+                    pendulum_multiplier=pendulum_mult,
                     ticker=ticker,
                 )
             except Exception:

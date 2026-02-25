@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -26,6 +28,21 @@ from investmentology.registry.queries import Registry
 from investmentology.timing.sizing import KellyCalculator, PositionSizer, KELLY_MIN_DECISIONS
 
 logger = logging.getLogger(__name__)
+
+
+
+async def _daily_settlement_loop(registry):
+    """Background task: settle due predictions once per day at startup and then every 24h."""
+    from investmentology.learning.predictions import PredictionManager
+    while True:
+        try:
+            pm = PredictionManager(registry)
+            settled = pm.settle_due_predictions()
+            if settled:
+                logger.info("Daily settlement: settled %d predictions", len(settled))
+        except Exception:
+            logger.debug("Daily settlement task failed")
+        await asyncio.sleep(86400)  # 24 hours
 
 
 @asynccontextmanager
