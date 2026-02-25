@@ -101,11 +101,13 @@ class QuantGateScreener:
         yf_client: YFinanceClient,
         config: AppConfig,
         edgar_client: EdgarClient | None = None,
+        progress_callback: callable | None = None,
     ) -> None:
         self._registry = registry
         self._yf = yf_client
         self._edgar = edgar_client
         self._config = config
+        self._progress = progress_callback or (lambda stage, detail, pct: None)
 
     def run(self) -> ScreenerResult:
         """Full screening pipeline:
@@ -124,11 +126,13 @@ class QuantGateScreener:
         top_n = self._config.quant_gate_top_n
 
         # 1. Load universe
+        self._progress("universe", "Loading stock universe...", 5)
         logger.info("Loading stock universe...")
         universe = load_full_universe(
             min_market_cap=self._config.universe_min_market_cap,
         )
         universe_size = len(universe)
+        self._progress("universe", f"Loaded {universe_size} tickers", 10)
         logger.info("Universe loaded: %d tickers", universe_size)
 
         if not universe:
@@ -136,6 +140,7 @@ class QuantGateScreener:
             return self._empty_result(universe_size=0)
 
         # 2. Upsert stocks to DB
+        self._progress("db", f"Upserting {universe_size} stocks to DB...", 12)
         stocks = [_dict_to_stock(u) for u in universe]
         self._registry.upsert_stocks(stocks)
         logger.info("Upserted %d stocks", len(stocks))
@@ -146,14 +151,17 @@ class QuantGateScreener:
 
         # 3. Fetch fundamentals
         tickers = [u["ticker"] for u in universe]
+        self._progress("fundamentals", f"Fetching fundamentals for {len(tickers)} tickers...", 15)
         logger.info("Fetching fundamentals for %d tickers...", len(tickers))
 
         if self._edgar is not None:
             # EDGAR path: bulk frames (fast, ~7s for all companies)
+            self._progress("fundamentals", "Fetching EDGAR filings (SEC bulk data)...", 18)
             raw_fundamentals = self._edgar.get_fundamentals_batch(tickers)
             # Enrich with sector/industry from universe
             self._edgar.enrich_with_sectors(raw_fundamentals, sectors, industries)
             # Fetch prices via yfinance in chunks to avoid rate limiting
+            self._progress("prices", f"Fetching prices for {len(tickers)} tickers...", 25)
             logger.info("Fetching prices for %d tickers via yfinance...", len(tickers))
             all_prices: dict[str, Decimal] = {}
             chunk_size = 100
@@ -164,6 +172,9 @@ class QuantGateScreener:
                 chunk_prices = self._yf.get_prices_batch(chunk)
                 all_prices.update(chunk_prices)
                 chunk_num = i // chunk_size + 1
+                # Progress: prices go from 25% to 60%
+                price_pct = 25 + int((chunk_num / total_chunks) * 35)
+                self._progress("prices", f"Price chunk {chunk_num}/{total_chunks} ({len(all_prices)} fetched)", price_pct)
                 logger.info(
                     "Price chunk %d/%d: got %d prices (%d total)",
                     chunk_num, total_chunks, len(chunk_prices), len(all_prices),
@@ -173,6 +184,7 @@ class QuantGateScreener:
                 time.sleep(1)  # 1s pause between chunks to avoid rate limiting
             # Retry any failed chunks once after a longer pause
             if failed_chunks:
+                self._progress("prices", f"Retrying {len(failed_chunks)} failed chunks...", 62)
                 logger.info("Retrying %d failed price chunks after 10s pause...", len(failed_chunks))
                 time.sleep(10)
                 for chunk in failed_chunks:
@@ -184,8 +196,10 @@ class QuantGateScreener:
             self._edgar.enrich_with_prices(raw_fundamentals, all_prices)
         else:
             # Legacy yfinance path (slow, rate-limited)
+            self._progress("fundamentals", "Fetching via yfinance (slow path)...", 20)
             raw_fundamentals = self._yf.get_fundamentals_batch(tickers)
 
+        self._progress("processing", f"Got {len(raw_fundamentals)} fundamentals, processing...", 65)
         logger.info("Got fundamentals for %d tickers", len(raw_fundamentals))
 
         # Convert to snapshots
@@ -200,11 +214,13 @@ class QuantGateScreener:
             snapshots.append(snap)
 
         # 4. Insert fundamentals to DB
+        self._progress("db", f"Saving {len(snapshots)} fundamentals to DB...", 68)
         if snapshots:
             self._registry.insert_fundamentals(snapshots)
             logger.info("Inserted %d fundamentals snapshots", len(snapshots))
 
         # 5. Apply Greenblatt ranking
+        self._progress("ranking", "Applying Greenblatt Magic Formula ranking...", 72)
         ranked = rank_by_greenblatt(snapshots, sectors=sectors)
         logger.info("Greenblatt ranking: %d eligible stocks", len(ranked))
 
@@ -218,6 +234,7 @@ class QuantGateScreener:
         snap_by_ticker: dict[str, FundamentalsSnapshot] = {s.ticker: s for s in snapshots}
 
         # Build prior-year snapshot lookup for Piotroski YoY comparisons
+        self._progress("prior", f"Fetching prior-year data for top {len(top_ranked)} stocks...", 75)
         prior_by_ticker: dict[str, FundamentalsSnapshot] = {}
         has_prior = False
         if self._edgar is not None:
@@ -233,6 +250,7 @@ class QuantGateScreener:
         total_ranked = len(ranked)
 
         # 6. Calculate Piotroski + Altman + Composite for top N
+        self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (Piotroski + Altman + Composite)...", 80)
         top_results: list[dict] = []
         for gr in top_ranked:
             snap = snap_by_ticker.get(gr.ticker)
@@ -279,6 +297,7 @@ class QuantGateScreener:
         )
 
         # 8. Create quant gate run in DB
+        self._progress("saving", f"Saving {len(top_results)} results to DB...", 90)
         run_id = self._registry.create_quant_gate_run(
             universe_size=universe_size,
             passed_count=len(top_results),
@@ -315,6 +334,7 @@ class QuantGateScreener:
         ))
 
         # 11. Add top N to watchlist as CANDIDATE
+        self._progress("watchlist", "Adding candidates to watchlist...", 95)
         for result in top_results:
             try:
                 self._registry.add_to_watchlist(

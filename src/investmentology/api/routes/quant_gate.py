@@ -128,8 +128,12 @@ def get_run_delta(registry: Registry = Depends(get_registry)) -> dict:
 def _run_screener_background() -> None:
     """Run the quant gate screener in a background thread."""
     global _screener_state
+
+    def _update_progress(stage: str, detail: str, pct: int) -> None:
+        _screener_state["progress"] = {"stage": stage, "detail": detail, "pct": pct}
+
     try:
-        _screener_state = {"running": True, "progress": {"stage": "loading", "detail": "Loading stock universe...", "pct": 5}}
+        _screener_state = {"running": True, "progress": {"stage": "starting", "detail": "Initializing...", "pct": 2}}
 
         from investmentology.data.edgar_client import EdgarClient
         from investmentology.data.yfinance_client import YFinanceClient
@@ -139,25 +143,28 @@ def _run_screener_background() -> None:
         registry = app_state.registry
         if not config or not registry:
             logger.error("Screener: app not initialized")
+            _update_progress("error", "App not initialized", 0)
             return
 
         yf_client = YFinanceClient()
         edgar_client = EdgarClient() if config.use_edgar else None
 
-        _screener_state["progress"] = {"stage": "fetching", "detail": "Fetching fundamentals...", "pct": 20}
-
-        screener = QuantGateScreener(registry, yf_client, config, edgar_client=edgar_client)
+        screener = QuantGateScreener(
+            registry, yf_client, config,
+            edgar_client=edgar_client,
+            progress_callback=_update_progress,
+        )
         result = screener.run()
 
-        _screener_state["progress"] = {
-            "stage": "complete",
-            "detail": f"Done: {len(result.top_results)} stocks passed from {result.data_quality.universe_size} universe",
-            "pct": 100,
-        }
+        _update_progress(
+            "complete",
+            f"Done: {len(result.top_results)} stocks passed from {result.data_quality.universe_size} universe",
+            100,
+        )
         logger.info("Screener run complete: run_id=%d, passed=%d", result.run_id, len(result.top_results))
     except Exception:
         logger.exception("Screener background run failed")
-        _screener_state["progress"] = {"stage": "error", "detail": "Screener run failed", "pct": 0}
+        _screener_state["progress"] = {"stage": "error", "detail": "Screener run failed — check logs", "pct": 0}
     finally:
         _screener_state["running"] = False
 
