@@ -14,23 +14,39 @@ logger = logging.getLogger(__name__)
 _VALID_TAGS = TECHNICAL_TAGS | ACTION_TAGS
 
 _SYSTEM_PROMPT = """\
-You are a quantitative technical analyst modeled on Jim Simons's approach.
+You are a quantitative technical analyst modeled on Jim Simons's Renaissance Technologies approach.
 
 Your task: Interpret the pre-computed technical indicators provided for the given stock. \
 Assess trend, momentum, volume patterns, support/resistance, and relative strength.
 
-IMPORTANT: Do NOT calculate any indicators yourself. All indicators are pre-computed and \
-provided in the data. Your job is to INTERPRET them and produce actionable signals.
+CRITICAL RULES:
+1. If NO pre-computed technical indicators are provided, you MUST return LOW confidence \
+(0.0-0.15) and use the NO_ACTION tag. Do NOT guess or fabricate technical analysis. \
+Without data, you cannot assess technicals.
+
+2. BEARISH signals are equally valid as bullish ones. Most stocks at any given time are NOT \
+in strong uptrends. Be rigorous:
+   - RSI > 70 = RSI_OVERBOUGHT (not bullish)
+   - MACD histogram negative = MOMENTUM_WEAK
+   - Price below SMA 200 = TREND_DOWNTREND
+   - Volume declining = VOLUME_DRY
+   - ATR expanding with price decline = BREAKDOWN_CONFIRMED
+
+3. Your confidence should reflect the STRENGTH of the technical setup, not a general \
+optimism level. A stock with mixed signals should get 0.3-0.5 confidence, not 0.7+.
+
+4. Cross-validate: If RSI says overbought but MACD says bullish crossover, that's a \
+CONFLICT — lower your confidence and note it.
 
 Return your analysis as JSON with this exact structure:
 {
     "signals": [
         {"tag": "TREND_UPTREND", "strength": "strong", "detail": "Price above SMA 50 and SMA 200"},
-        {"tag": "MOMENTUM_STRONG", "strength": "moderate", "detail": "RSI at 62, MACD positive"}
+        {"tag": "RSI_OVERBOUGHT", "strength": "moderate", "detail": "RSI at 74, approaching resistance"}
     ],
-    "confidence": 0.75,
+    "confidence": 0.55,
     "target_price": null,
-    "summary": "Brief summary of your technical assessment..."
+    "summary": "Brief summary including both bullish AND bearish factors..."
 }
 
 Rules:
@@ -44,7 +60,8 @@ VOLUME_SURGE, VOLUME_DRY, VOLUME_CLIMAX, RSI_OVERSOLD, RSI_OVERBOUGHT, GOLDEN_CR
 DEATH_CROSS, RELATIVE_STRENGTH_HIGH, RELATIVE_STRENGTH_LOW
   Action: BUY_NEW, BUY_ADD, TRIM, SELL_FULL, SELL_PARTIAL, HOLD, HOLD_STRONG, \
 WATCHLIST_ADD, WATCHLIST_REMOVE, WATCHLIST_PROMOTE, REJECT, REJECT_HARD, NO_ACTION
-- Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON."""
+- Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON.
+- You MUST include at least one bearish/cautionary signal if ANY indicator suggests weakness."""
 
 
 class SimonsAgent(BaseAgent):
@@ -75,6 +92,32 @@ class SimonsAgent(BaseAgent):
             parts.append("Pre-Computed Technical Indicators:")
             for k, v in request.technical_indicators.items():
                 parts.append(f"  {k}: {v}")
+
+            # Add explicit interpretation hints based on the data
+            ti = request.technical_indicators
+            parts.append("")
+            parts.append("Key thresholds to evaluate:")
+            if ti.get("rsi_14"):
+                rsi = float(ti["rsi_14"])
+                if rsi > 70:
+                    parts.append(f"  - RSI is {rsi:.1f} (ABOVE 70 = OVERBOUGHT territory)")
+                elif rsi < 30:
+                    parts.append(f"  - RSI is {rsi:.1f} (BELOW 30 = OVERSOLD territory)")
+            if ti.get("macd_histogram"):
+                macd_h = float(ti["macd_histogram"])
+                if macd_h < 0:
+                    parts.append(f"  - MACD histogram is NEGATIVE ({macd_h:.4f}) = bearish momentum")
+            if ti.get("price_vs_sma200") == "below":
+                parts.append("  - Price is BELOW 200-day SMA = bearish trend")
+            if ti.get("pct_from_52w_high"):
+                pct = float(ti["pct_from_52w_high"])
+                if pct < -20:
+                    parts.append(f"  - Stock is {abs(pct):.1f}% below 52-week high = significant drawdown")
+        else:
+            parts.append("")
+            parts.append("WARNING: No pre-computed technical indicators available.")
+            parts.append("Without technical data, you CANNOT perform meaningful technical analysis.")
+            parts.append("Set confidence to 0.0-0.15 and use NO_ACTION tag.")
 
         # Social sentiment as a momentum signal
         if request.social_sentiment:
@@ -148,6 +191,16 @@ class SimonsAgent(BaseAgent):
 
         confidence = Decimal(str(data.get("confidence", 0.5)))
         confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+
+        # Data gate: if no technical indicators were provided, cap confidence
+        if not request.technical_indicators:
+            confidence = min(confidence, Decimal("0.15"))
+            if not any(s.tag == SignalTag.NO_ACTION for s in signals):
+                signals.append(Signal(
+                    tag=SignalTag.NO_ACTION,
+                    strength="strong",
+                    detail="No technical indicators available — cannot assess",
+                ))
 
         target_price = data.get("target_price")
         if target_price is not None:
