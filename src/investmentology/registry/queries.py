@@ -247,10 +247,18 @@ class Registry:
         self, ticker: str, state: WatchlistState = WatchlistState.UNIVERSE,
         source_run_id: int | None = None, notes: str | None = None,
     ) -> int:
-        """Add a stock to the watchlist. Returns watchlist id."""
+        """Add a stock to the watchlist. Returns watchlist id.
+
+        Uses ON CONFLICT to update existing entries rather than creating duplicates.
+        """
         rows = self._db.execute(
             "INSERT INTO invest.watchlist (ticker, state, source_run_id, notes) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (ticker, state) DO UPDATE SET "
+            "source_run_id = EXCLUDED.source_run_id, "
+            "notes = EXCLUDED.notes, "
+            "updated_at = NOW() "
+            "RETURNING id",
             (ticker, state.value, source_run_id, notes),
         )
         return rows[0]["id"]
