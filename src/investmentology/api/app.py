@@ -26,6 +26,7 @@ from investmentology.orchestrator import AnalysisOrchestrator
 from investmentology.registry.db import Database
 from investmentology.registry.queries import Registry
 from investmentology.timing.sizing import KellyCalculator, PositionSizer, KELLY_MIN_DECISIONS
+from investmentology.advisory.triggers import reanalysis_loop
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app_state.calibration_engine = calibration_engine
     app_state.orchestrator = orchestrator
 
-    logger.info("API started — DB and gateway ready")
+    # Start background tasks
+    _bg_tasks = []
+    _bg_tasks.append(asyncio.create_task(_daily_settlement_loop(registry)))
+    _bg_tasks.append(asyncio.create_task(reanalysis_loop(registry, orchestrator)))
+    logger.info("API started — DB, gateway, and background tasks ready")
     yield
+
+    # Cancel background tasks
+    for task in _bg_tasks:
+        task.cancel()
 
     # Shutdown
     await gateway.close()

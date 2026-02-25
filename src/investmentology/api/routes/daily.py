@@ -64,3 +64,73 @@ def get_briefing_summary(registry: Registry = Depends(get_registry)) -> dict:
             for a in briefing.action_items[:5]
         ],
     }
+
+
+
+@router.get("/daily/reanalysis")
+def get_reanalysis_status(registry: Registry = Depends(get_registry)) -> dict:
+    """Check current trigger conditions and recent re-analysis events.
+
+    Returns which triggers would fire NOW and recent verdict changes.
+    """
+    from investmentology.advisory.triggers import ReanalysisTrigger
+
+    trigger = ReanalysisTrigger(registry)
+    events = trigger.check_triggers()
+
+    # Get recent verdict changes from decisions
+    recent_changes = []
+    try:
+        rows = registry._db.execute(
+            """SELECT ticker, action, reasoning, confidence, signals, created_at
+               FROM invest.decisions
+               WHERE decision_type = 'verdict_change'
+               ORDER BY created_at DESC
+               LIMIT 20""",
+        )
+        for r in rows:
+            recent_changes.append({
+                "ticker": r["ticker"],
+                "change": r.get("action"),
+                "reasoning": r.get("reasoning"),
+                "severity": r.get("signals", {}).get("severity") if isinstance(r.get("signals"), dict) else None,
+                "date": str(r["created_at"])[:19] if r.get("created_at") else None,
+            })
+    except Exception:
+        pass
+
+    # Get recent trigger events
+    recent_triggers = []
+    try:
+        rows = registry._db.execute(
+            """SELECT ticker, action, reasoning, signals, created_at
+               FROM invest.decisions
+               WHERE decision_type = 'reanalysis_trigger'
+               ORDER BY created_at DESC
+               LIMIT 10""",
+        )
+        for r in rows:
+            recent_triggers.append({
+                "trigger_type": r.get("action"),
+                "reason": r.get("reasoning"),
+                "tickers": r.get("signals", {}).get("tickers") if isinstance(r.get("signals"), dict) else [],
+                "severity": r.get("signals", {}).get("severity") if isinstance(r.get("signals"), dict) else None,
+                "date": str(r["created_at"])[:19] if r.get("created_at") else None,
+            })
+    except Exception:
+        pass
+
+    return {
+        "currentTriggers": [
+            {
+                "type": e.trigger_type,
+                "severity": e.severity,
+                "reason": e.reason,
+                "tickers": e.tickers,
+            }
+            for e in events
+        ],
+        "activeTriggerCount": len(events),
+        "recentVerdictChanges": recent_changes,
+        "recentTriggers": recent_triggers,
+    }
