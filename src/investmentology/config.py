@@ -29,6 +29,7 @@ class AppConfig:
     anthropic_api_key: str
     use_claude_cli: bool = False
     use_gemini_cli: bool = False
+    use_edgar: bool = True
     quant_gate_top_n: int = 100
     universe_min_market_cap: int = 200_000_000
     min_hold_hours: int = 48
@@ -60,6 +61,7 @@ def load_config() -> AppConfig:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         use_claude_cli=os.environ.get("USE_CLAUDE_CLI", "").lower() in ("1", "true", "yes"),
         use_gemini_cli=os.environ.get("USE_GEMINI_CLI", "").lower() in ("1", "true", "yes"),
+        use_edgar=os.environ.get("USE_EDGAR", "true").lower() in ("1", "true", "yes"),
         quant_gate_top_n=int(os.environ.get("QUANT_GATE_TOP_N", "100")),
         universe_min_market_cap=int(os.environ.get("MIN_MARKET_CAP", "200000000")),
         min_hold_hours=int(os.environ.get("MIN_HOLD_HOURS", "48")),
