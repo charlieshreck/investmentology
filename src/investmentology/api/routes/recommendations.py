@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, Depends
 
@@ -165,60 +163,49 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         pass
 
-    # Slow enrichment (external APIs) — run in parallel
+    # Enrichment from DB (populated by daily monitor cronjob — no external API calls)
     rec_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
+
+    # Batch-fetch buzz scores from DB
     buzz_results: dict = {}
-    div_data: dict = {}
+    if rec_tickers:
+        try:
+            placeholders = ",".join(["%s"] * len(rec_tickers))
+            buzz_rows = registry._db.execute(
+                f"SELECT DISTINCT ON (ticker) ticker, buzz_score, buzz_label, "
+                f"headline_sentiment, news_count_7d, news_count_30d, contrarian_flag "
+                f"FROM invest.buzz_scores WHERE ticker IN ({placeholders}) "
+                f"ORDER BY ticker, scored_at DESC",
+                tuple(rec_tickers),
+            )
+            for b in (buzz_rows or []):
+                buzz_results[b["ticker"]] = b
+        except Exception:
+            logger.debug("Could not fetch buzz scores from DB")
+
+    # Batch-fetch earnings momentum from DB
     earnings_results: dict = {}
-
-    def _fetch_buzz(tickers: list[str]) -> dict:
-        from investmentology.data.buzz_scorer import BuzzScorer
-        return BuzzScorer().score_watchlist(tickers)
-
-    def _fetch_dividends(tickers: list[str]) -> dict:
-        return get_dividend_data(tickers)
-
-    def _fetch_earnings(tickers: list[str]) -> dict:
-        from concurrent.futures import ThreadPoolExecutor as _Pool
-        from investmentology.data.earnings_tracker import EarningsTracker
-        from investmentology.data.finnhub_provider import FinnhubProvider
-        fh_key = os.environ.get("FINNHUB_API_KEY", "")
-        if not fh_key:
-            return {}
-        fh = FinnhubProvider(fh_key)
-        tracker = EarningsTracker(fh, registry)
-
-        def _one(t: str) -> tuple[str, dict | None]:
-            try:
-                tracker.capture_snapshot(t)
-                return t, tracker.compute_momentum(t)
-            except Exception:
-                return t, None
-
-        results = {}
-        with _Pool(max_workers=4) as p:
-            for ticker, momentum in p.map(lambda t: _one(t), tickers):
-                if momentum:
-                    results[ticker] = momentum
-        return results
-
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        fut_buzz = pool.submit(_fetch_buzz, rec_tickers)
-        fut_div = pool.submit(_fetch_dividends, rec_tickers)
-        fut_earn = pool.submit(_fetch_earnings, rec_tickers)
-
+    if rec_tickers:
         try:
-            buzz_results = fut_buzz.result(timeout=30)
+            placeholders = ",".join(["%s"] * len(rec_tickers))
+            em_rows = registry._db.execute(
+                f"SELECT DISTINCT ON (ticker) ticker, momentum_score, momentum_label, "
+                f"upward_revisions, downward_revisions, beat_streak "
+                f"FROM invest.earnings_momentum WHERE ticker IN ({placeholders}) "
+                f"ORDER BY ticker, computed_at DESC",
+                tuple(rec_tickers),
+            )
+            for em in (em_rows or []):
+                earnings_results[em["ticker"]] = em
         except Exception:
-            logger.debug("Buzz enrichment failed or timed out")
-        try:
-            div_data = fut_div.result(timeout=20)
-        except Exception:
-            logger.debug("Dividend enrichment failed or timed out")
-        try:
-            earnings_results = fut_earn.result(timeout=20)
-        except Exception:
-            logger.debug("Earnings enrichment failed or timed out")
+            logger.debug("Could not fetch earnings momentum from DB")
+
+    # Dividends: yfinance with in-memory cache (fast after first load)
+    div_data: dict = {}
+    try:
+        div_data = get_dividend_data(rec_tickers)
+    except Exception:
+        logger.debug("Dividend enrichment failed")
 
     # Apply enrichment results
     for row in positive_rows:
