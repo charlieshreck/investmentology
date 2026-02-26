@@ -516,6 +516,12 @@ class AnalysisOrchestrator:
         # Update watchlist state
         self._update_watchlist(ticker, analysis)
 
+        # Update held positions with fair value + stop loss from analysis
+        self._update_held_position(ticker, analysis)
+
+        # Log predictions for the learning feedback loop
+        self._log_predictions(ticker, analysis)
+
         return analysis
 
 
@@ -681,3 +687,53 @@ class AnalysisOrchestrator:
             self._registry.update_watchlist_state(ticker, new_state)
         except ValueError:
             logger.warning("Could not transition %s to %s", ticker, new_state)
+
+    def _update_held_position(self, ticker: str, analysis: CandidateAnalysis) -> None:
+        """Update fair_value_estimate and stop_loss on held positions after analysis."""
+        if not analysis.agent_responses:
+            return
+
+        # Check if we hold this ticker
+        positions = self._registry.get_open_positions()
+        held = next((p for p in positions if p.ticker == ticker), None)
+        if held is None:
+            return
+
+        # Compute consensus target price from agents that provided one
+        target_prices = [
+            r.target_price for r in analysis.agent_responses
+            if r.target_price and r.target_price > 0
+        ]
+        fair_value: Decimal | None = None
+        if target_prices:
+            fair_value = sum(target_prices, Decimal(0)) / len(target_prices)
+            fair_value = fair_value.quantize(Decimal("0.01"))
+
+        # Compute stop loss based on position type
+        stop_loss: Decimal | None = None
+        if held.entry_price and held.entry_price > 0:
+            if held.position_type == "core":
+                # Core: 20% trailing stop from current high
+                ref_price = max(held.entry_price, held.current_price or held.entry_price)
+                stop_loss = (ref_price * Decimal("0.80")).quantize(Decimal("0.01"))
+            else:
+                # Tactical: 15% hard stop from entry
+                stop_loss = (held.entry_price * Decimal("0.85")).quantize(Decimal("0.01"))
+
+        # Build thesis summary from verdict
+        thesis: str | None = None
+        if analysis.verdict:
+            thesis = f"[{analysis.verdict.verdict.value}] {analysis.verdict.reasoning[:500]}"
+
+        if fair_value or stop_loss or thesis:
+            updated = self._registry.update_position_analysis(
+                ticker=ticker,
+                fair_value_estimate=fair_value,
+                stop_loss=stop_loss,
+                thesis=thesis,
+            )
+            if updated:
+                logger.info(
+                    "Updated position %s: fair_value=%s stop_loss=%s",
+                    ticker, fair_value, stop_loss,
+                )

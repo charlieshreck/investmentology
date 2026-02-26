@@ -369,6 +369,36 @@ class Registry:
             (actual_exit_date, exit_price, exit_price, position_id),
         )
 
+    def update_position_analysis(
+        self, ticker: str, fair_value_estimate: Decimal | None = None,
+        stop_loss: Decimal | None = None, thesis: str | None = None,
+    ) -> bool:
+        """Update fair_value_estimate, stop_loss, and/or thesis on an open position.
+
+        Returns True if a row was updated.
+        """
+        updates: list[str] = []
+        params: list = []
+        if fair_value_estimate is not None:
+            updates.append("fair_value_estimate = %s")
+            params.append(fair_value_estimate)
+        if stop_loss is not None:
+            updates.append("stop_loss = %s")
+            params.append(stop_loss)
+        if thesis is not None:
+            updates.append("thesis = %s")
+            params.append(thesis)
+        if not updates:
+            return False
+        updates.append("updated_at = NOW()")
+        params.append(ticker)
+        rows = self._db.execute(
+            f"UPDATE invest.portfolio_positions SET {', '.join(updates)} "
+            "WHERE ticker = %s AND is_closed = false RETURNING id",
+            tuple(params),
+        )
+        return bool(rows)
+
     def get_closed_positions(self) -> list[PortfolioPosition]:
         """Get all closed positions for P&L history."""
         rows = self._db.execute(
