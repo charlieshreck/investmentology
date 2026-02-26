@@ -346,7 +346,7 @@ def cmd_cron(args: argparse.Namespace) -> None:
 
             # Watchlist
             wl_rows = registry._db.execute(
-                "SELECT ticker FROM invest.watchlist WHERE state NOT IN ('REJECTED', 'REMOVED')"
+                "SELECT ticker FROM invest.watchlist WHERE state != 'REJECTED'"
             )
             all_tickers |= {r["ticker"] for r in wl_rows}
 
