@@ -24,7 +24,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: screen
-              image: ghcr.io/charlieshreck/investmentology:latest
+              image: ghcr.io/charlieshreck/investmentology-api:latest
               command: ["python3", "-m", "investmentology", "cron", "weekly-screen"]
               envFrom:
                 - secretRef:

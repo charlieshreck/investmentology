@@ -24,7 +24,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: price-refresh
-              image: ghcr.io/charlieshreck/investmentology:latest
+              image: ghcr.io/charlieshreck/investmentology-api:latest
               command: ["python3", "-m", "investmentology", "cron", "price-refresh"]
               envFrom:
                 - secretRef:

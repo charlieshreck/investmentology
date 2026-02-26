@@ -24,7 +24,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: portfolio-sync
-              image: ghcr.io/charlieshreck/investmentology:latest
+              image: ghcr.io/charlieshreck/investmentology-api:latest
               command: ["python3", "-m", "investmentology", "cron", "daily-monitor", "--premarket"]
               envFrom:
                 - secretRef:

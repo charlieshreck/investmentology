@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: investmentology
-          image: ghcr.io/charlieshreck/investmentology:latest
+          image: ghcr.io/charlieshreck/investmentology-api:latest
           ports:
             - containerPort: 80
               protocol: TCP

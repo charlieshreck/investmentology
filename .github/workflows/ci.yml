@@ -37,5 +37,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/charlieshreck/investmentology:latest
-            ghcr.io/charlieshreck/investmentology:${{ github.sha }}
+            ghcr.io/charlieshreck/investmentology-api:latest
+            ghcr.io/charlieshreck/investmentology-api:${{ github.sha }}
