@@ -546,33 +546,35 @@ class AnalysisOrchestrator:
         else:
             return  # Skip HOLD/WATCHLIST — ambiguous for predictions
 
-        try:
-            self._prediction_mgr.log_prediction(
-                ticker=ticker,
-                prediction_type=pred_type,
-                predicted_value=direction,
-                confidence=confidence,
-                horizon_days=90,
-                source=f"orchestrator:{verdict_val}",
-            )
-            logger.info("Logged prediction for %s: %s conf=%s", ticker, pred_type, confidence)
-        except Exception:
-            logger.debug("Failed to log prediction for %s", ticker)
+        for horizon in (30, 90):
+            try:
+                self._prediction_mgr.log_prediction(
+                    ticker=ticker,
+                    prediction_type=pred_type,
+                    predicted_value=direction,
+                    confidence=confidence,
+                    horizon_days=horizon,
+                    source=f"orchestrator:{verdict_val}",
+                )
+                logger.info("Logged %d-day prediction for %s: %s conf=%s", horizon, ticker, pred_type, confidence)
+            except Exception:
+                logger.debug("Failed to log %d-day prediction for %s", horizon, ticker)
 
         # Log target price prediction if any agent provided one
         for resp in analysis.agent_responses:
             if resp.target_price and resp.target_price > 0:
-                try:
-                    self._prediction_mgr.log_prediction(
-                        ticker=ticker,
-                        prediction_type=f"target_price_{resp.agent_name}",
-                        predicted_value=resp.target_price,
-                        confidence=resp.signal_set.confidence,
-                        horizon_days=90,
-                        source=f"{resp.agent_name}:{resp.model}",
-                    )
-                except Exception:
-                    logger.debug("Failed to log target price prediction for %s/%s", ticker, resp.agent_name)
+                for horizon in (30, 90):
+                    try:
+                        self._prediction_mgr.log_prediction(
+                            ticker=ticker,
+                            prediction_type=f"target_price_{resp.agent_name}",
+                            predicted_value=resp.target_price,
+                            confidence=resp.signal_set.confidence,
+                            horizon_days=horizon,
+                            source=f"{resp.agent_name}:{resp.model}",
+                        )
+                    except Exception:
+                        logger.debug("Failed to log %d-day target price prediction for %s/%s", horizon, ticker, resp.agent_name)
 
     async def _run_agent(
         self, agent: WarrenAgent | SorosAgent | SimonsAgent | AuditorAgent,

@@ -268,12 +268,68 @@ def create_position(
     registry: Registry = Depends(get_registry),
 ) -> dict:
     """Create a new paper portfolio position, or add to existing position for same ticker."""
+    # Portfolio construction enforcement: require stop_loss
+    if body.stop_loss is None:
+        raise HTTPException(
+            status_code=422,
+            detail="stop_loss is required for every position. "
+            "Set a trailing stop (core: 15-20%, permanent: 25% catastrophic).",
+        )
+
     ticker = body.ticker.upper()
     new_shares = Decimal(str(body.shares))
     new_price = Decimal(str(body.entry_price))
 
     # Check for existing open position — consolidate if found
     existing = registry.get_open_positions()
+
+    # Portfolio construction limits check
+    purchase_value = float(new_price * new_shares)
+    total_portfolio_value = sum(float(p.current_price * p.shares) for p in existing) + purchase_value
+
+    if total_portfolio_value > 0:
+        # Check max single position (20%)
+        existing_pos = next((p for p in existing if p.ticker == ticker), None)
+        position_value = purchase_value
+        if existing_pos:
+            position_value += float(existing_pos.current_price * existing_pos.shares)
+        position_pct = position_value / total_portfolio_value * 100
+        if position_pct > 20:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Position would be {position_pct:.1f}% of portfolio. "
+                f"Max single position is 20%.",
+            )
+
+        # Check max single sector (25%)
+        try:
+            rows = registry._db.execute(
+                "SELECT sector FROM invest.stocks WHERE ticker = %s", (ticker,)
+            )
+            candidate_sector = rows[0]["sector"] if rows else None
+            if candidate_sector:
+                sector_value = purchase_value
+                for p in existing:
+                    try:
+                        s_rows = registry._db.execute(
+                            "SELECT sector FROM invest.stocks WHERE ticker = %s",
+                            (p.ticker,),
+                        )
+                        if s_rows and s_rows[0].get("sector") == candidate_sector:
+                            sector_value += float(p.current_price * p.shares)
+                    except Exception:
+                        pass
+                sector_pct = sector_value / total_portfolio_value * 100
+                if sector_pct > 25:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"{candidate_sector} sector would be {sector_pct:.1f}% "
+                        f"of portfolio. Max single sector is 25%.",
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.debug("Sector check failed for %s", ticker)
     existing_pos = next((p for p in existing if p.ticker == ticker), None)
 
     # Cost of this purchase

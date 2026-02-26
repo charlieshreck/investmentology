@@ -242,6 +242,13 @@ def synthesize(
         compatibility,
     )
 
+    # --- Sell-side confidence boost ---
+    # BUY avg confidence ~0.655 vs SELL avg ~0.420 — system biased toward holding.
+    # Boost bearish verdict confidence by 1.3x (capped at 1.0) to correct asymmetry.
+    _BEARISH_VERDICTS = {Verdict.REDUCE, Verdict.SELL, Verdict.AVOID, Verdict.DISCARD}
+    if verdict in _BEARISH_VERDICTS:
+        weighted_confidence = min(Decimal("1"), weighted_confidence * Decimal("1.3"))
+
     # --- Build reasoning ---
     reasoning = _build_reasoning(
         verdict, stances, weighted_sentiment, weighted_confidence,

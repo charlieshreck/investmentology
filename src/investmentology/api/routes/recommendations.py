@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends
 from investmentology.api.deps import get_registry
 from investmentology.advisory.portfolio_fit import PortfolioFitScorer
 from investmentology.api.routes.shared import (
+    consensus_tier as _consensus_tier,
     get_dividend_data,
     success_probability as _success_probability,
+    verdict_stability as _verdict_stability,
 )
 from investmentology.registry.queries import Registry
 
@@ -55,6 +57,12 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         ((current_price - entry_price) / entry_price * 100)
         if entry_price > 0 else 0.0
     )
+
+    # Compute verdict stability and consensus tier
+    cons_score = float(row["consensus_score"]) if row.get("consensus_score") else None
+    stability = row.get("_stability")  # Pre-computed if registry available
+    cons_tier = _consensus_tier(cons_score)
+
     result = {
         "ticker": row["ticker"],
         "name": row.get("name") or row["ticker"],
@@ -65,7 +73,8 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         "watchlistState": row.get("watchlist_state"),
         "verdict": row["verdict"],
         "confidence": float(row["confidence"]) if row.get("confidence") else None,
-        "consensusScore": float(row["consensus_score"]) if row.get("consensus_score") else None,
+        "consensusScore": cons_score,
+        "consensusTier": cons_tier,
         "reasoning": row.get("reasoning"),
         "agentStances": row.get("agent_stances"),
         "riskFlags": row.get("risk_flags"),
@@ -76,6 +85,10 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         "changePct": round(change_pct, 2),
         "priceHistory": _build_price_history(row, registry) if registry else row.get("price_history") or [],
     }
+
+    if stability:
+        result["stabilityScore"] = stability[0]
+        result["stabilityLabel"] = stability[1]
 
     # Add portfolio fit if scorer is available
     fit = row.get("_portfolio_fit")
@@ -110,6 +123,15 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
 
     # Filter to positive verdicts only
     positive_rows = [r for r in rows if r.get("verdict") in POSITIVE_VERDICTS]
+
+    # Compute verdict stability for each recommendation
+    for row in positive_rows:
+        ticker = row.get("ticker", "")
+        if ticker:
+            try:
+                row["_stability"] = _verdict_stability(ticker, registry)
+            except Exception:
+                pass
 
     # Compute portfolio fit for each recommendation
     try:

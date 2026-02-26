@@ -9,7 +9,10 @@ from decimal import Decimal
 from investmentology.data.alerts import Alert, AlertEngine
 from investmentology.data.snapshots import fetch_market_snapshot
 from investmentology.data.yfinance_client import YFinanceClient
+from investmentology.models.decision import Decision, DecisionType
 from investmentology.registry.queries import Registry
+from investmentology.sell.engine import SellEngine
+from investmentology.sell.rules import SellSignal, SellUrgency
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MonitorResult:
     alerts: list[Alert] = field(default_factory=list)
+    sell_signals: dict[str, list[SellSignal]] = field(default_factory=dict)
     positions_updated: int = 0
     predictions_settled: int = 0
     market_snapshot_id: int | None = None
@@ -85,6 +89,42 @@ class DailyMonitor:
             result.alerts = self._alert_engine.evaluate_all(
                 positions, sector_map, vix, spy_drawdown,
             )
+
+            # Step 6b: Run sell engine on all positions
+            try:
+                sell_engine = SellEngine()
+                fair_values = {
+                    p.ticker: p.fair_value_estimate
+                    for p in positions
+                    if p.fair_value_estimate
+                }
+                sell_results = sell_engine.evaluate_portfolio(
+                    positions,
+                    fair_values=fair_values,
+                )
+                result.sell_signals = sell_results
+                for ticker, signals in sell_results.items():
+                    for sig in signals:
+                        self._registry.log_decision(Decision(
+                            ticker=ticker,
+                            decision_type=DecisionType.SELL,
+                            layer_source="sell_engine",
+                            confidence=None,
+                            reasoning=f"[{sig.urgency}] {sig.reason}: {sig.detail}",
+                            signals={"reason": str(sig.reason), "urgency": str(sig.urgency)},
+                            metadata={
+                                "current_price": str(sig.current_price) if sig.current_price else None,
+                                "trigger_price": str(sig.trigger_price) if sig.trigger_price else None,
+                            },
+                        ))
+                        level = "CRITICAL" if sig.urgency == SellUrgency.EXECUTE else "WARNING"
+                        logger.log(
+                            logging.CRITICAL if level == "CRITICAL" else logging.WARNING,
+                            "Sell signal [%s] %s: %s — %s",
+                            sig.urgency, ticker, sig.reason, sig.detail,
+                        )
+            except Exception:
+                logger.exception("Sell engine evaluation failed")
 
             # Step 7: Settle predictions
             unsettled = self._registry.get_unsettled_predictions(as_of=date.today())

@@ -109,6 +109,69 @@ def get_dividend_data(tickers: list[str]) -> dict[str, dict]:
     return results
 
 
+_BULLISH_VERDICTS = {"STRONG_BUY", "BUY", "ACCUMULATE"}
+_BEARISH_VERDICTS = {"REDUCE", "SELL", "AVOID", "DISCARD"}
+# HOLD, WATCHLIST = neutral
+
+
+def verdict_stability(ticker: str, registry) -> tuple[float, str]:
+    """Compute verdict stability from last 3 verdicts.
+
+    Returns (score, label):
+        1.0 / "STABLE" — all 3 same direction
+        0.67 / "MODERATE" — 2 of 3 same direction
+        0.33 / "UNSTABLE" — alternating directions
+        None if fewer than 2 verdicts available.
+    """
+    try:
+        rows = registry._db.execute(
+            """SELECT verdict FROM invest.verdicts
+               WHERE ticker = %s ORDER BY created_at DESC LIMIT 3""",
+            (ticker,),
+        )
+    except Exception:
+        return (1.0, "UNKNOWN")
+
+    if not rows or len(rows) < 2:
+        return (1.0, "UNKNOWN")
+
+    directions = []
+    for r in rows:
+        v = r.get("verdict", "")
+        if v in _BULLISH_VERDICTS:
+            directions.append("bullish")
+        elif v in _BEARISH_VERDICTS:
+            directions.append("bearish")
+        else:
+            directions.append("neutral")
+
+    if len(set(directions)) == 1:
+        return (1.0, "STABLE")
+    # Count most common direction
+    from collections import Counter
+    counts = Counter(directions)
+    most_common_count = counts.most_common(1)[0][1]
+    if most_common_count >= 2:
+        return (0.67, "MODERATE")
+    return (0.33, "UNSTABLE")
+
+
+def consensus_tier(consensus_score: float | None) -> str | None:
+    """Classify consensus score into actionable tiers.
+
+    - > 0.3: HIGH_CONVICTION — agents aligned, full size
+    - -0.2 to 0.3: MIXED — agents disagree, starter only
+    - < -0.2: CONTRARIAN — positive verdict but agents bearish, flag for review
+    """
+    if consensus_score is None:
+        return None
+    if consensus_score > 0.3:
+        return "HIGH_CONVICTION"
+    if consensus_score < -0.2:
+        return "CONTRARIAN"
+    return "MIXED"
+
+
 def success_probability(row: dict) -> float | None:
     """Blended success probability (0.0-1.0) from agent analysis signals.
 
