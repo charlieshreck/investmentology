@@ -1117,3 +1117,107 @@ def get_portfolio_briefing(registry: Registry = Depends(get_registry)) -> dict:
             ],
         },
     }
+
+
+@router.get("/portfolio/timeline")
+def get_portfolio_timeline(
+    limit: int = 50,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Build a unified timeline of portfolio events.
+
+    Merges: position opens/closes, key decisions, and verdict changes.
+    Returns events newest-first.
+    """
+    events: list[dict] = []
+
+    # 1. Position opens (buys)
+    all_positions = registry._db.execute(
+        "SELECT id, ticker, entry_date, entry_price, shares, position_type, "
+        "is_closed, exit_date, exit_price, realized_pnl "
+        "FROM invest.portfolio_positions ORDER BY entry_date DESC"
+    )
+    for p in all_positions:
+        events.append({
+            "type": "BUY",
+            "date": str(p["entry_date"]),
+            "ticker": p["ticker"],
+            "detail": f"Bought {float(p['shares']):.0f} shares at ${float(p['entry_price']):,.2f}",
+            "extra": {
+                "shares": float(p["shares"]),
+                "price": float(p["entry_price"]),
+                "positionType": p["position_type"] or "core",
+            },
+        })
+        # Position closes (sells)
+        if p["is_closed"] and p["exit_date"]:
+            rpnl = float(p["realized_pnl"]) if p["realized_pnl"] else 0.0
+            events.append({
+                "type": "SELL",
+                "date": str(p["exit_date"]),
+                "ticker": p["ticker"],
+                "detail": (
+                    f"Sold {float(p['shares']):.0f} shares at "
+                    f"${float(p['exit_price']):,.2f} "
+                    f"({'+'if rpnl >= 0 else ''}{rpnl:,.2f})"
+                ),
+                "extra": {
+                    "shares": float(p["shares"]),
+                    "price": float(p["exit_price"]) if p["exit_price"] else None,
+                    "pnl": rpnl,
+                },
+            })
+
+    # 2. Key decisions (actionable ones)
+    decisions = registry.get_decisions(limit=200)
+    decision_types_to_show = {"BUY", "SELL", "HOLD", "WATCHLIST", "REJECT", "TRIM"}
+    for d in decisions:
+        if d.decision_type.value in decision_types_to_show:
+            events.append({
+                "type": f"DECISION_{d.decision_type.value}",
+                "date": str(d.created_at.date()) if d.created_at else "",
+                "ticker": d.ticker,
+                "detail": d.reasoning[:150] if d.reasoning else f"{d.decision_type.value} decision",
+                "extra": {
+                    "confidence": float(d.confidence) if d.confidence else None,
+                    "layer": d.layer_source,
+                },
+            })
+
+    # 3. Verdict changes
+    verdict_rows = registry._db.execute(
+        "SELECT id, ticker, verdict, confidence, reasoning, created_at "
+        "FROM invest.verdicts ORDER BY created_at DESC LIMIT 100"
+    )
+    for v in verdict_rows:
+        events.append({
+            "type": "VERDICT",
+            "date": str(v["created_at"].date()) if v["created_at"] else "",
+            "ticker": v["ticker"],
+            "detail": f"Verdict: {v['verdict']} ({float(v['confidence']) * 100:.0f}% confidence)",
+            "extra": {
+                "verdict": v["verdict"],
+                "confidence": float(v["confidence"]) if v["confidence"] else None,
+                "reasoning": (v["reasoning"] or "")[:200],
+            },
+        })
+
+    # Sort newest first, deduplicate near-identical events
+    events.sort(key=lambda e: e["date"], reverse=True)
+
+    # Group by date for timeline display
+    from collections import OrderedDict
+    grouped: OrderedDict[str, list[dict]] = OrderedDict()
+    for e in events[:limit]:
+        d = e["date"]
+        if d not in grouped:
+            grouped[d] = []
+        grouped[d].append(e)
+
+    return {
+        "timeline": [
+            {"date": d, "events": evts}
+            for d, evts in grouped.items()
+        ],
+        "totalEvents": len(events),
+    }
