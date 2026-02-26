@@ -68,6 +68,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
                 "weight": p.weight,
                 "stop_loss": p.stop_loss,
                 "pnl_pct": p.pnl_pct,
+                "position_type": p.position_type or "core",
             }
 
     # Fetch stock names and previous close prices
@@ -133,6 +134,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
             "dayChange": round(day_change_total, 2),
             "dayChangePct": round(day_change_pct, 2),
             "weight": float(a["weight"]),
+            "positionType": a["position_type"],
         })
 
     positions = raw_positions  # Still need raw positions for alerts

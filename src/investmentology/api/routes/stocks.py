@@ -382,6 +382,7 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         pnl = (current - entry) * float(held.shares)
         pnl_pct = ((current - entry) / entry * 100) if entry > 0 else 0
         position_data = {
+            "id": held.id,
             "shares": float(held.shares),
             "entryPrice": entry,
             "currentPrice": current,
