@@ -836,3 +836,235 @@ def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
     actions.sort(key=lambda a: priority_order.get(a["priority"], 99))
 
     return {"actions": actions}
+
+
+@router.get("/portfolio/briefing")
+def get_portfolio_briefing(registry: Registry = Depends(get_registry)) -> dict:
+    """Portfolio-level briefing: plain-English synthesis of the whole portfolio.
+
+    Covers: overall health, each position summary, diversity, quality,
+    position type mix (core vs tactical), and prioritised next steps.
+    """
+    positions = registry.get_open_positions()
+    if not positions:
+        return {"briefing": None}
+
+    total_value = sum(float(p.market_value) for p in positions)
+    tickers = [p.ticker for p in positions]
+
+    # Fetch verdicts, sectors, stock names
+    verdicts: dict[str, dict] = {}
+    for t in tickers:
+        v = registry.get_latest_verdict(t)
+        if v:
+            verdicts[t] = v
+
+    stock_rows = registry._db.execute(
+        "SELECT ticker, name, sector, industry FROM invest.stocks WHERE ticker = ANY(%s)",
+        (tickers,),
+    )
+    stock_info = {r["ticker"]: r for r in stock_rows}
+
+    # Cash
+    cash = 0.0
+    try:
+        budget_row = registry._db.execute(
+            "SELECT total_capital, cash_reserve FROM invest.portfolio_budget LIMIT 1"
+        )
+        if budget_row:
+            cash = float(budget_row[0].get("cash_reserve", 0) or 0)
+    except Exception:
+        pass
+
+    portfolio_total = total_value + cash
+
+    # --- Per-position summaries ---
+    pos_summaries: list[dict] = []
+    sectors: dict[str, float] = {}
+    core_count = 0
+    tactical_count = 0
+    analyzed_count = 0
+    bullish_count = 0
+    bearish_count = 0
+    total_upside_weighted = 0.0
+    total_weight_for_upside = 0.0
+
+    for p in positions:
+        mv = float(p.market_value)
+        weight = (mv / total_value * 100) if total_value else 0
+        pnl = float(p.current_price - p.entry_price) * float(p.shares)
+        pnl_pct = float(p.pnl_pct * 100) if p.pnl_pct else 0
+        sector = stock_info.get(p.ticker, {}).get("sector", "Other") or "Other"
+        name = stock_info.get(p.ticker, {}).get("name", p.ticker) or p.ticker
+        short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+
+        sectors[sector] = sectors.get(sector, 0) + weight
+
+        ptype = p.position_type or "core"
+        if ptype == "core":
+            core_count += 1
+        else:
+            tactical_count += 1
+
+        # Verdict info
+        v = verdicts.get(p.ticker)
+        verdict_str = v["verdict"] if v else None
+        conf = float(v["confidence"]) if v and v.get("confidence") else None
+
+        if v:
+            analyzed_count += 1
+            if verdict_str in ("STRONG_BUY", "BUY", "ACCUMULATE"):
+                bullish_count += 1
+            elif verdict_str in ("SELL", "AVOID", "REDUCE"):
+                bearish_count += 1
+
+        # Fair value upside
+        fv = float(p.fair_value_estimate) if p.fair_value_estimate else None
+        price = float(p.current_price)
+        upside_pct = None
+        if fv and price > 0:
+            upside_pct = ((fv - price) / price) * 100
+            total_upside_weighted += upside_pct * weight
+            total_weight_for_upside += weight
+
+        # Build one-liner
+        status_parts: list[str] = []
+        if pnl >= 0:
+            status_parts.append(f"up {pnl_pct:.1f}%")
+        else:
+            status_parts.append(f"down {abs(pnl_pct):.1f}%")
+        if verdict_str:
+            status_parts.append(f"rated {verdict_str}")
+            if conf:
+                status_parts[-1] += f" ({conf * 100:.0f}%)"
+        if upside_pct is not None:
+            if upside_pct > 0:
+                status_parts.append(f"{upside_pct:.0f}% upside to fair value")
+            else:
+                status_parts.append(f"{abs(upside_pct):.0f}% above fair value")
+
+        # Action hint
+        action_hint = ""
+        if verdict_str in ("SELL", "AVOID"):
+            action_hint = "Consider selling"
+        elif verdict_str == "REDUCE":
+            action_hint = "Consider trimming"
+        elif verdict_str in ("STRONG_BUY", "BUY") and weight < 8:
+            action_hint = "Room to add more"
+        elif verdict_str == "WATCHLIST":
+            action_hint = "Hold and monitor"
+        elif verdict_str in ("ACCUMULATE",):
+            action_hint = "Add on dips"
+        elif not verdict_str:
+            action_hint = "Needs analysis"
+        else:
+            action_hint = "Hold"
+
+        pos_summaries.append({
+            "ticker": p.ticker,
+            "name": short_name,
+            "sector": sector,
+            "positionType": ptype,
+            "weight": round(weight, 1),
+            "pnl": round(pnl, 2),
+            "pnlPct": round(pnl_pct, 1),
+            "verdict": verdict_str,
+            "confidence": round(conf * 100) if conf else None,
+            "fairValue": fv,
+            "upsidePct": round(upside_pct, 1) if upside_pct is not None else None,
+            "status": ". ".join(status_parts).capitalize(),
+            "action": action_hint,
+        })
+
+    # Sort: urgent actions first (sells/reduces), then by weight
+    action_priority = {"Consider selling": 0, "Consider trimming": 1, "Needs analysis": 2}
+    pos_summaries.sort(key=lambda s: (action_priority.get(s["action"], 5), -s["weight"]))
+
+    # --- Portfolio-level narrative ---
+    n_positions = len(positions)
+    n_sectors = len(sectors)
+    top_sector = max(sectors, key=sectors.get) if sectors else "None"  # type: ignore[arg-type]
+    top_sector_pct = sectors.get(top_sector, 0)
+
+    # Diversity assessment
+    if n_sectors >= 5 and top_sector_pct < 35:
+        diversity = "well-diversified"
+        diversity_detail = f"Spread across {n_sectors} sectors with no single sector dominating."
+    elif n_sectors >= 3 and top_sector_pct < 50:
+        diversity = "moderately diversified"
+        diversity_detail = f"{n_sectors} sectors, but {top_sector} is heavy at {top_sector_pct:.0f}%."
+    else:
+        diversity = "concentrated"
+        diversity_detail = f"Only {n_sectors} sector{'s' if n_sectors > 1 else ''} with {top_sector} at {top_sector_pct:.0f}%. Consider adding exposure to other sectors."
+
+    # Quality assessment
+    unanalyzed = n_positions - analyzed_count
+    if analyzed_count == 0:
+        quality = "unknown"
+        quality_detail = "No positions have been through the AI analysis pipeline. Run analysis to get buy/hold/sell guidance."
+    elif bullish_count >= analyzed_count * 0.7:
+        quality = "strong"
+        quality_detail = f"{bullish_count} of {analyzed_count} analyzed positions rated bullish. The portfolio is aligned with AI conviction."
+    elif bearish_count >= analyzed_count * 0.5:
+        quality = "concerning"
+        quality_detail = f"{bearish_count} of {analyzed_count} analyzed positions have sell/reduce signals. Review urgently."
+    else:
+        quality = "mixed"
+        quality_detail = f"{bullish_count} bullish, {bearish_count} bearish, {analyzed_count - bullish_count - bearish_count} neutral out of {analyzed_count} analyzed."
+
+    if unanalyzed > 0:
+        quality_detail += f" {unanalyzed} position{'s' if unanalyzed > 1 else ''} still need{'s' if unanalyzed == 1 else ''} analysis."
+
+    # Position type mix
+    type_detail = ""
+    if core_count and tactical_count:
+        type_detail = f"{core_count} core (long-term) and {tactical_count} tactical (shorter-term) positions."
+    elif core_count:
+        type_detail = f"All {core_count} positions are core holds. Consider adding tactical positions for shorter-term opportunities."
+    elif tactical_count:
+        type_detail = f"All {tactical_count} positions are tactical. Consider converting winners to core for long-term compounding."
+
+    # Weighted average upside
+    avg_upside = (total_upside_weighted / total_weight_for_upside) if total_weight_for_upside > 0 else None
+    upside_str = ""
+    if avg_upside is not None:
+        if avg_upside > 0:
+            upside_str = f"Weighted average upside to fair value is {avg_upside:.0f}%."
+        else:
+            upside_str = f"The portfolio is trading {abs(avg_upside):.0f}% above aggregate fair value on average."
+
+    # Top priority actions (first 3)
+    urgent = [s for s in pos_summaries if s["action"] in ("Consider selling", "Consider trimming", "Needs analysis")]
+
+    # Overall headline
+    if any(s["action"] == "Consider selling" for s in pos_summaries):
+        headline = "Action needed — review sell signals"
+    elif unanalyzed > 0:
+        headline = f"{unanalyzed} position{'s' if unanalyzed > 1 else ''} need{'s' if unanalyzed == 1 else ''} analysis"
+    elif quality == "strong":
+        headline = "Portfolio looks healthy"
+    elif quality == "concerning":
+        headline = "Review portfolio — multiple concerns flagged"
+    else:
+        headline = "Portfolio is stable with some mixed signals"
+
+    return {
+        "briefing": {
+            "headline": headline,
+            "overview": (
+                f"You hold {n_positions} positions worth ${total_value:,.0f}"
+                f"{f' with ${cash:,.0f} in cash' if cash > 0 else ''}. "
+                f"The portfolio is {diversity}."
+            ),
+            "diversity": {"rating": diversity, "detail": diversity_detail},
+            "quality": {"rating": quality, "detail": quality_detail},
+            "positionTypes": {"core": core_count, "tactical": tactical_count, "detail": type_detail},
+            "upside": upside_str,
+            "positions": pos_summaries,
+            "urgent": urgent[:5],
+            "sectors": [
+                {"name": s, "pct": round(w, 1)}
+                for s, w in sorted(sectors.items(), key=lambda x: -x[1])
+            ],
+        },
+    }
