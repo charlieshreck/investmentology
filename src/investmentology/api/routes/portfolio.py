@@ -57,7 +57,9 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
             agg["entry_price"] = (old_cost + new_cost) / total_shares if total_shares else Decimal("0")
             agg["shares"] = total_shares
             agg["current_price"] = p.current_price  # latest
-            # Keep lowest id as canonical
+            # Keep earliest entry_date
+            if p.entry_date and (not agg["entry_date"] or p.entry_date < agg["entry_date"]):
+                agg["entry_date"] = p.entry_date
         else:
             aggregated[p.ticker] = {
                 "id": p.id,
@@ -69,6 +71,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
                 "stop_loss": p.stop_loss,
                 "pnl_pct": p.pnl_pct,
                 "position_type": p.position_type or "core",
+                "entry_date": p.entry_date,
             }
 
     # Fetch stock names and previous close prices
@@ -135,6 +138,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
             "dayChangePct": round(day_change_pct, 2),
             "weight": float(a["weight"]),
             "positionType": a["position_type"],
+            "entryDate": str(a["entry_date"]) if a.get("entry_date") else None,
         })
 
     positions = raw_positions  # Still need raw positions for alerts
