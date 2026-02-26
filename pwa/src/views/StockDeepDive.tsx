@@ -124,6 +124,22 @@ interface NewsArticle {
   type: string;
 }
 
+interface BuzzData {
+  buzzScore: number;
+  buzzLabel: string;
+  headlineSentiment: number | null;
+  articleCount: number;
+  contrarianFlag: boolean;
+}
+
+interface EarningsMomentum {
+  score: number;
+  label: string;
+  upwardRevisions: number;
+  downwardRevisions: number;
+  beatStreak: number;
+}
+
 interface StockResponse {
   ticker: string;
   name: string;
@@ -138,20 +154,25 @@ interface StockResponse {
   signals: Signal[];
   decisions: Decision[];
   watchlist: WatchlistInfo | null;
+  buzz: BuzzData | null;
+  earningsMomentum: EarningsMomentum | null;
+  stabilityScore: number | null;
+  stabilityLabel: string | null;
+  consensusTier: string | null;
 }
 
 function formatCap(cap: number): string {
   if (!cap) return "—";
-  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(1)}T`;
-  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(1)}B`;
-  if (cap >= 1e6) return `$${(cap / 1e6).toFixed(0)}M`;
-  return `$${cap.toLocaleString()}`;
+  if (cap >= 1e12) return `£${(cap / 1e12).toFixed(1)}T`;
+  if (cap >= 1e9) return `£${(cap / 1e9).toFixed(1)}B`;
+  if (cap >= 1e6) return `£${(cap / 1e6).toFixed(0)}M`;
+  return `£${cap.toLocaleString()}`;
 }
 
 function formatNum(n: number): string {
-  if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toLocaleString()}`;
+  if (Math.abs(n) >= 1e9) return `£${(n / 1e9).toFixed(1)}B`;
+  if (Math.abs(n) >= 1e6) return `£${(n / 1e6).toFixed(0)}M`;
+  return `£${n.toLocaleString()}`;
 }
 
 function formatVol(v: number): string {
@@ -273,11 +294,11 @@ function FiftyTwoWeekBar({ low, high, current }: { low: number; high: number; cu
     <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-sm)" }}>52-Week Range</div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>${low.toFixed(0)}</span>
+        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>£{low.toFixed(0)}</span>
         <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--color-surface-2)", position: "relative" }}>
           <div style={{ position: "absolute", left: `${pct}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: "var(--color-accent-bright)", transform: "translateX(-50%)" }} />
         </div>
-        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>${high.toFixed(0)}</span>
+        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>£{high.toFixed(0)}</span>
       </div>
     </div>
   );
@@ -363,7 +384,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         </div>
         <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-xs)" }}>
           <MarketStatus />
-          {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
+          {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>£{f.price.toFixed(2)}</div>}
           {f && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatCap(f.market_cap)}</div>}
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
           {f && (
@@ -445,6 +466,62 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       {/* Verdict */}
       {data.verdict && <VerdictCard verdict={data.verdict} />}
 
+      {/* Signal Intelligence */}
+      {(data.buzz || data.earningsMomentum || data.stabilityLabel || data.consensusTier) && (
+        <BentoCard title="Signal Intelligence">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-md)" }}>
+            {data.consensusTier && (
+              <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", borderLeft: `3px solid ${data.consensusTier === "HIGH_CONVICTION" ? "var(--color-success)" : data.consensusTier === "CONTRARIAN" ? "#a78bfa" : "var(--color-warning)"}` }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-xs)" }}>Consensus Tier</div>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-sm)", color: data.consensusTier === "HIGH_CONVICTION" ? "var(--color-success)" : data.consensusTier === "CONTRARIAN" ? "#a78bfa" : "var(--color-warning)" }}>
+                  {data.consensusTier.replace(/_/g, " ")}
+                </div>
+              </div>
+            )}
+            {data.stabilityLabel && data.stabilityLabel !== "UNKNOWN" && (
+              <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", borderLeft: `3px solid ${data.stabilityLabel === "STABLE" ? "var(--color-success)" : data.stabilityLabel === "UNSTABLE" ? "var(--color-error)" : "var(--color-warning)"}` }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-xs)" }}>Verdict Stability</div>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{data.stabilityLabel}</div>
+                {data.stabilityScore != null && (
+                  <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-muted)" }}>{(data.stabilityScore * 100).toFixed(0)}%</div>
+                )}
+              </div>
+            )}
+            {data.buzz && (
+              <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", borderLeft: `3px solid ${data.buzz.buzzLabel === "HIGH" ? "var(--color-error)" : data.buzz.buzzLabel === "MODERATE" ? "var(--color-warning)" : "var(--color-success)"}` }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-xs)" }}>Media Buzz</div>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{data.buzz.buzzLabel}</div>
+                <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-muted)" }}>
+                  {data.buzz.buzzScore}/100 ({data.buzz.articleCount} articles)
+                </div>
+                {data.buzz.headlineSentiment != null && (
+                  <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: data.buzz.headlineSentiment > 0 ? "var(--color-success)" : data.buzz.headlineSentiment < 0 ? "var(--color-error)" : "var(--color-text-muted)" }}>
+                    sentiment: {data.buzz.headlineSentiment > 0 ? "+" : ""}{data.buzz.headlineSentiment.toFixed(2)}
+                  </div>
+                )}
+                {data.buzz.contrarianFlag && (
+                  <Badge variant="accent">Contrarian</Badge>
+                )}
+              </div>
+            )}
+            {data.earningsMomentum && (
+              <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", borderLeft: `3px solid ${data.earningsMomentum.label === "STRONG_UP" || data.earningsMomentum.label === "UP" ? "var(--color-success)" : data.earningsMomentum.label === "DOWN" || data.earningsMomentum.label === "STRONG_DOWN" ? "var(--color-error)" : "var(--color-text-muted)"}` }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-xs)" }}>Earnings Momentum</div>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{data.earningsMomentum.label.replace(/_/g, " ")}</div>
+                <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-muted)" }}>
+                  {data.earningsMomentum.upwardRevisions > 0 && <span style={{ color: "var(--color-success)" }}>{data.earningsMomentum.upwardRevisions} up</span>}
+                  {data.earningsMomentum.upwardRevisions > 0 && data.earningsMomentum.downwardRevisions > 0 && " / "}
+                  {data.earningsMomentum.downwardRevisions > 0 && <span style={{ color: "var(--color-error)" }}>{data.earningsMomentum.downwardRevisions} down</span>}
+                </div>
+                {data.earningsMomentum.beatStreak > 0 && (
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-success)" }}>{data.earningsMomentum.beatStreak}Q beat streak</div>
+                )}
+              </div>
+            )}
+          </div>
+        </BentoCard>
+      )}
+
       {/* Verdict History Timeline */}
       {data.verdictHistory && data.verdictHistory.length > 1 && (
         <BentoCard title="Verdict History">
@@ -498,7 +575,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
               {p.analystTarget != null && f && (
                 <div style={{ marginLeft: "auto", textAlign: "right" }}>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>Target</div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>${p.analystTarget.toFixed(0)}</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>£{p.analystTarget.toFixed(0)}</div>
                   <div style={{
                     fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)",
                     color: p.analystTarget > f.price ? "var(--color-success)" : "var(--color-error)",

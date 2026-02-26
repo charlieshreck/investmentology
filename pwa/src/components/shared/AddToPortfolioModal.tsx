@@ -125,7 +125,7 @@ export function AddToPortfolioModal({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
               <span style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>Total cost</span>
               <span style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
-                {totalCost.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
+                {totalCost.toLocaleString("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 })}
               </span>
             </div>
           </div>

@@ -13,7 +13,7 @@ import type { Position, Alert } from "../types/models";
 import { useStore } from "../stores/useStore";
 
 function formatCurrency(n: number): string {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  return n.toLocaleString("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 }
 
 function formatPct(n: number): string {
@@ -525,10 +525,10 @@ export function Portfolio() {
                         {cp.ticker}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                        ${cp.entryPrice.toFixed(2)}
+                        £{cp.entryPrice.toFixed(2)}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                        {cp.exitPrice != null ? `$${cp.exitPrice.toFixed(2)}` : "—"}
+                        {cp.exitPrice != null ? `£${cp.exitPrice.toFixed(2)}` : "—"}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
                         {cp.shares}

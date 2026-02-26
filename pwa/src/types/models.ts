@@ -12,6 +12,23 @@ export interface Position {
   weight: number;
 }
 
+export interface EarningsMomentum {
+  score: number;
+  label: string;
+  upwardRevisions: number;
+  downwardRevisions: number;
+  beatStreak: number;
+}
+
+export interface PortfolioFit {
+  score: number;
+  reasoning: string;
+  diversificationScore: number;
+  balanceScore: number;
+  capacityScore: number;
+  alreadyHeld: boolean;
+}
+
 export interface Recommendation {
   ticker: string;
   name: string;
@@ -23,6 +40,7 @@ export interface Recommendation {
   verdict: string;
   confidence: number | null;
   consensusScore: number | null;
+  consensusTier: string | null;
   reasoning: string | null;
   agentStances: AgentStance[] | null;
   riskFlags: string[] | null;
@@ -30,6 +48,16 @@ export interface Recommendation {
   mungerOverride: boolean;
   analysisDate: string | null;
   successProbability: number | null;
+  stabilityScore?: number;
+  stabilityLabel?: string;
+  buzzScore?: number;
+  buzzLabel?: string;
+  headlineSentiment?: number;
+  contrarianFlag?: boolean;
+  earningsMomentum?: EarningsMomentum;
+  portfolioFit?: PortfolioFit;
+  dividendYield?: number;
+  changePct?: number;
 }
 
 export interface AgentStance {

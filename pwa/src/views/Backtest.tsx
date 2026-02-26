@@ -5,7 +5,7 @@ import { Badge } from "../components/shared/Badge";
 import { useBacktest } from "../hooks/useBacktest";
 
 function formatCurrency(n: number): string {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  return n.toLocaleString("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 }
 
 function formatPct(n: number): string {

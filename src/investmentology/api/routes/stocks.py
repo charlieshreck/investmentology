@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 
 from investmentology.api.deps import get_registry
+from investmentology.api.routes.shared import consensus_tier, verdict_stability
 from investmentology.data.profile import fetch_news_from_yfinance, get_or_fetch_profile
 from investmentology.registry.queries import Registry
 
@@ -396,6 +397,50 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
             "thesis": held.thesis or None,
         }
 
+    # Signal enrichment: buzz, earnings momentum, stability, consensus tier
+    buzz_data = None
+    try:
+        buzz_rows = registry._db.execute(
+            "SELECT buzz_score, buzz_label, headline_sentiment, article_count, contrarian_flag "
+            "FROM invest.buzz_scores WHERE ticker = %s ORDER BY scored_at DESC LIMIT 1",
+            (ticker,),
+        )
+        if buzz_rows:
+            b = buzz_rows[0]
+            buzz_data = {
+                "buzzScore": b["buzz_score"],
+                "buzzLabel": b["buzz_label"],
+                "headlineSentiment": float(b["headline_sentiment"]) if b["headline_sentiment"] else None,
+                "articleCount": b["article_count"],
+                "contrarianFlag": b.get("contrarian_flag", False),
+            }
+    except Exception:
+        logger.debug("Could not fetch buzz for %s", ticker)
+
+    earnings_data = None
+    try:
+        em_rows = registry._db.execute(
+            "SELECT score, label, upward_revisions, downward_revisions, beat_streak "
+            "FROM invest.earnings_momentum WHERE ticker = %s ORDER BY computed_at DESC LIMIT 1",
+            (ticker,),
+        )
+        if em_rows:
+            em = em_rows[0]
+            earnings_data = {
+                "score": em["score"],
+                "label": em["label"],
+                "upwardRevisions": em["upward_revisions"],
+                "downwardRevisions": em["downward_revisions"],
+                "beatStreak": em["beat_streak"],
+            }
+    except Exception:
+        logger.debug("Could not fetch earnings momentum for %s", ticker)
+
+    stab_score, stab_label = verdict_stability(ticker, registry)
+    cons_tier = consensus_tier(
+        float(verdict_data["consensusScore"]) if verdict_data and verdict_data.get("consensusScore") else None
+    )
+
     # Synthesized briefing — plain English, position-aware
     briefing = _build_briefing(
         ticker, stock_name, verdict_data, position_data, positions,
@@ -428,6 +473,11 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         ],
         "decisions": decision_data,
         "watchlist": watchlist,
+        "buzz": buzz_data,
+        "earningsMomentum": earnings_data,
+        "stabilityScore": stab_score,
+        "stabilityLabel": stab_label,
+        "consensusTier": cons_tier,
     }
 
 

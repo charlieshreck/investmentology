@@ -10,14 +10,101 @@ import type { Recommendation, AgentStance } from "../types/models";
 import { useStore } from "../stores/useStore";
 
 function formatCap(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toLocaleString()}`;
+  if (n >= 1e12) return `£${(n / 1e12).toFixed(1)}T`;
+  if (n >= 1e9) return `£${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `£${(n / 1e6).toFixed(0)}M`;
+  return `£${n.toLocaleString()}`;
 }
 
 function formatPrice(n: number): string {
-  return n > 0 ? `$${n.toFixed(2)}` : "\u2014";
+  return n > 0 ? `£${n.toFixed(2)}` : "\u2014";
+}
+
+function buzzPill(buzzLabel?: string) {
+  if (!buzzLabel) return null;
+  const colors: Record<string, { bg: string; fg: string }> = {
+    HIGH: { bg: "rgba(248, 113, 113, 0.15)", fg: "var(--color-error)" },
+    ELEVATED: { bg: "rgba(251, 191, 36, 0.15)", fg: "var(--color-warning)" },
+    NORMAL: { bg: "rgba(148, 163, 184, 0.12)", fg: "var(--color-text-muted)" },
+    QUIET: { bg: "rgba(52, 211, 153, 0.12)", fg: "var(--color-success)" },
+  };
+  const c = colors[buzzLabel] || colors.NORMAL;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "1px 6px", borderRadius: 99, fontSize: 9, fontWeight: 600,
+      background: c.bg, color: c.fg, letterSpacing: "0.03em",
+    }}>
+      {buzzLabel === "HIGH" ? "🔥" : buzzLabel === "QUIET" ? "🤫" : ""} {buzzLabel}
+    </span>
+  );
+}
+
+function tierPill(tier?: string | null) {
+  if (!tier) return null;
+  const colors: Record<string, { bg: string; fg: string }> = {
+    HIGH_CONVICTION: { bg: "rgba(52, 211, 153, 0.15)", fg: "var(--color-success)" },
+    MIXED: { bg: "rgba(251, 191, 36, 0.15)", fg: "var(--color-warning)" },
+    CONTRARIAN: { bg: "rgba(168, 85, 247, 0.15)", fg: "#a855f7" },
+  };
+  const labels: Record<string, string> = {
+    HIGH_CONVICTION: "High Conv.",
+    MIXED: "Mixed",
+    CONTRARIAN: "Contrarian",
+  };
+  const c = colors[tier] || colors.MIXED;
+  return (
+    <span style={{
+      display: "inline-flex", padding: "1px 6px", borderRadius: 99,
+      fontSize: 9, fontWeight: 600, background: c.bg, color: c.fg,
+    }}>
+      {labels[tier] || tier}
+    </span>
+  );
+}
+
+function stabilityPill(label?: string) {
+  if (!label || label === "UNKNOWN") return null;
+  const colors: Record<string, { bg: string; fg: string }> = {
+    STABLE: { bg: "rgba(52, 211, 153, 0.12)", fg: "var(--color-success)" },
+    MODERATE: { bg: "rgba(251, 191, 36, 0.12)", fg: "var(--color-warning)" },
+    UNSTABLE: { bg: "rgba(248, 113, 113, 0.12)", fg: "var(--color-error)" },
+  };
+  const c = colors[label] || colors.MODERATE;
+  return (
+    <span style={{
+      display: "inline-flex", padding: "1px 6px", borderRadius: 99,
+      fontSize: 9, fontWeight: 600, background: c.bg, color: c.fg,
+    }}>
+      {label}
+    </span>
+  );
+}
+
+function earningsPill(momentum?: { label: string; beatStreak: number }) {
+  if (!momentum || momentum.label === "STABLE") return null;
+  const isPositive = momentum.label === "STRONG_UPWARD" || momentum.label === "IMPROVING";
+  const fg = isPositive ? "var(--color-success)" : "var(--color-error)";
+  const bg = isPositive ? "rgba(52, 211, 153, 0.12)" : "rgba(248, 113, 113, 0.12)";
+  const arrow = isPositive ? "↑" : "↓";
+  const short: Record<string, string> = {
+    STRONG_UPWARD: "EPS ↑↑",
+    IMPROVING: "EPS ↑",
+    WEAKENING: "EPS ↓",
+    DECLINING: "EPS ↓↓",
+  };
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 2,
+      padding: "1px 6px", borderRadius: 99,
+      fontSize: 9, fontWeight: 600, background: bg, color: fg,
+    }}>
+      {short[momentum.label] || `${arrow} EPS`}
+      {momentum.beatStreak >= 3 && (
+        <span style={{ fontSize: 8, opacity: 0.8 }}>({momentum.beatStreak}x beat)</span>
+      )}
+    </span>
+  );
 }
 
 function sentimentBar(s: number): { width: string; color: string } {
@@ -133,12 +220,41 @@ function RecCard({
             })}
           </div>
         )}
-        {/* Risk flags */}
-        {rec.riskFlags && rec.riskFlags.length > 0 && (
-          <div style={{ fontSize: 9, color: "var(--color-warning)", marginTop: 2 }}>
-            {rec.riskFlags.length} risk flag{rec.riskFlags.length > 1 ? "s" : ""}
-          </div>
-        )}
+        {/* Signal pills */}
+        <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap", alignItems: "center" }}>
+          {rec.riskFlags && rec.riskFlags.length > 0 && (
+            <span style={{
+              display: "inline-flex", padding: "1px 5px", borderRadius: 99,
+              fontSize: 9, fontWeight: 600,
+              background: "rgba(251, 191, 36, 0.12)", color: "var(--color-warning)",
+            }}>
+              {rec.riskFlags.length} risk
+            </span>
+          )}
+          {tierPill(rec.consensusTier)}
+          {stabilityPill(rec.stabilityLabel)}
+          {buzzPill(rec.buzzLabel)}
+          {earningsPill(rec.earningsMomentum)}
+          {rec.contrarianFlag && (
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 2,
+              padding: "1px 6px", borderRadius: 99,
+              fontSize: 9, fontWeight: 700,
+              background: "rgba(168, 85, 247, 0.15)", color: "#a855f7",
+            }}>
+              ◆ Contrarian
+            </span>
+          )}
+          {rec.dividendYield != null && rec.dividendYield > 0 && (
+            <span style={{
+              display: "inline-flex", padding: "1px 5px", borderRadius: 99,
+              fontSize: 9, fontWeight: 600,
+              background: "rgba(52, 211, 153, 0.08)", color: "var(--color-text-muted)",
+            }}>
+              {rec.dividendYield.toFixed(1)}% div
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Consensus */}
