@@ -21,7 +21,7 @@ jobs:
   build-and-push:
     needs: test
     if: github.ref == 'refs/heads/main'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
