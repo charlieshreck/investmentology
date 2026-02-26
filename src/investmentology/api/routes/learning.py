@@ -127,6 +127,17 @@ def get_attribution(registry: Registry = Depends(get_registry)) -> dict:
             for agent, tag, acc in report.worst_signals
         ],
         "recommendations": report.recommendations,
+        "overrideOutcomes": [
+            {
+                "type": o.override_type,
+                "totalOverrides": o.total_overrides,
+                "totalSettled": o.total_settled,
+                "correct": o.override_correct,
+                "wrong": o.override_wrong,
+                "valueAddedPct": o.value_added_pct,
+            }
+            for o in (report.override_outcomes or [])
+        ],
     }
 
 

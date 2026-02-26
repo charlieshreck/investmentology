@@ -9,6 +9,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from investmentology.advisory.performance import PerformanceCalculator
 from investmentology.api.deps import get_registry
 from investmentology.registry.db import Database
 from investmentology.registry.queries import Registry
@@ -183,6 +184,31 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
 
     day_pnl_pct = (total_day_pnl / (portfolio_total - total_day_pnl) * 100) if portfolio_total - total_day_pnl > 0 else 0.0
 
+    # Performance metrics (benchmark comparison)
+    performance = None
+    try:
+        calc = PerformanceCalculator(registry)
+        perf = calc.compute()
+        performance = {
+            "portfolioReturnPct": perf.portfolio_return_pct,
+            "spyReturnPct": perf.spy_return_pct,
+            "alphaPct": perf.alpha_pct,
+            "sharpeRatio": perf.sharpe_ratio,
+            "sortinoRatio": perf.sortino_ratio,
+            "maxDrawdownPct": perf.max_drawdown_pct,
+            "winRate": perf.win_rate,
+            "avgWinPct": perf.avg_win_pct,
+            "avgLossPct": perf.avg_loss_pct,
+            "totalTrades": perf.total_trades,
+            "expectancy": perf.expectancy,
+            "dispositionRatio": perf.disposition_ratio,
+            "avgWinnerHoldDays": perf.avg_winner_hold_days,
+            "avgLoserHoldDays": perf.avg_loser_hold_days,
+            "measurementDays": perf.measurement_days,
+        }
+    except Exception:
+        logger.debug("Performance metrics computation failed", exc_info=True)
+
     return {
         "positions": items,
         "totalValue": portfolio_total,
@@ -190,6 +216,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         "dayPnlPct": round(day_pnl_pct, 2),
         "cash": float(cash),
         "alerts": alerts,
+        "performance": performance,
     }
 
 

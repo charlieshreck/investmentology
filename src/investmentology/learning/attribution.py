@@ -47,6 +47,18 @@ class AgentAttribution:
 
 
 @dataclass
+class OverrideOutcome:
+    """Outcome analysis for auditor/munger overrides."""
+
+    override_type: str  # "auditor" or "munger"
+    total_overrides: int = 0
+    total_settled: int = 0
+    override_correct: int = 0  # override improved the outcome
+    override_wrong: int = 0  # original verdict was actually better
+    value_added_pct: float = 0.0  # positive = overrides help, negative = hurt
+
+
+@dataclass
 class AttributionReport:
     """Full attribution report across all agents."""
 
@@ -55,6 +67,7 @@ class AttributionReport:
     top_signals: list[tuple[str, str, float]]  # (agent, signal_tag, accuracy)
     worst_signals: list[tuple[str, str, float]]
     recommendations: list[str]
+    override_outcomes: list[OverrideOutcome] | None = None
 
 
 class AgentAttributionEngine:
@@ -168,12 +181,16 @@ class AgentAttributionEngine:
         # Generate recommendations
         recommendations = self._generate_recommendations(agents, recommended)
 
+        # Override outcome analysis
+        override_outcomes = self._analyze_overrides()
+
         return AttributionReport(
             agents=agents,
             recommended_weights=recommended,
             top_signals=top_signals[:10],
             worst_signals=worst_signals[:10],
             recommendations=recommendations,
+            override_outcomes=override_outcomes,
         )
 
     def _compute_weights(self, agents: dict[str, AgentAttribution]) -> dict[str, float]:
@@ -246,3 +263,64 @@ class AgentAttributionEngine:
             recs.append("All agents performing within normal parameters.")
 
         return recs
+
+    def _analyze_overrides(self) -> list[OverrideOutcome]:
+        """Analyze whether auditor/munger overrides add or destroy value.
+
+        Compares overridden verdicts against settled predictions to determine
+        if the override direction aligned with actual price movement.
+        """
+        results = []
+
+        for override_type, column in [("auditor", "auditor_override"), ("munger", "munger_override")]:
+            try:
+                rows = self._registry._db.execute(
+                    f"""SELECT v.ticker, v.verdict, v.confidence, v.{column},
+                               p.predicted_value, p.actual_value, p.is_settled
+                        FROM invest.verdicts v
+                        LEFT JOIN invest.predictions p
+                            ON p.ticker = v.ticker
+                            AND p.created_at >= v.created_at - INTERVAL '1 day'
+                            AND p.created_at <= v.created_at + INTERVAL '1 day'
+                            AND p.prediction_type LIKE 'verdict_direction_%'
+                        WHERE v.{column} = TRUE
+                        ORDER BY v.created_at DESC"""
+                )
+
+                outcome = OverrideOutcome(override_type=override_type)
+                outcome.total_overrides = len(set(r["ticker"] for r in rows)) if rows else 0
+
+                # Check settled predictions for overridden verdicts
+                bullish = {"STRONG_BUY", "BUY", "ACCUMULATE"}
+                bearish = {"SELL", "AVOID", "DISCARD", "REDUCE"}
+
+                for r in rows or []:
+                    if not r.get("is_settled") or r.get("actual_value") is None:
+                        continue
+
+                    outcome.total_settled += 1
+                    verdict = r["verdict"]
+                    actual = float(r["actual_value"])
+                    predicted = float(r["predicted_value"]) if r.get("predicted_value") else 0
+
+                    # Override made verdict bearish (capped to WATCHLIST/AVOID)
+                    # If price actually went down, override was correct
+                    verdict_is_bearish = verdict in bearish or verdict in {"WATCHLIST", "HOLD"}
+
+                    if verdict_is_bearish and actual < 0:
+                        outcome.override_correct += 1
+                    elif not verdict_is_bearish and actual > 0:
+                        outcome.override_correct += 1
+                    else:
+                        outcome.override_wrong += 1
+
+                if outcome.total_settled > 0:
+                    correct_rate = outcome.override_correct / outcome.total_settled
+                    outcome.value_added_pct = round((correct_rate - 0.5) * 100, 1)
+
+                results.append(outcome)
+            except Exception:
+                logger.debug("Failed to analyze %s overrides", override_type)
+                results.append(OverrideOutcome(override_type=override_type))
+
+        return results

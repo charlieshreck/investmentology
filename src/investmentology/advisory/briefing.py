@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
+from investmentology.advisory.performance import PerformanceCalculator
 from investmentology.registry.queries import Registry
 from investmentology.timing.pendulum import PendulumReader, PendulumReading
 
@@ -103,6 +104,7 @@ class DailyBriefing:
     risk_summary: RiskSummary
     action_items: list[ActionItem]
     learning_summary: dict  # calibration stats, prediction counts
+    performance: dict | None = None  # benchmark comparison, Sharpe, disposition
 
 
 # ---- Sector -> Risk Category Mapping ----
@@ -152,6 +154,35 @@ class BriefingBuilder:
         )
         learning = self._build_learning_summary()
 
+        # Performance metrics (benchmark, disposition)
+        perf_data = None
+        try:
+            calc = PerformanceCalculator(self._registry)
+            perf = calc.compute()
+            perf_data = {
+                "portfolioReturnPct": perf.portfolio_return_pct,
+                "spyReturnPct": perf.spy_return_pct,
+                "alphaPct": perf.alpha_pct,
+                "sharpeRatio": perf.sharpe_ratio,
+                "maxDrawdownPct": perf.max_drawdown_pct,
+                "dispositionRatio": perf.disposition_ratio,
+                "measurementDays": perf.measurement_days,
+            }
+            # Add disposition warning to action items if ratio is bad
+            if perf.disposition_ratio and perf.disposition_ratio > 1.5:
+                actions.append(ActionItem(
+                    priority=len(actions) + 1,
+                    category="review",
+                    ticker=None,
+                    action="Disposition effect detected — losers held longer than winners",
+                    reasoning=f"Avg winner hold: {perf.avg_winner_hold_days:.0f} days, "
+                    f"avg loser hold: {perf.avg_loser_hold_days:.0f} days "
+                    f"(ratio: {perf.disposition_ratio:.1f}x). "
+                    f"Review losing positions for thesis breaks.",
+                ))
+        except Exception:
+            logger.debug("Performance metrics failed in briefing", exc_info=True)
+
         return DailyBriefing(
             date=today,
             market_overview=market,
@@ -161,6 +192,7 @@ class BriefingBuilder:
             risk_summary=risk,
             action_items=actions,
             learning_summary=learning,
+            performance=perf_data,
         )
 
     # ---- Market Overview ----
@@ -683,4 +715,5 @@ def briefing_to_dict(b: DailyBriefing) -> dict:
             for a in b.action_items
         ],
         "learningSummary": b.learning_summary,
+        "performance": b.performance,
     }
