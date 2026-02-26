@@ -1121,26 +1121,39 @@ def get_portfolio_briefing(registry: Registry = Depends(get_registry)) -> dict:
 
 @router.get("/portfolio/timeline")
 def get_portfolio_timeline(
-    limit: int = 50,
+    limit: int = 80,
     registry: Registry = Depends(get_registry),
 ) -> dict:
     """Build a unified timeline of portfolio events.
 
-    Merges: position opens/closes, key decisions, and verdict changes.
-    Returns events newest-first.
+    Only includes events for tickers that are or were in the portfolio.
+    Each event has a full ISO timestamp for sorting and display.
     """
-    events: list[dict] = []
+    from datetime import datetime as dt
 
-    # 1. Position opens (buys)
+    # Get the set of portfolio tickers (open + closed)
+    portfolio_tickers: set[str] = set()
     all_positions = registry._db.execute(
         "SELECT id, ticker, entry_date, entry_price, shares, position_type, "
-        "is_closed, exit_date, exit_price, realized_pnl "
-        "FROM invest.portfolio_positions ORDER BY entry_date DESC"
+        "is_closed, exit_date, exit_price, realized_pnl, created_at, updated_at "
+        "FROM invest.portfolio_positions ORDER BY created_at DESC"
     )
     for p in all_positions:
+        portfolio_tickers.add(p["ticker"])
+
+    events: list[dict] = []
+
+    # 1. Position opens (buys) and closes (sells)
+    for p in all_positions:
+        # Buy event — use created_at for time, entry_date for date
+        buy_ts = p["created_at"]
+        if buy_ts and hasattr(buy_ts, "isoformat"):
+            ts_str = buy_ts.isoformat()
+        else:
+            ts_str = f"{p['entry_date']}T09:30:00"
         events.append({
             "type": "BUY",
-            "date": str(p["entry_date"]),
+            "timestamp": ts_str,
             "ticker": p["ticker"],
             "detail": f"Bought {float(p['shares']):.0f} shares at ${float(p['entry_price']):,.2f}",
             "extra": {
@@ -1149,12 +1162,17 @@ def get_portfolio_timeline(
                 "positionType": p["position_type"] or "core",
             },
         })
-        # Position closes (sells)
+        # Sell event
         if p["is_closed"] and p["exit_date"]:
             rpnl = float(p["realized_pnl"]) if p["realized_pnl"] else 0.0
+            sell_ts = p["updated_at"]
+            if sell_ts and hasattr(sell_ts, "isoformat"):
+                sell_ts_str = sell_ts.isoformat()
+            else:
+                sell_ts_str = f"{p['exit_date']}T16:00:00"
             events.append({
                 "type": "SELL",
-                "date": str(p["exit_date"]),
+                "timestamp": sell_ts_str,
                 "ticker": p["ticker"],
                 "detail": (
                     f"Sold {float(p['shares']):.0f} shares at "
@@ -1168,48 +1186,59 @@ def get_portfolio_timeline(
                 },
             })
 
-    # 2. Key decisions (actionable ones)
-    decisions = registry.get_decisions(limit=200)
-    decision_types_to_show = {"BUY", "SELL", "HOLD", "WATCHLIST", "REJECT", "TRIM"}
-    for d in decisions:
-        if d.decision_type.value in decision_types_to_show:
+    # 2. Key decisions — portfolio tickers only
+    if portfolio_tickers:
+        decisions = registry.get_decisions(limit=500)
+        decision_types_to_show = {"BUY", "SELL", "HOLD", "WATCHLIST", "REJECT", "TRIM"}
+        for d in decisions:
+            if d.ticker in portfolio_tickers and d.decision_type.value in decision_types_to_show:
+                ts = d.created_at.isoformat() if d.created_at else ""
+                events.append({
+                    "type": f"DECISION_{d.decision_type.value}",
+                    "timestamp": ts,
+                    "ticker": d.ticker,
+                    "detail": d.reasoning[:150] if d.reasoning else f"{d.decision_type.value} decision",
+                    "extra": {
+                        "confidence": float(d.confidence) if d.confidence else None,
+                        "layer": d.layer_source,
+                    },
+                })
+
+    # 3. Verdict changes — portfolio tickers only
+    if portfolio_tickers:
+        ticker_list = list(portfolio_tickers)
+        verdict_rows = registry._db.execute(
+            "SELECT id, ticker, verdict, confidence, reasoning, created_at "
+            "FROM invest.verdicts WHERE ticker = ANY(%s) "
+            "ORDER BY created_at DESC LIMIT 200",
+            (ticker_list,),
+        )
+        for v in verdict_rows:
+            ts = v["created_at"].isoformat() if v["created_at"] else ""
             events.append({
-                "type": f"DECISION_{d.decision_type.value}",
-                "date": str(d.created_at.date()) if d.created_at else "",
-                "ticker": d.ticker,
-                "detail": d.reasoning[:150] if d.reasoning else f"{d.decision_type.value} decision",
+                "type": "VERDICT",
+                "timestamp": ts,
+                "ticker": v["ticker"],
+                "detail": f"Verdict: {v['verdict']} ({float(v['confidence']) * 100:.0f}% confidence)",
                 "extra": {
-                    "confidence": float(d.confidence) if d.confidence else None,
-                    "layer": d.layer_source,
+                    "verdict": v["verdict"],
+                    "confidence": float(v["confidence"]) if v["confidence"] else None,
+                    "reasoning": (v["reasoning"] or "")[:200],
                 },
             })
 
-    # 3. Verdict changes
-    verdict_rows = registry._db.execute(
-        "SELECT id, ticker, verdict, confidence, reasoning, created_at "
-        "FROM invest.verdicts ORDER BY created_at DESC LIMIT 100"
-    )
-    for v in verdict_rows:
-        events.append({
-            "type": "VERDICT",
-            "date": str(v["created_at"].date()) if v["created_at"] else "",
-            "ticker": v["ticker"],
-            "detail": f"Verdict: {v['verdict']} ({float(v['confidence']) * 100:.0f}% confidence)",
-            "extra": {
-                "verdict": v["verdict"],
-                "confidence": float(v["confidence"]) if v["confidence"] else None,
-                "reasoning": (v["reasoning"] or "")[:200],
-            },
-        })
+    # Sort newest first by timestamp
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
 
-    # Sort newest first, deduplicate near-identical events
-    events.sort(key=lambda e: e["date"], reverse=True)
+    # Collect unique event types and tickers for filter metadata
+    event_types = sorted({e["type"] for e in events})
+    tickers_in_timeline = sorted({e["ticker"] for e in events})
 
-    # Group by date for timeline display
+    # Group by date for display
     from collections import OrderedDict
     grouped: OrderedDict[str, list[dict]] = OrderedDict()
     for e in events[:limit]:
-        d = e["date"]
+        d = e["timestamp"][:10] if e["timestamp"] else "unknown"
         if d not in grouped:
             grouped[d] = []
         grouped[d].append(e)
@@ -1220,4 +1249,8 @@ def get_portfolio_timeline(
             for d, evts in grouped.items()
         ],
         "totalEvents": len(events),
+        "filters": {
+            "types": event_types,
+            "tickers": tickers_in_timeline,
+        },
     }
