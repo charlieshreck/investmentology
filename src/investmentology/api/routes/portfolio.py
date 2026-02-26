@@ -1279,10 +1279,9 @@ class IncomeTargetRequest(BaseModel):
 def get_portfolio_income(registry: Registry = Depends(get_registry)) -> dict:
     """Passive income projection from dividends.
 
-    Fetches dividend data from yfinance for all open positions and computes
-    per-position and portfolio-level income projections.
+    Uses cached + parallel dividend fetching for performance.
     """
-    import yfinance as yf
+    from investmentology.api.routes.shared import get_dividend_data
 
     positions = registry.get_open_positions()
     if not positions:
@@ -1307,6 +1306,9 @@ def get_portfolio_income(registry: Registry = Depends(get_registry)) -> dict:
     )
     stock_info = {r["ticker"]: r for r in stock_rows}
 
+    # Fetch all dividend data in parallel (cached 4h)
+    div_data = get_dividend_data(tickers)
+
     items: list[dict] = []
     total_annual_income = 0.0
     total_portfolio_value = 0.0
@@ -1318,57 +1320,15 @@ def get_portfolio_income(registry: Registry = Depends(get_registry)) -> dict:
         position_value = shares * price
         total_portfolio_value += position_value
 
-        # Fetch dividend data from yfinance
-        annual_div = 0.0
-        div_yield = 0.0
-        last_div_amount = 0.0
-        last_div_date = None
-        payout_ratio = 0.0
-        ex_div_date = None
-        frequency = "none"
-        div_growth_5y = None
-
-        try:
-            tk = yf.Ticker(p.ticker)
-            info = tk.info or {}
-            divs = tk.dividends
-
-            if len(divs) >= 4:
-                annual_div = float(divs.tail(4).sum())
-                last_div_amount = float(divs.iloc[-1])
-                last_div_date = divs.index[-1].strftime("%Y-%m-%d")
-
-                # Estimate frequency from last 2 dividends
-                if len(divs) >= 2:
-                    spacing = (divs.index[-1] - divs.index[-2]).days
-                    if spacing < 45:
-                        frequency = "monthly"
-                    elif spacing < 100:
-                        frequency = "quarterly"
-                    elif spacing < 200:
-                        frequency = "semi-annual"
-                    else:
-                        frequency = "annual"
-
-                # 5-year dividend growth
-                if len(divs) >= 20:
-                    old_annual = float(divs.head(4).sum())
-                    if old_annual > 0:
-                        years = (divs.index[-1] - divs.index[0]).days / 365.25
-                        if years > 1:
-                            div_growth_5y = ((annual_div / old_annual) ** (1 / min(years, 5)) - 1) * 100
-            elif info.get("dividendRate"):
-                annual_div = float(info["dividendRate"])
-
-            div_yield = (annual_div / price * 100) if price > 0 and annual_div > 0 else 0.0
-            payout_ratio = float(info.get("payoutRatio") or 0) * 100
-
-            ex_ts = info.get("exDividendDate")
-            if ex_ts and isinstance(ex_ts, (int, float)):
-                from datetime import datetime
-                ex_div_date = datetime.fromtimestamp(ex_ts).strftime("%Y-%m-%d")
-        except Exception:
-            logger.debug("Failed to fetch dividend data for %s", p.ticker)
+        dd = div_data.get(p.ticker, {})
+        annual_div = dd.get("annual_div", 0.0)
+        div_yield = (annual_div / price * 100) if price > 0 and annual_div > 0 else 0.0
+        frequency = dd.get("frequency", "none")
+        payout_ratio = dd.get("payout_ratio", 0.0)
+        div_growth_5y = dd.get("div_growth_5y")
+        last_div_amount = dd.get("last_div_amount", 0.0)
+        last_div_date = dd.get("last_div_date")
+        ex_div_date = dd.get("ex_div_date")
 
         position_income = annual_div * shares
         total_annual_income += position_income

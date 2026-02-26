@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends
 
 from investmentology.api.deps import get_registry
 from investmentology.advisory.portfolio_fit import PortfolioFitScorer
-from investmentology.api.routes.shared import success_probability as _success_probability
+from investmentology.api.routes.shared import (
+    get_dividend_data,
+    success_probability as _success_probability,
+)
 from investmentology.registry.queries import Registry
 
 router = APIRouter()
@@ -118,44 +121,21 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         pass  # Fit scoring is optional — don't break recommendations
 
-    # Fetch dividend data for recommendations
+    # Fetch dividend data (cached, parallel)
     try:
-        import yfinance as yf
-
+        rec_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
+        div_data = get_dividend_data(rec_tickers)
         for row in positive_rows:
             ticker = row.get("ticker", "")
-            try:
-                tk = yf.Ticker(ticker)
-                divs = tk.dividends
+            dd = div_data.get(ticker)
+            if dd and dd.get("annual_div", 0) > 0:
                 price = float(row.get("current_price") or 0)
-                annual_div = 0.0
-                frequency = "none"
-
-                if len(divs) >= 4:
-                    annual_div = float(divs.tail(4).sum())
-                    if len(divs) >= 2:
-                        spacing = (divs.index[-1] - divs.index[-2]).days
-                        if spacing < 45:
-                            frequency = "monthly"
-                        elif spacing < 100:
-                            frequency = "quarterly"
-                        elif spacing < 200:
-                            frequency = "semi-annual"
-                        else:
-                            frequency = "annual"
-                elif (tk.info or {}).get("dividendRate"):
-                    annual_div = float(tk.info["dividendRate"])
-                    frequency = "unknown"
-
-                if annual_div > 0:
-                    div_yield = (annual_div / price * 100) if price > 0 else 0.0
-                    row["_dividend_data"] = {
-                        "yield": round(div_yield, 2),
-                        "annual": round(annual_div, 2),
-                        "frequency": frequency,
-                    }
-            except Exception:
-                pass
+                div_yield = (dd["annual_div"] / price * 100) if price > 0 else 0.0
+                row["_dividend_data"] = {
+                    "yield": round(div_yield, 2),
+                    "annual": round(dd["annual_div"], 2),
+                    "frequency": dd.get("frequency", "none"),
+                }
     except Exception:
         pass  # Dividend enrichment is optional
 

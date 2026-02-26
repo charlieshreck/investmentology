@@ -2,6 +2,112 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
+
+# --- Dividend data cache (4-hour TTL) ---
+_div_cache: dict[str, tuple[float, dict]] = {}
+_DIV_CACHE_TTL = 14400  # 4 hours
+
+
+def _fetch_one_dividend(ticker: str) -> tuple[str, dict]:
+    """Fetch dividend data for a single ticker from yfinance."""
+    import yfinance as yf
+
+    result: dict = {
+        "annual_div": 0.0,
+        "div_yield": 0.0,
+        "frequency": "none",
+        "last_div_amount": 0.0,
+        "last_div_date": None,
+        "payout_ratio": 0.0,
+        "ex_div_date": None,
+        "div_growth_5y": None,
+    }
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+        divs = tk.dividends
+
+        if len(divs) >= 4:
+            result["annual_div"] = float(divs.tail(4).sum())
+            result["last_div_amount"] = float(divs.iloc[-1])
+            result["last_div_date"] = divs.index[-1].strftime("%Y-%m-%d")
+
+            if len(divs) >= 2:
+                spacing = (divs.index[-1] - divs.index[-2]).days
+                if spacing < 45:
+                    result["frequency"] = "monthly"
+                elif spacing < 100:
+                    result["frequency"] = "quarterly"
+                elif spacing < 200:
+                    result["frequency"] = "semi-annual"
+                else:
+                    result["frequency"] = "annual"
+
+            if len(divs) >= 20:
+                old_annual = float(divs.head(4).sum())
+                if old_annual > 0:
+                    years = (divs.index[-1] - divs.index[0]).days / 365.25
+                    if years > 1:
+                        result["div_growth_5y"] = (
+                            (result["annual_div"] / old_annual)
+                            ** (1 / min(years, 5))
+                            - 1
+                        ) * 100
+        elif info.get("dividendRate"):
+            result["annual_div"] = float(info["dividendRate"])
+            result["frequency"] = "unknown"
+
+        result["payout_ratio"] = float(info.get("payoutRatio") or 0) * 100
+
+        ex_ts = info.get("exDividendDate")
+        if ex_ts and isinstance(ex_ts, (int, float)):
+            from datetime import datetime
+
+            result["ex_div_date"] = datetime.fromtimestamp(ex_ts).strftime(
+                "%Y-%m-%d"
+            )
+    except Exception:
+        logger.debug("Failed to fetch dividend data for %s", ticker)
+
+    return ticker, result
+
+
+def get_dividend_data(tickers: list[str]) -> dict[str, dict]:
+    """Fetch dividend data for multiple tickers using cache + parallel fetching.
+
+    Returns {ticker: {annual_div, div_yield, frequency, ...}} for each ticker.
+    """
+    now = time.time()
+    results: dict[str, dict] = {}
+    to_fetch: list[str] = []
+
+    for t in tickers:
+        if t in _div_cache:
+            ts, data = _div_cache[t]
+            if now - ts < _DIV_CACHE_TTL:
+                results[t] = data
+                continue
+        to_fetch.append(t)
+
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_fetch_one_dividend, t): t for t in to_fetch}
+            for future in as_completed(futures):
+                try:
+                    ticker, data = future.result(timeout=15)
+                    _div_cache[ticker] = (now, data)
+                    results[ticker] = data
+                except Exception:
+                    ticker = futures[future]
+                    results[ticker] = {"annual_div": 0.0, "frequency": "none"}
+
+    return results
+
 
 def success_probability(row: dict) -> float | None:
     """Blended success probability (0.0-1.0) from agent analysis signals.
