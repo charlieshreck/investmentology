@@ -1,30 +1,36 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: investmentology-api
+  name: investmentology
   namespace: investmentology
   labels:
-    app: investmentology-api
+    app.kubernetes.io/name: investmentology
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: investmentology-api
+      app.kubernetes.io/name: investmentology
   template:
     metadata:
       labels:
-        app: investmentology-api
+        app.kubernetes.io/name: investmentology
     spec:
       containers:
-        - name: api
-          image: investmentology-api:latest
+        - name: investmentology
+          image: ghcr.io/charlieshreck/investmentology:latest
           ports:
-            - containerPort: 8000
+            - containerPort: 80
+              protocol: TCP
           envFrom:
-            - configMapRef:
-                name: investmentology-config
             - secretRef:
                 name: investmentology-secrets
+          env:
+            - name: QUANT_GATE_TOP_N
+              value: "100"
+            - name: MIN_MARKET_CAP
+              value: "200000000"
+            - name: MIN_HOLD_HOURS
+              value: "48"
           resources:
             requests:
               memory: "256Mi"
@@ -35,7 +41,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /api/invest/system/health
-              port: 8000
+              port: 80
             initialDelaySeconds: 15
             periodSeconds: 30
             timeoutSeconds: 5
@@ -43,7 +49,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /api/invest/system/health
-              port: 8000
+              port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3

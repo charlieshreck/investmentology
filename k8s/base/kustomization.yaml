@@ -5,11 +5,12 @@ namespace: investmentology
 
 resources:
   - namespace.yaml
-  - api-configmap.yaml
-  - postgres-secret.yaml
-  - api-deployment.yaml
-  - api-service.yaml
-  - pwa-deployment.yaml
-  - pwa-service.yaml
+  - infisical-secret.yaml
+  - deployment.yaml
+  - service.yaml
   - ingress.yaml
+  - cloudflare-tunnel-ingress.yaml
+  - cronjob-price-refresh.yaml
   - cronjob-screen.yaml
+  - cronjob-post-screen.yaml
+  - cronjob-portfolio-sync.yaml

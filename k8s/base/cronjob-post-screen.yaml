@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: investmentology-screen
+  name: investmentology-post-screen
   namespace: investmentology
   labels:
     app.kubernetes.io/name: investmentology
-    app.kubernetes.io/component: screen
+    app.kubernetes.io/component: post-screen
 spec:
-  # Sunday 06:00 UTC — weekly Quant Gate screening
-  schedule: "0 6 * * 0"
+  # Sunday 07:00 UTC — analyze top screened candidates (1h after screen)
+  schedule: "0 7 * * 0"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,13 +19,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: investmentology
-            app.kubernetes.io/component: screen
+            app.kubernetes.io/component: post-screen
         spec:
           restartPolicy: OnFailure
           containers:
-            - name: screen
+            - name: post-screen
               image: ghcr.io/charlieshreck/investmentology:latest
-              command: ["python3", "-m", "investmentology", "cron", "weekly-screen"]
+              command: ["python3", "-m", "investmentology", "cron", "post-screen-analyze", "--limit", "20"]
               envFrom:
                 - secretRef:
                     name: investmentology-secrets

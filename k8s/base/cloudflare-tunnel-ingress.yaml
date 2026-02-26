@@ -1,18 +1,12 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: investmentology
+  name: investmentology-cloudflare
   namespace: investmentology
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
   labels:
     app.kubernetes.io/name: investmentology
 spec:
-  ingressClassName: traefik
-  tls:
-    - hosts:
-        - haute-banque.kernow.io
-      secretName: investmentology-tls
+  ingressClassName: cloudflare-tunnel
   rules:
     - host: haute-banque.kernow.io
       http:

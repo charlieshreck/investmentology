@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: investmentology-screen
+  name: investmentology-portfolio-sync
   namespace: investmentology
   labels:
     app.kubernetes.io/name: investmentology
-    app.kubernetes.io/component: screen
+    app.kubernetes.io/component: portfolio-sync
 spec:
-  # Sunday 06:00 UTC — weekly Quant Gate screening
-  schedule: "0 6 * * 0"
+  # Daily 13:00 UTC — premarket monitoring
+  schedule: "0 13 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,13 +19,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: investmentology
-            app.kubernetes.io/component: screen
+            app.kubernetes.io/component: portfolio-sync
         spec:
           restartPolicy: OnFailure
           containers:
-            - name: screen
+            - name: portfolio-sync
               image: ghcr.io/charlieshreck/investmentology:latest
-              command: ["python3", "-m", "investmentology", "cron", "weekly-screen"]
+              command: ["python3", "-m", "investmentology", "cron", "daily-monitor", "--premarket"]
               envFrom:
                 - secretRef:
                     name: investmentology-secrets
@@ -36,8 +36,8 @@ spec:
                   value: "200000000"
               resources:
                 requests:
-                  memory: "512Mi"
-                  cpu: "200m"
+                  memory: "256Mi"
+                  cpu: "100m"
                 limits:
-                  memory: "1Gi"
-                  cpu: "1000m"
+                  memory: "512Mi"
+                  cpu: "500m"

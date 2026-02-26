@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: investmentology-screen
+  name: investmentology-price-refresh
   namespace: investmentology
   labels:
     app.kubernetes.io/name: investmentology
-    app.kubernetes.io/component: screen
+    app.kubernetes.io/component: price-refresh
 spec:
-  # Sunday 06:00 UTC — weekly Quant Gate screening
-  schedule: "0 6 * * 0"
+  # Mon-Fri 14:30, 16:00, 17:30, 19:00, 20:30 UTC (market hours)
+  schedule: "30 14,16,17,19,20 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,13 +19,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: investmentology
-            app.kubernetes.io/component: screen
+            app.kubernetes.io/component: price-refresh
         spec:
           restartPolicy: OnFailure
           containers:
-            - name: screen
+            - name: price-refresh
               image: ghcr.io/charlieshreck/investmentology:latest
-              command: ["python3", "-m", "investmentology", "cron", "weekly-screen"]
+              command: ["python3", "-m", "investmentology", "cron", "price-refresh"]
               envFrom:
                 - secretRef:
                     name: investmentology-secrets
@@ -36,8 +36,8 @@ spec:
                   value: "200000000"
               resources:
                 requests:
-                  memory: "512Mi"
-                  cpu: "200m"
+                  memory: "256Mi"
+                  cpu: "100m"
                 limits:
-                  memory: "1Gi"
-                  cpu: "1000m"
+                  memory: "512Mi"
+                  cpu: "500m"

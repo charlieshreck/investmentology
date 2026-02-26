@@ -13,7 +13,8 @@ dist/
 build/
 .ruff_cache/
 .pytest_cache/
-pwa/
+pwa/node_modules/
+pwa/.vite/
 deploy/
 k8s/
 scripts/
