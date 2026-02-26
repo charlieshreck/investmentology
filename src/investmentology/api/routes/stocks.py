@@ -401,7 +401,8 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
     buzz_data = None
     try:
         buzz_rows = registry._db.execute(
-            "SELECT buzz_score, buzz_label, headline_sentiment, article_count, contrarian_flag "
+            "SELECT buzz_score, buzz_label, headline_sentiment, "
+            "news_count_7d, news_count_30d, contrarian_flag "
             "FROM invest.buzz_scores WHERE ticker = %s ORDER BY scored_at DESC LIMIT 1",
             (ticker,),
         )
@@ -411,7 +412,7 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
                 "buzzScore": b["buzz_score"],
                 "buzzLabel": b["buzz_label"],
                 "headlineSentiment": float(b["headline_sentiment"]) if b["headline_sentiment"] else None,
-                "articleCount": b["article_count"],
+                "articleCount": (b["news_count_7d"] or 0) + (b["news_count_30d"] or 0),
                 "contrarianFlag": b.get("contrarian_flag", False),
             }
     except Exception:
@@ -420,18 +421,18 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
     earnings_data = None
     try:
         em_rows = registry._db.execute(
-            "SELECT score, label, upward_revisions, downward_revisions, beat_streak "
+            "SELECT momentum_score, momentum_label, upward_revisions, downward_revisions, beat_streak "
             "FROM invest.earnings_momentum WHERE ticker = %s ORDER BY computed_at DESC LIMIT 1",
             (ticker,),
         )
         if em_rows:
             em = em_rows[0]
             earnings_data = {
-                "score": em["score"],
-                "label": em["label"],
-                "upwardRevisions": em["upward_revisions"],
-                "downwardRevisions": em["downward_revisions"],
-                "beatStreak": em["beat_streak"],
+                "score": float(em["momentum_score"]) if em["momentum_score"] else 0,
+                "label": em["momentum_label"],
+                "upwardRevisions": em["upward_revisions"] or 0,
+                "downwardRevisions": em["downward_revisions"] or 0,
+                "beatStreak": em["beat_streak"] or 0,
             }
     except Exception:
         logger.debug("Could not fetch earnings momentum for %s", ticker)
