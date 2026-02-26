@@ -86,6 +86,13 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
             "alreadyHeld": fit.already_held,
         }
 
+    # Add dividend data if available
+    div_data = row.get("_dividend_data")
+    if div_data:
+        result["dividendYield"] = div_data["yield"]
+        result["annualDividend"] = div_data["annual"]
+        result["dividendFrequency"] = div_data["frequency"]
+
     return result
 
 
@@ -110,6 +117,47 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
             row["_portfolio_fit"] = scorer.score(ticker, sector)
     except Exception:
         pass  # Fit scoring is optional — don't break recommendations
+
+    # Fetch dividend data for recommendations
+    try:
+        import yfinance as yf
+
+        for row in positive_rows:
+            ticker = row.get("ticker", "")
+            try:
+                tk = yf.Ticker(ticker)
+                divs = tk.dividends
+                price = float(row.get("current_price") or 0)
+                annual_div = 0.0
+                frequency = "none"
+
+                if len(divs) >= 4:
+                    annual_div = float(divs.tail(4).sum())
+                    if len(divs) >= 2:
+                        spacing = (divs.index[-1] - divs.index[-2]).days
+                        if spacing < 45:
+                            frequency = "monthly"
+                        elif spacing < 100:
+                            frequency = "quarterly"
+                        elif spacing < 200:
+                            frequency = "semi-annual"
+                        else:
+                            frequency = "annual"
+                elif (tk.info or {}).get("dividendRate"):
+                    annual_div = float(tk.info["dividendRate"])
+                    frequency = "unknown"
+
+                if annual_div > 0:
+                    div_yield = (annual_div / price * 100) if price > 0 else 0.0
+                    row["_dividend_data"] = {
+                        "yield": round(div_yield, 2),
+                        "annual": round(annual_div, 2),
+                        "frequency": frequency,
+                    }
+            except Exception:
+                pass
+    except Exception:
+        pass  # Dividend enrichment is optional
 
     items = [_format_recommendation(r, registry) for r in positive_rows]
 
