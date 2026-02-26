@@ -183,6 +183,78 @@ class BriefingBuilder:
         except Exception:
             logger.debug("Performance metrics failed in briefing", exc_info=True)
 
+        # Buzz + earnings insights for action items
+        try:
+            import os
+            from investmentology.data.buzz_scorer import BuzzScorer
+
+            held_tickers = [p.ticker for p in portfolio.positions]
+            scorer = BuzzScorer()
+            buzz_results = scorer.score_watchlist(held_tickers)
+
+            for ticker, buzz in buzz_results.items():
+                if buzz.get("contrarian_flag"):
+                    actions.append(ActionItem(
+                        priority=len(actions) + 1,
+                        category="watch",
+                        ticker=ticker,
+                        action=f"Contrarian signal: {ticker} has low buzz but positive verdict",
+                        reasoning=f"Buzz score {buzz['buzz_score']:.0f}/100 ({buzz['buzz_label']}) "
+                        f"with sentiment {buzz['headline_sentiment']:+.2f} — "
+                        f"low attention + high fundamentals may indicate mispricing",
+                    ))
+                if buzz.get("buzz_score", 0) >= 75:
+                    actions.append(ActionItem(
+                        priority=len(actions) + 1,
+                        category="review",
+                        ticker=ticker,
+                        action=f"High buzz alert: {ticker} has elevated news coverage",
+                        reasoning=f"Buzz score {buzz['buzz_score']:.0f}/100 with "
+                        f"{buzz.get('news_count_7d', 0)} articles this week. "
+                        f"Sentiment: {buzz['headline_sentiment']:+.2f}. "
+                        f"High attention may precede volatility.",
+                    ))
+        except Exception:
+            logger.debug("Buzz scoring failed in briefing", exc_info=True)
+
+        try:
+            import os
+            from investmentology.data.earnings_tracker import EarningsTracker
+            from investmentology.data.finnhub_provider import FinnhubProvider
+
+            fh_key = os.environ.get("FINNHUB_API_KEY", "")
+            if fh_key:
+                fh = FinnhubProvider(fh_key)
+                tracker = EarningsTracker(fh, self._registry)
+                held_tickers = [p.ticker for p in portfolio.positions]
+                for ticker in held_tickers:
+                    try:
+                        tracker.capture_snapshot(ticker)
+                        momentum = tracker.compute_momentum(ticker)
+                        if momentum["momentum_label"] == "STRONG_UPWARD":
+                            actions.append(ActionItem(
+                                priority=len(actions) + 1,
+                                category="watch",
+                                ticker=ticker,
+                                action=f"Strong earnings momentum: {ticker} EPS estimates rising",
+                                reasoning=f"{momentum['upward_revisions']} upward revisions in 90d, "
+                                f"beat streak: {momentum['beat_streak']}. "
+                                f"Positive revision momentum is a leading indicator.",
+                            ))
+                        elif momentum["momentum_label"] == "DECLINING":
+                            actions.append(ActionItem(
+                                priority=len(actions) + 1,
+                                category="review",
+                                ticker=ticker,
+                                action=f"Earnings concern: {ticker} EPS estimates declining",
+                                reasoning=f"{momentum['downward_revisions']} downward revisions in 90d. "
+                                f"Declining estimates may signal fundamental deterioration.",
+                            ))
+                    except Exception:
+                        pass
+        except Exception:
+            logger.debug("Earnings tracking failed in briefing", exc_info=True)
+
         return DailyBriefing(
             date=today,
             market_overview=market,

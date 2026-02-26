@@ -109,6 +109,25 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         result["annualDividend"] = div_data["annual"]
         result["dividendFrequency"] = div_data["frequency"]
 
+    # Add buzz score
+    buzz = row.get("_buzz")
+    if buzz:
+        result["buzzScore"] = buzz["buzz_score"]
+        result["buzzLabel"] = buzz["buzz_label"]
+        result["headlineSentiment"] = buzz["headline_sentiment"]
+        result["contrarianFlag"] = buzz.get("contrarian_flag", False)
+
+    # Add earnings momentum
+    earnings_m = row.get("_earnings_momentum")
+    if earnings_m:
+        result["earningsMomentum"] = {
+            "score": earnings_m["momentum_score"],
+            "label": earnings_m["momentum_label"],
+            "upwardRevisions": earnings_m["upward_revisions"],
+            "downwardRevisions": earnings_m["downward_revisions"],
+            "beatStreak": earnings_m["beat_streak"],
+        }
+
     return result
 
 
@@ -160,6 +179,42 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
                 }
     except Exception:
         pass  # Dividend enrichment is optional
+
+    # Fetch buzz scores for recommendations (batch — uses SearXNG via MCP)
+    try:
+        from investmentology.data.buzz_scorer import BuzzScorer
+
+        buzz_scorer = BuzzScorer()
+        buzz_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
+        buzz_results = buzz_scorer.score_watchlist(buzz_tickers)
+        for row in positive_rows:
+            ticker = row.get("ticker", "")
+            buzz = buzz_results.get(ticker)
+            if buzz:
+                row["_buzz"] = buzz
+    except Exception:
+        pass  # Buzz scoring is optional
+
+    # Fetch earnings momentum
+    try:
+        from investmentology.data.earnings_tracker import EarningsTracker
+        from investmentology.data.finnhub_provider import FinnhubProvider
+        import os
+
+        fh_key = os.environ.get("FINNHUB_API_KEY", "")
+        if fh_key:
+            fh = FinnhubProvider(fh_key)
+            tracker = EarningsTracker(fh, registry)
+            for row in positive_rows:
+                ticker = row.get("ticker", "")
+                if ticker:
+                    try:
+                        tracker.capture_snapshot(ticker)
+                        row["_earnings_momentum"] = tracker.compute_momentum(ticker)
+                    except Exception:
+                        pass
+    except Exception:
+        pass  # Earnings tracking is optional
 
     items = [_format_recommendation(r, registry) for r in positive_rows]
 

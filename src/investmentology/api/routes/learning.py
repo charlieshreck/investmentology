@@ -141,6 +141,49 @@ def get_attribution(registry: Registry = Depends(get_registry)) -> dict:
     }
 
 
+@router.get("/learning/buzz/{ticker}")
+def get_ticker_buzz(ticker: str) -> dict:
+    """Buzz score for a single ticker (SearXNG + Finnhub news)."""
+    import os
+    from investmentology.data.buzz_scorer import BuzzScorer
+    from investmentology.data.finnhub_provider import FinnhubProvider
+
+    fh_key = os.environ.get("FINNHUB_API_KEY", "")
+    finnhub = FinnhubProvider(fh_key) if fh_key else None
+    scorer = BuzzScorer(finnhub_provider=finnhub)
+    result = scorer.score_ticker(ticker.upper())
+    return {"status": "ok", "ticker": ticker.upper(), **result}
+
+
+@router.get("/learning/earnings/{ticker}")
+def get_ticker_earnings(
+    ticker: str,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Earnings revision momentum for a single ticker."""
+    import os
+    from investmentology.data.earnings_tracker import EarningsTracker
+    from investmentology.data.finnhub_provider import FinnhubProvider
+
+    fh_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not fh_key:
+        return {"status": "unavailable", "message": "FINNHUB_API_KEY not set"}
+
+    finnhub = FinnhubProvider(fh_key)
+    tracker = EarningsTracker(finnhub, registry)
+
+    # Capture latest snapshot
+    snapshot = tracker.capture_snapshot(ticker.upper())
+    momentum = tracker.compute_momentum(ticker.upper())
+
+    return {
+        "status": "ok",
+        "ticker": ticker.upper(),
+        "snapshot": snapshot,
+        "momentum": momentum,
+    }
+
+
 @router.get("/learning/pendulum")
 def get_pendulum_reading() -> dict:
     """Live pendulum (fear/greed) reading from market data."""
