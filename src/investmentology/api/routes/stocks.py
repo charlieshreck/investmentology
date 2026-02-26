@@ -41,6 +41,191 @@ def _format_profile(p: dict) -> dict:
     }
 
 
+def _build_briefing(
+    ticker: str,
+    name: str,
+    verdict: dict | None,
+    position: dict | None,
+    all_positions: list,
+    fundamentals: dict | None,
+    profile: dict | None,
+    competence: dict | None,
+    quant_gate: dict | None,
+) -> dict | None:
+    """Build a plain-English briefing synthesizing all data into actionable guidance."""
+    if not verdict:
+        return None
+
+    rec = verdict.get("recommendation", "")
+    conf = verdict.get("confidence")
+    conf_pct = f"{conf * 100:.0f}%" if conf else "unknown"
+    stances = verdict.get("agentStances") or []
+    risk_flags = verdict.get("riskFlags") or []
+    price = fundamentals.get("price") if fundamentals else None
+
+    # Count bulls vs bears
+    bulls = [s for s in stances if s.get("sentiment", 0) > 0.1]
+    bears = [s for s in stances if s.get("sentiment", 0) < -0.1]
+    bull_names = [s["name"].capitalize() for s in bulls]
+    bear_names = [s["name"].capitalize() for s in bears]
+
+    # Short company descriptor
+    short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+
+    # --- Build the narrative pieces ---
+    headline = ""
+    situation = ""
+    action = ""
+    rationale_parts: list[str] = []
+
+    # Position-aware context
+    if position:
+        pnl = position.get("pnl", 0)
+        pnl_pct = position.get("pnlPct", 0)
+        shares = position.get("shares", 0)
+        entry = position.get("entryPrice", 0)
+        pos_type = position.get("positionType", "tactical")
+        pnl_dir = "up" if pnl >= 0 else "down"
+        pnl_str = f"${abs(pnl):,.0f} ({abs(pnl_pct):.1f}%)"
+
+        situation = (
+            f"You hold {int(shares)} shares of {short_name} at ${entry:.2f}. "
+            f"You're currently {pnl_dir} {pnl_str}. "
+            f"This is a {pos_type} position."
+        )
+
+        fair_value = position.get("fairValue")
+        stop_loss = position.get("stopLoss")
+        if fair_value and price:
+            upside = ((fair_value - price) / price) * 100
+            if upside > 0:
+                rationale_parts.append(
+                    f"Our agents estimate fair value at ${fair_value:.2f}, "
+                    f"suggesting {upside:.0f}% upside from here."
+                )
+            else:
+                rationale_parts.append(
+                    f"Our agents estimate fair value at ${fair_value:.2f}, "
+                    f"which is {abs(upside):.0f}% below the current price."
+                )
+        if stop_loss:
+            rationale_parts.append(f"Stop loss is set at ${stop_loss:.2f}.")
+
+        # Action based on verdict + position
+        if rec in ("STRONG_BUY", "BUY"):
+            headline = f"Keep holding — the thesis is intact"
+            action = f"The system rates {ticker} a {rec} with {conf_pct} confidence. Consider adding to this position if you have available capital."
+        elif rec == "ACCUMULATE":
+            headline = f"Gradually add on dips"
+            action = f"The fundamentals support building this position over time. Look for pullbacks to add shares at better prices."
+        elif rec in ("REDUCE", "SELL"):
+            headline = f"Consider reducing your exposure"
+            action = f"The system flags {ticker} as {rec}. Review whether your original thesis still holds and consider trimming."
+        elif rec == "WATCHLIST":
+            headline = f"Hold but watch closely"
+            action = f"Mixed signals — the position is worth keeping but not adding to right now. Monitor for the risk flags to resolve."
+        elif rec == "HOLD":
+            headline = f"No action needed right now"
+            action = f"The position is stable. Hold and review at the next analysis cycle."
+        elif rec == "AVOID":
+            headline = f"This position may need exiting"
+            action = f"The system rates {ticker} as AVOID. Review urgently — this may warrant selling."
+        else:
+            headline = f"Review this position"
+            action = f"Verdict: {rec} at {conf_pct} confidence."
+    else:
+        # Not held — should you buy?
+        situation = f"{short_name} is not currently in your portfolio."
+
+        if rec in ("STRONG_BUY", "BUY"):
+            headline = f"Strong candidate for purchase"
+            action = f"The system rates {ticker} a {rec} with {conf_pct} confidence. This could be worth initiating a position."
+        elif rec == "ACCUMULATE":
+            headline = f"Worth starting a small position"
+            action = f"Start accumulating gradually. Don't go all-in — build the position over time."
+        elif rec == "WATCHLIST":
+            headline = f"Interesting but not ready yet"
+            action = f"Add to your watch list and wait for a better entry point or for risk flags to clear."
+        elif rec in ("HOLD", "REDUCE", "SELL"):
+            headline = f"Not recommended for purchase"
+            action = f"The system does not recommend initiating a new position in {ticker} right now."
+        elif rec == "AVOID":
+            headline = f"Stay away"
+            action = f"Multiple agents flag significant concerns. There are better opportunities elsewhere."
+        else:
+            headline = f"{rec} — needs more analysis"
+            action = f"Run the full analysis pipeline for a clearer picture."
+
+    # Agent consensus narrative
+    if bulls and bears:
+        rationale_parts.append(
+            f"{', '.join(bull_names)} {'are' if len(bulls) > 1 else 'is'} bullish, "
+            f"while {', '.join(bear_names)} {'raise' if len(bears) > 1 else 'raises'} concerns."
+        )
+    elif bulls:
+        rationale_parts.append(f"All active agents ({', '.join(bull_names)}) are bullish.")
+    elif bears:
+        rationale_parts.append(f"All active agents ({', '.join(bear_names)}) are cautious or bearish.")
+
+    # Risk flag narrative
+    if risk_flags:
+        flag_labels = []
+        for f in risk_flags:
+            label = f.split(":")[0].strip().replace("_", " ").lower()
+            flag_labels.append(label)
+        rationale_parts.append(f"Key risks: {', '.join(flag_labels)}.")
+
+    # Portfolio context
+    total_value = sum(
+        float(p.current_price) * float(p.shares) for p in all_positions
+    ) if all_positions else 0
+    if total_value > 0 and position:
+        weight = (position.get("currentPrice", 0) * position.get("shares", 0)) / total_value * 100
+        rationale_parts.append(f"This position is {weight:.1f}% of your portfolio.")
+
+    # Sector context
+    if all_positions and fundamentals:
+        from collections import Counter
+        # Get sector of this stock
+        this_sector = profile.get("sector") if profile else None
+        if this_sector:
+            sector_count = sum(1 for p in all_positions if hasattr(p, 'ticker'))
+            # Simple check — we don't have sector per position easily, skip if complex
+            pass
+
+    # Quant gate summary
+    if quant_gate:
+        comp = quant_gate.get("compositeScore")
+        piotroski = quant_gate.get("piotroskiScore")
+        altman = quant_gate.get("altmanZone")
+        qg_parts = []
+        if comp is not None:
+            qg_parts.append(f"composite score {comp:.2f}")
+        if piotroski is not None:
+            qg_parts.append(f"Piotroski {piotroski}/9")
+        if altman:
+            qg_parts.append(f"Altman {altman}")
+        if qg_parts:
+            rationale_parts.append(f"Quantitative health: {', '.join(qg_parts)}.")
+
+    # Analyst target
+    if profile and profile.get("analystTarget") and price:
+        target = profile["analystTarget"]
+        diff_pct = ((target - price) / price) * 100
+        if abs(diff_pct) > 2:
+            direction = "above" if diff_pct > 0 else "below"
+            rationale_parts.append(
+                f"Wall Street target is ${target:.0f} ({abs(diff_pct):.0f}% {direction} current price)."
+            )
+
+    return {
+        "headline": headline,
+        "situation": situation,
+        "action": action,
+        "rationale": " ".join(rationale_parts),
+    }
+
+
 @router.get("/stock/{ticker}")
 def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
     """Full deep dive: profile, fundamentals, signals, decisions, watchlist state."""
@@ -187,6 +372,35 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         if not stock_industry:
             stock_industry = stock_rows[0].get("industry") or ""
 
+    # Position data (if held)
+    position_data = None
+    positions = registry.get_open_positions()
+    held = next((p for p in positions if p.ticker == ticker), None)
+    if held:
+        current = float(fund_data["price"]) if fund_data and fund_data.get("price") else float(held.current_price)
+        entry = float(held.entry_price)
+        pnl = (current - entry) * float(held.shares)
+        pnl_pct = ((current - entry) / entry * 100) if entry > 0 else 0
+        position_data = {
+            "shares": float(held.shares),
+            "entryPrice": entry,
+            "currentPrice": current,
+            "positionType": held.position_type,
+            "weight": float(held.weight) if held.weight else None,
+            "stopLoss": float(held.stop_loss) if held.stop_loss else None,
+            "fairValue": float(held.fair_value_estimate) if held.fair_value_estimate else None,
+            "pnl": round(pnl, 2),
+            "pnlPct": round(pnl_pct, 2),
+            "entryDate": str(held.entry_date) if held.entry_date else None,
+            "thesis": held.thesis or None,
+        }
+
+    # Synthesized briefing — plain English, position-aware
+    briefing = _build_briefing(
+        ticker, stock_name, verdict_data, position_data, positions,
+        fund_data, profile_data, competence_data, quant_gate,
+    )
+
     return {
         "ticker": ticker,
         "name": stock_name,
@@ -198,6 +412,8 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         "competence": competence_data,
         "verdict": verdict_data,
         "verdictHistory": verdict_history,
+        "position": position_data,
+        "briefing": briefing,
         "signals": [
             {
                 "agentName": r["agent_name"],
