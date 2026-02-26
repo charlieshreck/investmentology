@@ -276,6 +276,9 @@ def create_position(
     existing = registry.get_open_positions()
     existing_pos = next((p for p in existing if p.ticker == ticker), None)
 
+    # Cost of this purchase
+    purchase_cost = new_price * new_shares
+
     if existing_pos:
         # Weighted average cost basis
         old_cost = existing_pos.entry_price * existing_pos.shares
@@ -289,21 +292,33 @@ def create_position(
             "WHERE id = %s AND is_closed = FALSE",
             (total_shares, avg_price, new_price, existing_pos.id),
         )
-        return {"id": existing_pos.id, "ticker": ticker, "status": "added",
-                "totalShares": float(total_shares), "avgCost": float(avg_price)}
+        result = {"id": existing_pos.id, "ticker": ticker, "status": "added",
+                  "totalShares": float(total_shares), "avgCost": float(avg_price)}
+    else:
+        position_id = registry.create_position(
+            ticker=ticker,
+            entry_date=date.today(),
+            entry_price=new_price,
+            shares=new_shares,
+            position_type=body.position_type,
+            weight=Decimal(str(body.weight)),
+            stop_loss=Decimal(str(body.stop_loss)) if body.stop_loss else None,
+            fair_value_estimate=Decimal(str(body.fair_value_estimate)) if body.fair_value_estimate else None,
+            thesis=body.thesis,
+        )
+        result = {"id": position_id, "ticker": ticker, "status": "created"}
 
-    position_id = registry.create_position(
-        ticker=ticker,
-        entry_date=date.today(),
-        entry_price=new_price,
-        shares=new_shares,
-        position_type=body.position_type,
-        weight=Decimal(str(body.weight)),
-        stop_loss=Decimal(str(body.stop_loss)) if body.stop_loss else None,
-        fair_value_estimate=Decimal(str(body.fair_value_estimate)) if body.fair_value_estimate else None,
-        thesis=body.thesis,
-    )
-    return {"id": position_id, "ticker": ticker, "status": "created"}
+    # Deduct purchase cost from cash reserve
+    try:
+        registry._db.execute(
+            "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve - %s",
+            (purchase_cost,),
+        )
+        logger.info("Deducted $%.2f from cash reserve for %s purchase", float(purchase_cost), ticker)
+    except Exception:
+        logger.warning("Failed to deduct cash reserve after buying %s", ticker, exc_info=True)
+
+    return result
 
 
 @router.post("/portfolio/positions/{position_id}/close")
