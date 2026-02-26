@@ -18,6 +18,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _build_portfolio_context(registry: Registry) -> dict:
+    """Build portfolio context dict from current open positions."""
+    positions = registry.get_open_positions()
+    if not positions:
+        return {}
+    return {
+        "held_tickers": [p.ticker for p in positions],
+        "position_count": len(positions),
+        "total_value": float(sum(p.current_price * p.shares for p in positions)),
+        "positions": [
+            {
+                "ticker": p.ticker,
+                "shares": float(p.shares),
+                "entry_price": float(p.entry_price),
+                "current_price": float(p.current_price),
+                "weight": float(p.weight) if p.weight else 0,
+                "position_type": p.position_type,
+            }
+            for p in positions
+        ],
+    }
+
+
 class AnalyseRequest(BaseModel):
     tickers: list[str]
 
