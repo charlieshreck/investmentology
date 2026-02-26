@@ -322,21 +322,58 @@ def close_position(
     exit_d = date.fromisoformat(body.exit_date) if body.exit_date else date.today()
     registry.close_position(position_id, Decimal(str(body.exit_price)), exit_d)
 
-    return {"id": position_id, "status": "closed", "exit_price": body.exit_price}
+    # Return sale proceeds to cash reserve
+    proceeds = position.shares * Decimal(str(body.exit_price))
+    try:
+        registry._db.execute(
+            "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve + %s",
+            (proceeds,),
+        )
+        logger.info("Added $%.2f proceeds from %s to cash reserve", float(proceeds), position.ticker)
+    except Exception:
+        logger.warning("Failed to update cash reserve after closing %s", position.ticker, exc_info=True)
+
+    return {"id": position_id, "status": "closed", "exit_price": body.exit_price, "proceeds": float(proceeds)}
 
 
 @router.get("/portfolio/closed")
 def get_closed_positions(registry: Registry = Depends(get_registry)) -> dict:
-    """Return closed positions with realized P&L."""
+    """Return closed positions with realized P&L, enriched with analysis data."""
     positions = registry.get_closed_positions()
+
+    # Fetch stock info and verdicts for all closed tickers
+    tickers = list({p.ticker for p in positions})
+    stock_info: dict[str, dict] = {}
+    verdicts: dict[str, dict] = {}
+    if tickers:
+        try:
+            stock_rows = registry._db.execute(
+                "SELECT ticker, name, sector, industry FROM invest.stocks WHERE ticker = ANY(%s)",
+                (tickers,),
+            )
+            stock_info = {r["ticker"]: r for r in stock_rows}
+        except Exception:
+            logger.warning("Failed to fetch stock info for closed positions", exc_info=True)
+        for t in tickers:
+            v = registry.get_latest_verdict(t)
+            if v:
+                verdicts[t] = v
+
     items = []
     total_realized = Decimal("0")
     for p in positions:
         rpnl = float(p.realized_pnl) if p.realized_pnl else 0.0
         total_realized += p.realized_pnl or Decimal("0")
+        si = stock_info.get(p.ticker, {})
+        name = si.get("name", p.ticker) or p.ticker
+        short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+        v = verdicts.get(p.ticker)
         items.append({
             "id": p.id,
             "ticker": p.ticker,
+            "name": short_name,
+            "sector": si.get("sector", "Unknown") or "Unknown",
+            "positionType": p.position_type or "core",
             "entryDate": str(p.entry_date),
             "entryPrice": float(p.entry_price),
             "exitDate": str(p.exit_date) if p.exit_date else None,
@@ -345,6 +382,12 @@ def get_closed_positions(registry: Registry = Depends(get_registry)) -> dict:
             "realizedPnl": rpnl,
             "realizedPnlPct": float(p.pnl_pct * 100) if p.entry_price else 0.0,
             "holdingDays": (p.exit_date - p.entry_date).days if p.exit_date else None,
+            "fairValue": float(p.fair_value_estimate) if p.fair_value_estimate else None,
+            "thesis": p.thesis or None,
+            "verdict": v["verdict"] if v else None,
+            "verdictConfidence": float(v["confidence"]) if v and v.get("confidence") else None,
+            "verdictReasoning": v["reasoning"] if v else None,
+            "verdictDate": str(v["created_at"]) if v and v.get("created_at") else None,
         })
     return {"closedPositions": items, "totalRealizedPnl": float(total_realized)}
 
