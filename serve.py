@@ -1,15 +1,29 @@
 """Single-port server: FastAPI API + PWA static files on port 80."""
 import uvicorn
 from pathlib import Path
-from fastapi import Request
+from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from investmentology.api.app import create_app
 
 PWA_DIR = Path(__file__).parent / "pwa" / "dist"
 
 app = create_app(use_lifespan=True)
+
+
+class ImmutableAssetHeaders(BaseHTTPMiddleware):
+    """Set long-lived cache headers for content-hashed assets."""
+
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        if request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+app.add_middleware(ImmutableAssetHeaders)
 
 # PWA static assets
 app.mount("/assets", StaticFiles(directory=PWA_DIR / "assets"), name="assets")

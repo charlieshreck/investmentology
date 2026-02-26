@@ -35,7 +35,8 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        navigateFallback: "/index.html",
+        // No navigateFallback — serve.py handles SPA routing and sends
+        // Cache-Control: no-cache on index.html, ensuring fresh loads.
         runtimeCaching: [
           {
             // Cache API responses (except auth) with stale-while-revalidate
@@ -47,19 +48,6 @@ export default defineConfig({
                 maxEntries: 50,
                 maxAgeSeconds: 300, // 5 minutes
               },
-            },
-          },
-          {
-            // Cache static assets — NetworkFirst so new builds always win
-            urlPattern: /\.(js|css|png|svg|woff2?)$/,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "static-cache",
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 86400, // 1 day
-              },
-              networkTimeoutSeconds: 3,
             },
           },
         ],
