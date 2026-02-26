@@ -331,6 +331,74 @@ def cmd_cron(args: argparse.Namespace) -> None:
             logging.info(msg)
             print(msg)
 
+        elif job == "price-refresh":
+            from investmentology.data.yfinance_client import YFinanceClient
+
+            yf_client = YFinanceClient(cache_ttl_hours=0)
+
+            # Collect all tickers: positions + watchlist + recent verdicts
+            all_tickers: set[str] = set()
+
+            # Open positions
+            positions = registry.get_open_positions()
+            pos_tickers = {p.ticker for p in positions}
+            all_tickers |= pos_tickers
+
+            # Watchlist
+            wl_rows = registry._db.execute(
+                "SELECT ticker FROM invest.watchlist WHERE state NOT IN ('REJECTED', 'REMOVED')"
+            )
+            all_tickers |= {r["ticker"] for r in wl_rows}
+
+            # Recent verdicts (recs)
+            verdict_rows = registry._db.execute(
+                "SELECT DISTINCT ON (ticker) ticker "
+                "FROM invest.verdicts ORDER BY ticker, created_at DESC"
+            )
+            all_tickers |= {r["ticker"] for r in verdict_rows}
+
+            if not all_tickers:
+                print("No tickers to refresh.")
+                registry.log_cron_finish(cron_id, "skipped", "No tickers")
+                return
+
+            ticker_list = sorted(all_tickers)
+            print(f"Refreshing prices for {len(ticker_list)} tickers...")
+
+            # Batch fetch (single yf.download call)
+            prices = yf_client.get_prices_batch(ticker_list)
+            updated = 0
+
+            # Update fundamentals_cache (used by recs/watchlist queries)
+            # Insert a new price-only row carrying forward market_cap from latest entry
+            for ticker, price in prices.items():
+                try:
+                    registry._db.execute(
+                        "INSERT INTO invest.fundamentals_cache (ticker, fetched_at, price, market_cap) "
+                        "SELECT %s, NOW(), %s, "
+                        "  (SELECT fc.market_cap FROM invest.fundamentals_cache fc "
+                        "   WHERE fc.ticker = %s ORDER BY fc.fetched_at DESC LIMIT 1) ",
+                        (ticker, price, ticker),
+                    )
+                    updated += 1
+                except Exception:
+                    pass  # ticker may not exist in invest.stocks
+
+            # Update portfolio positions current_price
+            pos_updated = 0
+            for p in positions:
+                if p.ticker in prices:
+                    registry._db.execute(
+                        "UPDATE invest.portfolio_positions SET current_price = %s, updated_at = NOW() "
+                        "WHERE ticker = %s AND is_closed = false",
+                        (prices[p.ticker], p.ticker),
+                    )
+                    pos_updated += 1
+
+            msg = f"Price refresh: {updated}/{len(ticker_list)} prices fetched, {pos_updated} positions updated"
+            logging.info(msg)
+            print(msg)
+
         else:
             print(f"Unknown cron job: {job}")
             registry.log_cron_finish(cron_id, "error", f"Unknown job: {job}")
@@ -385,7 +453,8 @@ def main(argv: list[str] | None = None) -> None:
     # cron
     p_cron = subs.add_parser("cron", help="Run a scheduled pipeline job")
     p_cron.add_argument("job", choices=[
-        "weekly-screen", "post-screen-analyze", "daily-watchlist-analyze", "daily-monitor",
+        "weekly-screen", "post-screen-analyze", "daily-watchlist-analyze",
+        "daily-monitor", "price-refresh",
     ], help="Cron job to run")
     p_cron.add_argument("--limit", type=int, default=20, help="Max tickers to process")
     p_cron.add_argument("--threshold", type=float, default=None,
