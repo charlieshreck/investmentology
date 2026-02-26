@@ -206,61 +206,69 @@ class BuzzScorer:
         }
 
     def score_watchlist(self, tickers: list[str], registry=None) -> dict[str, dict]:
-        """Score all watchlist tickers and optionally persist to DB."""
-        results = {}
-        for ticker in tickers:
+        """Score all watchlist tickers in parallel and optionally persist to DB."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        _empty = {
+            "news_count_7d": 0, "searxng_mentions": 0, "finnhub_mentions": 0,
+            "headline_sentiment": 0.0, "buzz_score": 0.0, "buzz_label": "QUIET",
+            "contrarian_flag": False,
+        }
+        results: dict[str, dict] = {}
+
+        def _score_one(ticker: str) -> tuple[str, dict]:
             try:
-                score = self.score_ticker(ticker)
-                results[ticker] = score
-
-                # Contrarian flag: low buzz + positive verdict
-                if registry and score["buzz_score"] < 25:
-                    try:
-                        rows = registry._db.execute(
-                            """SELECT verdict FROM invest.verdicts
-                               WHERE ticker = %s ORDER BY created_at DESC LIMIT 1""",
-                            (ticker,),
-                        )
-                        if rows and rows[0]["verdict"] in ("STRONG_BUY", "BUY", "ACCUMULATE"):
-                            score["contrarian_flag"] = True
-                    except Exception:
-                        pass
-
-                # Persist
-                if registry:
-                    try:
-                        registry._db.execute(
-                            """INSERT INTO invest.buzz_scores
-                               (ticker, news_count_7d, news_count_30d, headline_sentiment,
-                                buzz_score, buzz_label, contrarian_flag, details)
-                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)""",
-                            (
-                                ticker,
-                                score["news_count_7d"],
-                                0,  # 30d not computed in SearXNG mode
-                                score["headline_sentiment"],
-                                score["buzz_score"],
-                                score["buzz_label"],
-                                score.get("contrarian_flag", False),
-                                json.dumps({
-                                    "headlines": score.get("headlines", []),
-                                    "sources": score.get("sources", []),
-                                }),
-                            ),
-                        )
-                    except Exception:
-                        logger.debug("Failed to persist buzz score for %s", ticker)
-
+                return ticker, self.score_ticker(ticker)
             except Exception:
                 logger.debug("Failed to score buzz for %s", ticker)
-                results[ticker] = {
-                    "news_count_7d": 0,
-                    "searxng_mentions": 0,
-                    "finnhub_mentions": 0,
-                    "headline_sentiment": 0.0,
-                    "buzz_score": 0.0,
-                    "buzz_label": "QUIET",
-                    "contrarian_flag": False,
-                }
+                return ticker, dict(_empty)
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {pool.submit(_score_one, t): t for t in tickers}
+            for future in as_completed(futures):
+                try:
+                    ticker, score = future.result(timeout=15)
+                except Exception:
+                    ticker = futures[future]
+                    score = dict(_empty)
+                results[ticker] = score
+
+        # Post-process: contrarian flags and persistence (fast, serial is fine)
+        for ticker, score in results.items():
+            if registry and score["buzz_score"] < 25:
+                try:
+                    rows = registry._db.execute(
+                        """SELECT verdict FROM invest.verdicts
+                           WHERE ticker = %s ORDER BY created_at DESC LIMIT 1""",
+                        (ticker,),
+                    )
+                    if rows and rows[0]["verdict"] in ("STRONG_BUY", "BUY", "ACCUMULATE"):
+                        score["contrarian_flag"] = True
+                except Exception:
+                    pass
+
+            if registry:
+                try:
+                    registry._db.execute(
+                        """INSERT INTO invest.buzz_scores
+                           (ticker, news_count_7d, news_count_30d, headline_sentiment,
+                            buzz_score, buzz_label, contrarian_flag, details)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)""",
+                        (
+                            ticker,
+                            score["news_count_7d"],
+                            0,
+                            score["headline_sentiment"],
+                            score["buzz_score"],
+                            score["buzz_label"],
+                            score.get("contrarian_flag", False),
+                            json.dumps({
+                                "headlines": score.get("headlines", []),
+                                "sources": score.get("sources", []),
+                            }),
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to persist buzz score for %s", ticker)
 
         return results

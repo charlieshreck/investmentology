@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from fastapi import APIRouter, Depends
 
 from investmentology.api.deps import get_registry
@@ -13,6 +17,8 @@ from investmentology.api.routes.shared import (
     verdict_stability as _verdict_stability,
 )
 from investmentology.registry.queries import Registry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -143,7 +149,7 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
     # Filter to positive verdicts only
     positive_rows = [r for r in rows if r.get("verdict") in POSITIVE_VERDICTS]
 
-    # Compute verdict stability for each recommendation
+    # Fast enrichment (DB only — sub-millisecond per ticker)
     for row in positive_rows:
         ticker = row.get("ticker", "")
         if ticker:
@@ -152,69 +158,89 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
             except Exception:
                 pass
 
-    # Compute portfolio fit for each recommendation
     try:
         scorer = PortfolioFitScorer(registry)
         for row in positive_rows:
-            ticker = row.get("ticker", "")
-            sector = row.get("sector")
-            row["_portfolio_fit"] = scorer.score(ticker, sector)
+            row["_portfolio_fit"] = scorer.score(row.get("ticker", ""), row.get("sector"))
     except Exception:
-        pass  # Fit scoring is optional — don't break recommendations
+        pass
 
-    # Fetch dividend data (cached, parallel)
-    try:
-        rec_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
-        div_data = get_dividend_data(rec_tickers)
-        for row in positive_rows:
-            ticker = row.get("ticker", "")
-            dd = div_data.get(ticker)
-            if dd and dd.get("annual_div", 0) > 0:
-                price = float(row.get("current_price") or 0)
-                div_yield = (dd["annual_div"] / price * 100) if price > 0 else 0.0
-                row["_dividend_data"] = {
-                    "yield": round(div_yield, 2),
-                    "annual": round(dd["annual_div"], 2),
-                    "frequency": dd.get("frequency", "none"),
-                }
-    except Exception:
-        pass  # Dividend enrichment is optional
+    # Slow enrichment (external APIs) — run in parallel
+    rec_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
+    buzz_results: dict = {}
+    div_data: dict = {}
+    earnings_results: dict = {}
 
-    # Fetch buzz scores for recommendations (batch — uses SearXNG via MCP)
-    try:
+    def _fetch_buzz(tickers: list[str]) -> dict:
         from investmentology.data.buzz_scorer import BuzzScorer
+        return BuzzScorer().score_watchlist(tickers)
 
-        buzz_scorer = BuzzScorer()
-        buzz_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
-        buzz_results = buzz_scorer.score_watchlist(buzz_tickers)
-        for row in positive_rows:
-            ticker = row.get("ticker", "")
-            buzz = buzz_results.get(ticker)
-            if buzz:
-                row["_buzz"] = buzz
-    except Exception:
-        pass  # Buzz scoring is optional
+    def _fetch_dividends(tickers: list[str]) -> dict:
+        return get_dividend_data(tickers)
 
-    # Fetch earnings momentum
-    try:
+    def _fetch_earnings(tickers: list[str]) -> dict:
+        from concurrent.futures import ThreadPoolExecutor as _Pool
         from investmentology.data.earnings_tracker import EarningsTracker
         from investmentology.data.finnhub_provider import FinnhubProvider
-        import os
-
         fh_key = os.environ.get("FINNHUB_API_KEY", "")
-        if fh_key:
-            fh = FinnhubProvider(fh_key)
-            tracker = EarningsTracker(fh, registry)
-            for row in positive_rows:
-                ticker = row.get("ticker", "")
-                if ticker:
-                    try:
-                        tracker.capture_snapshot(ticker)
-                        row["_earnings_momentum"] = tracker.compute_momentum(ticker)
-                    except Exception:
-                        pass
-    except Exception:
-        pass  # Earnings tracking is optional
+        if not fh_key:
+            return {}
+        fh = FinnhubProvider(fh_key)
+        tracker = EarningsTracker(fh, registry)
+
+        def _one(t: str) -> tuple[str, dict | None]:
+            try:
+                tracker.capture_snapshot(t)
+                return t, tracker.compute_momentum(t)
+            except Exception:
+                return t, None
+
+        results = {}
+        with _Pool(max_workers=4) as p:
+            for ticker, momentum in p.map(lambda t: _one(t), tickers):
+                if momentum:
+                    results[ticker] = momentum
+        return results
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        fut_buzz = pool.submit(_fetch_buzz, rec_tickers)
+        fut_div = pool.submit(_fetch_dividends, rec_tickers)
+        fut_earn = pool.submit(_fetch_earnings, rec_tickers)
+
+        try:
+            buzz_results = fut_buzz.result(timeout=30)
+        except Exception:
+            logger.debug("Buzz enrichment failed or timed out")
+        try:
+            div_data = fut_div.result(timeout=20)
+        except Exception:
+            logger.debug("Dividend enrichment failed or timed out")
+        try:
+            earnings_results = fut_earn.result(timeout=20)
+        except Exception:
+            logger.debug("Earnings enrichment failed or timed out")
+
+    # Apply enrichment results
+    for row in positive_rows:
+        ticker = row.get("ticker", "")
+        # Buzz
+        buzz = buzz_results.get(ticker)
+        if buzz:
+            row["_buzz"] = buzz
+        # Dividends
+        dd = div_data.get(ticker)
+        if dd and dd.get("annual_div", 0) > 0:
+            price = float(row.get("current_price") or 0)
+            div_yield = (dd["annual_div"] / price * 100) if price > 0 else 0.0
+            row["_dividend_data"] = {
+                "yield": round(div_yield, 2),
+                "annual": round(dd["annual_div"], 2),
+                "frequency": dd.get("frequency", "none"),
+            }
+        # Earnings
+        em = earnings_results.get(ticker)
+        if em:
+            row["_earnings_momentum"] = em
 
     items = [_format_recommendation(r, registry) for r in positive_rows]
 
