@@ -9,7 +9,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
-  - cloudflare-tunnel-ingress.yaml
   - cronjob-price-refresh.yaml
   - cronjob-screen.yaml
   - cronjob-post-screen.yaml
