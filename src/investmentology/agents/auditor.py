@@ -209,6 +209,18 @@ class AuditorAgent(BaseAgent):
                 shares = h.get("shares", 0)
                 parts.append(f"  {name}: {shares:,} shares")
 
+        # Thesis lifecycle context (Phase 1)
+        if request.position_thesis:
+            parts.append("")
+            parts.append("THESIS RISK CONTEXT:")
+            parts.append(f"  Original buy thesis: {request.position_thesis[:300]}")
+            if request.position_type:
+                parts.append(f"  Position type: {request.position_type}")
+            if request.days_held is not None:
+                parts.append(f"  Held for: {request.days_held} days")
+            parts.append("  Assess: Are there risks that could BREAK this thesis?")
+            parts.append("  Distinguish between thesis-breaking risks and temporary noise.")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

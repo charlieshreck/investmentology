@@ -152,6 +152,19 @@ class SorosAgent(BaseAgent):
             parts.append(f"  Total value at risk: ${pc.get('total_value', 0):,.0f}")
             parts.append(f"  Consider: How does adding {request.ticker} ({request.sector}) change macro vulnerability?")
 
+        # Held-position awareness (Phase 1 fix — Soros was blind to held positions)
+        if request.position_type and request.days_held is not None:
+            parts.append("")
+            parts.append("HELD POSITION CONTEXT:")
+            parts.append(f"  Already hold {request.ticker} as {request.position_type} position")
+            parts.append(f"  Days held: {request.days_held}")
+            if request.pnl_pct is not None:
+                parts.append(f"  Current P&L: {request.pnl_pct:+.1f}%")
+            if request.position_thesis:
+                parts.append(f"  Original thesis: {request.position_thesis[:200]}")
+            parts.append("  Assess: How do current macro conditions affect this EXISTING position?")
+            parts.append("  Focus on macro risks to the thesis, NOT whether to initiate a new position.")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

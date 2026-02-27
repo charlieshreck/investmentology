@@ -284,7 +284,12 @@ async def reanalysis_loop(registry: Registry, orchestrator) -> None:
                 # Run re-analysis (only for routine and elevated — emergency just logs)
                 if event.severity != "emergency" and event.tickers:
                     try:
-                        result = await orchestrator.analyze_candidates(event.tickers)
+                        # Build portfolio context so agents know stocks are held
+                        from investmentology.api.routes.analyse import _build_portfolio_context
+                        portfolio_context = _build_portfolio_context(registry)
+                        result = await orchestrator.analyze_candidates(
+                            event.tickers, portfolio_context=portfolio_context,
+                        )
                         logger.info(
                             "Re-analysis complete: %d analyzed, %d conviction buys",
                             result.analyzed, result.conviction_buys,

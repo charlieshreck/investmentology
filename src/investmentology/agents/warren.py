@@ -191,6 +191,21 @@ class WarrenAgent(BaseAgent):
                 else:
                     parts.append(f"  {request.sector} is a NEW sector for the portfolio — adds diversification")
 
+        # Thesis lifecycle context (Phase 1)
+        if request.position_thesis:
+            parts.append("")
+            parts.append("THESIS CONTEXT:")
+            parts.append(f"  Original buy thesis: {request.position_thesis[:300]}")
+            if request.position_type:
+                parts.append(f"  Position type: {request.position_type}")
+            if request.days_held is not None:
+                parts.append(f"  Held for: {request.days_held} days")
+            if request.thesis_health:
+                parts.append(f"  Thesis health: {request.thesis_health}")
+            parts.append("  CRITICAL: Evaluate whether this thesis remains INTACT.")
+            parts.append("  Do NOT recommend selling just because of short-term noise.")
+            parts.append("  Only recommend selling if the fundamental thesis is BROKEN.")
+
         if request.previous_verdict:
             pv = request.previous_verdict
             parts.append("")

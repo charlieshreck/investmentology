@@ -20,24 +20,52 @@ router = APIRouter()
 
 def _build_portfolio_context(registry: Registry) -> dict:
     """Build portfolio context dict from current open positions."""
+    from datetime import date
+
     positions = registry.get_open_positions()
     if not positions:
         return {}
+
+    total_value = float(sum(p.current_price * p.shares for p in positions))
+
+    # Compute sector exposure from positions + stocks table
+    sector_exposure: dict[str, float] = {}
+    stocks = registry.get_active_stocks()
+    stock_map = {s.ticker: s for s in stocks}
+    for p in positions:
+        stock = stock_map.get(p.ticker)
+        sector = stock.sector if stock else "Unknown"
+        mv = float(p.current_price * p.shares)
+        pct = (mv / total_value * 100) if total_value > 0 else 0
+        sector_exposure[sector] = sector_exposure.get(sector, 0) + pct
+
+    pos_list = []
+    for p in positions:
+        pnl = float(p.pnl_pct * 100) if p.entry_price else 0
+        weight = (float(p.current_price * p.shares) / total_value * 100) if total_value > 0 else 0
+        days = (date.today() - p.entry_date).days if p.entry_date else 0
+        pos_list.append({
+            "ticker": p.ticker,
+            "shares": float(p.shares),
+            "entry_price": float(p.entry_price),
+            "current_price": float(p.current_price),
+            "weight": float(p.weight) if p.weight else 0,
+            "weight_pct": round(weight, 1),
+            "pnl_pct": round(pnl, 1),
+            "position_type": p.position_type,
+            "entry_date": str(p.entry_date) if p.entry_date else None,
+            "days_held": days,
+            "thesis": p.thesis or "",
+            "fair_value_estimate": float(p.fair_value_estimate) if p.fair_value_estimate else None,
+            "stop_loss": float(p.stop_loss) if p.stop_loss else None,
+        })
+
     return {
         "held_tickers": [p.ticker for p in positions],
         "position_count": len(positions),
-        "total_value": float(sum(p.current_price * p.shares for p in positions)),
-        "positions": [
-            {
-                "ticker": p.ticker,
-                "shares": float(p.shares),
-                "entry_price": float(p.entry_price),
-                "current_price": float(p.current_price),
-                "weight": float(p.weight) if p.weight else 0,
-                "position_type": p.position_type,
-            }
-            for p in positions
-        ],
+        "total_value": total_value,
+        "sector_exposure": sector_exposure,
+        "positions": pos_list,
     }
 
 

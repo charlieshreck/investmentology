@@ -37,6 +37,15 @@ class AnalysisRequest:
     # Previous analysis context for history-aware re-analysis
     previous_verdict: dict | None = None
     previous_signals: list[dict] | None = None
+    # Thesis lifecycle context (Phase 0+1)
+    market_snapshot: dict | None = None  # SPY, VIX, yields at analysis time
+    position_thesis: str | None = None  # Original buy thesis (immutable)
+    position_type: str | None = None  # permanent, core, tactical
+    days_held: int | None = None  # Days since entry
+    thesis_health: str | None = None  # INTACT, UNDER_REVIEW, CHALLENGED, BROKEN
+    thesis_type: str | None = None  # growth, income, value, momentum
+    entry_price: float | None = None  # Original entry price
+    pnl_pct: float | None = None  # Current unrealized P&L %
 
 
 @dataclass

@@ -26,6 +26,7 @@ from investmentology.agents.simons import SimonsAgent
 from investmentology.agents.soros import SorosAgent
 from investmentology.agents.warren import WarrenAgent
 from investmentology.data.enricher import DataEnricher
+from investmentology.data.snapshots import fetch_market_snapshot
 from investmentology.data.yfinance_client import YFinanceClient
 from investmentology.quant_gate.screener import _dict_to_snapshot
 from investmentology.compatibility.matrix import CompatibilityEngine, CompatibilityResult
@@ -67,6 +68,8 @@ class CandidateAnalysis:
     # Overall
     final_action: str = "NO_ACTION"
     final_confidence: Decimal = Decimal("0")
+    # Market context at analysis time (Phase 0)
+    market_snapshot: dict | None = None
 
 
 @dataclass
@@ -196,6 +199,34 @@ class AnalysisOrchestrator:
         """Run full pipeline for a single ticker."""
         analysis = CandidateAnalysis(ticker=ticker)
 
+        # Phase 0: Capture market snapshot at analysis time
+        market_snapshot: dict | None = None
+        try:
+            market_snapshot = fetch_market_snapshot()
+            # Store snapshot in DB for historical reference
+            self._registry.insert_market_snapshot(market_snapshot)
+            analysis.market_snapshot = market_snapshot
+            logger.debug("Market snapshot captured: SPY=%s VIX=%s", market_snapshot.get("spy_price"), market_snapshot.get("vix"))
+        except Exception:
+            logger.warning("Failed to capture market snapshot for %s analysis", ticker)
+
+        # Phase 1: Build thesis context for held positions
+        held_position = None
+        thesis_context: dict = {}
+        if portfolio_context and portfolio_context.get("held_tickers"):
+            if ticker in portfolio_context["held_tickers"]:
+                for pos in portfolio_context.get("positions", []):
+                    if pos.get("ticker") == ticker:
+                        held_position = pos
+                        thesis_context = {
+                            "position_thesis": pos.get("thesis", ""),
+                            "position_type": pos.get("position_type", "tactical"),
+                            "days_held": pos.get("days_held", 0),
+                            "entry_price": pos.get("entry_price"),
+                            "pnl_pct": pos.get("pnl_pct", 0),
+                        }
+                        break
+
         # Fetch fundamentals — try DB cache first, then on-demand yfinance
         fundamentals = self._registry.get_latest_fundamentals(ticker)
         if fundamentals is None:
@@ -303,6 +334,13 @@ class AnalysisOrchestrator:
                 "date": str(prev_verdict["created_at"]) if prev_verdict["created_at"] else None,
             } if prev_verdict else None,
             previous_signals=prev_signals or None,
+            # Phase 0+1: Market context and thesis lifecycle
+            market_snapshot=market_snapshot,
+            position_thesis=thesis_context.get("position_thesis"),
+            position_type=thesis_context.get("position_type"),
+            days_held=thesis_context.get("days_held"),
+            entry_price=thesis_context.get("entry_price"),
+            pnl_pct=thesis_context.get("pnl_pct"),
         )
 
         # Enrich with external data (FRED macro, Finnhub news/earnings/insider/sentiment)
@@ -430,6 +468,50 @@ class AnalysisOrchestrator:
                 f"Outside Circle of Competence ({familiarity} familiarity, {conf:.0f}% confidence)"
             )
 
+        # --- Phase 2: Thesis-aware verdict gating ---
+        gating_result = None
+        if held_position and thesis_context.get("position_type"):
+            try:
+                from investmentology.advisory.thesis_health import apply_verdict_gating, assess_thesis_health
+                gating_result = apply_verdict_gating(
+                    ticker=ticker,
+                    new_verdict=analysis.verdict.verdict.value,
+                    new_confidence=analysis.verdict.confidence,
+                    position_type=thesis_context["position_type"],
+                    registry=self._registry,
+                )
+                if not gating_result.allowed and gating_result.gated_verdict:
+                    from investmentology.verdict import Verdict
+                    original_verdict = analysis.verdict.verdict.value
+                    analysis.verdict.verdict = Verdict(gating_result.gated_verdict)
+                    analysis.verdict.risk_flags.append(
+                        f"GATED: {original_verdict}→{gating_result.gated_verdict} ({gating_result.reason})"
+                    )
+                    logger.info(
+                        "Verdict gated for %s: %s → %s (%s)",
+                        ticker, original_verdict, gating_result.gated_verdict, gating_result.reason,
+                    )
+
+                # Assess and update thesis health on the position
+                assessment = assess_thesis_health(ticker, self._registry, thesis_context["position_type"])
+                try:
+                    self._registry._db.execute(
+                        "UPDATE invest.portfolio_positions SET thesis_health = %s "
+                        "WHERE ticker = %s AND is_closed = false",
+                        (assessment.health.value, ticker),
+                    )
+                except Exception:
+                    logger.debug("Could not update thesis_health for %s (column may not exist yet)", ticker)
+            except Exception:
+                logger.debug("Verdict gating failed for %s, proceeding without", ticker)
+
+        # Log verdict diff if verdict changed from previous
+        self._log_verdict_diff(
+            ticker, prev_verdict, analysis,
+            was_gated=bool(gating_result and not gating_result.allowed),
+            gating_reason=gating_result.reason if gating_result and not gating_result.allowed else None,
+        )
+
         # Map verdict to legacy action code for backward compat
         analysis.final_action = self._verdict_to_action(analysis.verdict)
         analysis.final_confidence = analysis.verdict.confidence
@@ -522,6 +604,9 @@ class AnalysisOrchestrator:
         # Log predictions for the learning feedback loop
         self._log_predictions(ticker, analysis)
 
+        # Phase 4+5: Store in semantic + graph memory (fire-and-forget)
+        self._store_memory_async(ticker, analysis, thesis_context)
+
         return analysis
 
 
@@ -575,6 +660,23 @@ class AnalysisOrchestrator:
                         )
                     except Exception:
                         logger.debug("Failed to log %d-day target price prediction for %s/%s", horizon, ticker, resp.agent_name)
+
+        # Phase 0: Backfill market context on predictions just logged
+        if analysis.market_snapshot:
+            try:
+                snap = analysis.market_snapshot
+                # Get stock price from fundamentals cache
+                fund = self._registry.get_latest_fundamentals(ticker)
+                stock_price = float(fund.price) if fund and fund.price else None
+                self._registry._db.execute(
+                    "UPDATE invest.predictions SET "
+                    "price_at_prediction = %s, sp500_at_prediction = %s, vix_at_prediction = %s "
+                    "WHERE ticker = %s AND price_at_prediction IS NULL "
+                    "AND created_at > NOW() - INTERVAL '5 minutes'",
+                    (stock_price, snap.get("spy_price"), snap.get("vix"), ticker),
+                )
+            except Exception:
+                logger.debug("Could not backfill market context on predictions for %s", ticker)
 
     async def _run_agent(
         self, agent: WarrenAgent | SorosAgent | SimonsAgent | AuditorAgent,
@@ -722,10 +824,20 @@ class AnalysisOrchestrator:
                 # Tactical: 15% hard stop from entry
                 stop_loss = (held.entry_price * Decimal("0.85")).quantize(Decimal("0.01"))
 
-        # Build thesis summary from verdict
+        # Phase 1 fix: Only set thesis on FIRST analysis (when entry_thesis is empty).
+        # Subsequent analyses update fair_value/stop_loss but NEVER overwrite the thesis.
         thesis: str | None = None
-        if analysis.verdict:
+        if analysis.verdict and not held.thesis:
             thesis = f"[{analysis.verdict.verdict.value}] {analysis.verdict.reasoning[:500]}"
+            # Also set entry_thesis (immutable) via direct DB call
+            try:
+                self._registry._db.execute(
+                    "UPDATE invest.portfolio_positions SET entry_thesis = %s "
+                    "WHERE ticker = %s AND is_closed = false AND entry_thesis IS NULL",
+                    (thesis, ticker),
+                )
+            except Exception:
+                logger.debug("Could not set entry_thesis for %s (column may not exist yet)", ticker)
 
         if fair_value or stop_loss or thesis:
             updated = self._registry.update_position_analysis(
@@ -739,3 +851,160 @@ class AnalysisOrchestrator:
                     "Updated position %s: fair_value=%s stop_loss=%s",
                     ticker, fair_value, stop_loss,
                 )
+
+        # Log thesis event for audit trail
+        self._log_thesis_event(ticker, held, analysis)
+
+    def _log_thesis_event(
+        self, ticker: str, held, analysis: CandidateAnalysis,
+    ) -> None:
+        """Log a thesis lifecycle event to the audit trail."""
+        if not analysis.verdict:
+            return
+
+        # Determine event type
+        prev = self._registry.get_latest_verdict(ticker)
+        # Check if there's already a thesis event for this ticker
+        try:
+            existing_events = self._registry._db.execute(
+                "SELECT event_type FROM invest.thesis_events "
+                "WHERE ticker = %s ORDER BY created_at DESC LIMIT 1",
+                (ticker,),
+            )
+        except Exception:
+            existing_events = []
+
+        if not existing_events:
+            event_type = "ENTRY"
+        elif prev and prev.get("verdict") != analysis.verdict.verdict.value:
+            # Verdict changed
+            bearish = {"SELL", "AVOID", "DISCARD", "REDUCE"}
+            if analysis.verdict.verdict.value in bearish:
+                event_type = "CHALLENGE"
+            else:
+                event_type = "REAFFIRM"
+        else:
+            event_type = "UPDATE"
+
+        # Build agent stances snapshot
+        agent_stances = [
+            {"name": s.name, "sentiment": s.sentiment, "confidence": float(s.confidence)}
+            for s in analysis.verdict.agent_stances
+        ] if analysis.verdict.agent_stances else []
+
+        # Build market snapshot for event
+        ms = analysis.market_snapshot or {}
+
+        try:
+            import json
+            self._registry._db.execute(
+                "INSERT INTO invest.thesis_events "
+                "(ticker, event_type, thesis_text, position_type, verdict_at_time, "
+                "confidence_at_time, fair_value_at_time, price_at_time, "
+                "market_snapshot, agent_stances) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    ticker,
+                    event_type,
+                    analysis.verdict.reasoning[:1000] if analysis.verdict.reasoning else None,
+                    held.position_type if held else None,
+                    analysis.verdict.verdict.value,
+                    analysis.verdict.confidence,
+                    held.fair_value_estimate if held else None,
+                    held.current_price if held else None,
+                    json.dumps({k: str(v) for k, v in ms.items() if v is not None}, default=str) if ms else None,
+                    json.dumps(agent_stances, default=str) if agent_stances else None,
+                ),
+            )
+            logger.debug("Logged thesis event %s for %s", event_type, ticker)
+        except Exception:
+            logger.debug("Could not log thesis event for %s (table may not exist yet)", ticker)
+
+    def _log_verdict_diff(
+        self, ticker: str, old_verdict: dict | None, analysis: CandidateAnalysis,
+        was_gated: bool = False, gating_reason: str | None = None,
+    ) -> None:
+        """Log a verdict change to the verdict_diffs audit table."""
+        if not analysis.verdict or not old_verdict:
+            return
+
+        old_v = old_verdict.get("verdict", "UNKNOWN")
+        new_v = analysis.verdict.verdict.value
+        if old_v == new_v:
+            return
+
+        try:
+            import json
+            self._registry._db.execute(
+                "INSERT INTO invest.verdict_diffs "
+                "(ticker, old_verdict, new_verdict, old_confidence, new_confidence, "
+                "change_drivers, was_gated, gating_reason, position_type) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    ticker, old_v, new_v,
+                    old_verdict.get("confidence"),
+                    analysis.verdict.confidence,
+                    json.dumps({
+                        "agent_stances": [
+                            {"name": s.name, "sentiment": s.sentiment}
+                            for s in analysis.verdict.agent_stances
+                        ] if analysis.verdict.agent_stances else [],
+                    }),
+                    was_gated,
+                    gating_reason,
+                    None,  # position_type filled by caller
+                ),
+            )
+        except Exception:
+            logger.debug("Could not log verdict diff for %s (table may not exist yet)", ticker)
+
+    def _store_memory_async(
+        self, ticker: str, analysis: CandidateAnalysis, thesis_context: dict,
+    ) -> None:
+        """Fire-and-forget storage to Qdrant + Neo4j memory layers."""
+        if not analysis.verdict:
+            return
+
+        agent_stances = [
+            {"name": s.name, "sentiment": s.sentiment, "confidence": float(s.confidence)}
+            for s in analysis.verdict.agent_stances
+        ] if analysis.verdict.agent_stances else []
+
+        async def _store():
+            # Phase 4: Qdrant semantic memory
+            try:
+                from investmentology.memory.semantic import store_analysis_memory
+                await store_analysis_memory(
+                    ticker=ticker,
+                    verdict=analysis.verdict.verdict.value,
+                    confidence=float(analysis.verdict.confidence),
+                    reasoning=analysis.verdict.reasoning,
+                    position_type=thesis_context.get("position_type"),
+                    thesis_health=thesis_context.get("thesis_health"),
+                    market_snapshot=analysis.market_snapshot,
+                    agent_stances=agent_stances,
+                    days_held=thesis_context.get("days_held"),
+                    pnl_pct=thesis_context.get("pnl_pct"),
+                )
+            except Exception:
+                logger.debug("Qdrant memory store failed for %s", ticker)
+
+            # Phase 5: Neo4j graph memory
+            try:
+                from investmentology.memory.graph import record_verdict_node
+                await record_verdict_node(
+                    ticker=ticker,
+                    verdict=analysis.verdict.verdict.value,
+                    confidence=float(analysis.verdict.confidence),
+                    consensus_score=analysis.verdict.consensus_score,
+                    agent_stances=agent_stances,
+                    thesis_health=thesis_context.get("thesis_health"),
+                )
+            except Exception:
+                logger.debug("Neo4j memory store failed for %s", ticker)
+
+        try:
+            asyncio.ensure_future(_store())
+        except RuntimeError:
+            # No event loop running — skip memory storage
+            logger.debug("No event loop for memory storage, skipping")
