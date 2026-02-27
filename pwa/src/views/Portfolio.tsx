@@ -362,6 +362,63 @@ export function Portfolio() {
           </div>
         )}
 
+        {/* Dividend Income */}
+        {(() => {
+          const positionsWithDiv = enrichedPositions.filter((p: any) => p.dividendPerShare > 0);
+          const totalMonthly = enrichedPositions.reduce((s: number, p: any) => s + (p.monthlyDividend || 0), 0);
+          const totalAnnual = enrichedPositions.reduce((s: number, p: any) => s + (p.annualDividend || 0), 0);
+          if (totalAnnual <= 0) return null;
+          return (
+            <BentoCard title="Dividend Income">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)", marginBottom: "var(--space-lg)" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>Monthly</div>
+                  <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>{formatCurrency(totalMonthly)}</div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>Annual</div>
+                  <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>{formatCurrency(totalAnnual)}</div>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" }}>
+                  <thead>
+                    <tr>
+                      {["Ticker", "DPS", "Yield", "Freq", "Monthly", "Annual"].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            textAlign: h === "Ticker" ? "left" : "right",
+                            padding: "var(--space-sm) var(--space-md)",
+                            color: "var(--color-text-muted)",
+                            fontWeight: 500, fontSize: "var(--text-xs)",
+                            textTransform: "uppercase", letterSpacing: "0.05em",
+                            borderBottom: "1px solid var(--glass-border)",
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {positionsWithDiv.map((p: any) => (
+                      <tr key={p.ticker}>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", fontWeight: 600 }}>{p.ticker}</td>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>${p.dividendPerShare?.toFixed(2)}</td>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>{p.dividendYield?.toFixed(1)}%</td>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>{p.dividendFrequency === "quarterly" ? "Q" : p.dividendFrequency === "monthly" ? "M" : p.dividendFrequency === "semi-annual" ? "S" : p.dividendFrequency === "annual" ? "A" : "—"}</td>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>{formatCurrency(p.monthlyDividend || 0)}</td>
+                        <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>{formatCurrency(p.annualDividend || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </BentoCard>
+          );
+        })()}
+
         {/* Daily Briefing */}
         {briefing && (
           <BentoCard title="Daily Briefing">

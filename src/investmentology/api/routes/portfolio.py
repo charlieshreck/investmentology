@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from investmentology.advisory.performance import PerformanceCalculator
 from investmentology.api.deps import get_registry
+from investmentology.api.routes.shared import get_dividend_data
 from investmentology.registry.db import Database
 from investmentology.registry.queries import Registry
 
@@ -175,6 +176,34 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
             "entryDate": str(a["entry_date"]) if a.get("entry_date") else None,
         })
 
+    # Enrich positions with dividend data
+    div_data: dict[str, dict] = {}
+    total_annual_div = 0.0
+    total_monthly_div = 0.0
+    if tickers:
+        try:
+            div_data = get_dividend_data(tickers)
+        except Exception:
+            logger.debug("Failed to fetch dividend data", exc_info=True)
+
+    for item in items:
+        ticker = item["ticker"]
+        dd = div_data.get(ticker, {})
+        annual_per_share = dd.get("annual_div", 0.0) or 0.0
+        shares = item["shares"]
+        annual_total = annual_per_share * shares
+        monthly_total = annual_total / 12 if annual_total > 0 else 0.0
+        item["dividendPerShare"] = round(annual_per_share, 4)
+        item["dividendYield"] = round((dd.get("div_yield", 0.0) or 0.0) * 100, 2) if dd.get("div_yield") else round(
+            (annual_per_share / item["avgCost"] * 100) if item["avgCost"] > 0 and annual_per_share > 0 else 0.0, 2
+        )
+        item["annualDividend"] = round(annual_total, 2)
+        item["monthlyDividend"] = round(monthly_total, 2)
+        item["dividendFrequency"] = dd.get("frequency", "none")
+        item["exDividendDate"] = dd.get("ex_div_date")
+        total_annual_div += annual_total
+        total_monthly_div += monthly_total
+
     positions = raw_positions  # Still need raw positions for alerts
 
     # Fetch alerts inline (same logic as /portfolio/alerts)
@@ -252,6 +281,11 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         "cash": float(cash),
         "alerts": alerts,
         "performance": performance,
+        "dividendSummary": {
+            "totalAnnual": round(total_annual_div, 2),
+            "totalMonthly": round(total_monthly_div, 2),
+            "yield": round(total_annual_div / float(total_value) * 100, 2) if total_value > 0 else 0.0,
+        },
     }
 
 
