@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: investmentology-post-screen
+  name: investmentology-midday-analyze
   namespace: investmentology
   labels:
     app.kubernetes.io/name: investmentology
-    app.kubernetes.io/component: post-screen
+    app.kubernetes.io/component: midday-analyze
 spec:
-  # Mon-Fri 12:00 UTC (08:00 ET) — analyze top screened candidates (2h after screen)
-  schedule: "0 12 * * 1-5"
+  # Mon-Fri 16:30 UTC (12:30 ET) — midday re-analysis of watchlist
+  schedule: "30 16 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,13 +19,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: investmentology
-            app.kubernetes.io/component: post-screen
+            app.kubernetes.io/component: midday-analyze
         spec:
           restartPolicy: OnFailure
           containers:
-            - name: post-screen
+            - name: midday-analyze
               image: ghcr.io/charlieshreck/investmentology-api:latest
-              command: ["python3", "-m", "investmentology", "cron", "post-screen-analyze", "--limit", "20"]
+              command: ["python3", "-m", "investmentology", "cron", "daily-watchlist-analyze", "--limit", "10", "--min-hours", "6"]
               envFrom:
                 - secretRef:
                     name: investmentology-secrets

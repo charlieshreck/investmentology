@@ -13,3 +13,6 @@ resources:
   - cronjob-screen.yaml
   - cronjob-post-screen.yaml
   - cronjob-portfolio-sync.yaml
+  - cronjob-watchlist-analyze.yaml
+  - cronjob-daily-monitor.yaml
+  - cronjob-midday-analyze.yaml

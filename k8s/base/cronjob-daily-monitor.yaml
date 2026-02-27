@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: investmentology-post-screen
+  name: investmentology-daily-monitor
   namespace: investmentology
   labels:
     app.kubernetes.io/name: investmentology
-    app.kubernetes.io/component: post-screen
+    app.kubernetes.io/component: daily-monitor
 spec:
-  # Mon-Fri 12:00 UTC (08:00 ET) — analyze top screened candidates (2h after screen)
-  schedule: "0 12 * * 1-5"
+  # Mon-Fri 20:15 UTC (16:15 ET) — post-market daily monitoring
+  schedule: "15 20 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,13 +19,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: investmentology
-            app.kubernetes.io/component: post-screen
+            app.kubernetes.io/component: daily-monitor
         spec:
           restartPolicy: OnFailure
           containers:
-            - name: post-screen
+            - name: daily-monitor
               image: ghcr.io/charlieshreck/investmentology-api:latest
-              command: ["python3", "-m", "investmentology", "cron", "post-screen-analyze", "--limit", "20"]
+              command: ["python3", "-m", "investmentology", "cron", "daily-monitor"]
               envFrom:
                 - secretRef:
                     name: investmentology-secrets
@@ -36,8 +36,8 @@ spec:
                   value: "200000000"
               resources:
                 requests:
-                  memory: "512Mi"
-                  cpu: "200m"
+                  memory: "256Mi"
+                  cpu: "100m"
                 limits:
-                  memory: "1Gi"
-                  cpu: "1000m"
+                  memory: "512Mi"
+                  cpu: "500m"

@@ -297,7 +297,7 @@ def cmd_cron(args: argparse.Namespace) -> None:
 
             states = ["CANDIDATE", "ASSESSED", "CONVICTION_BUY", "POSITION_HOLD",
                        "WATCHLIST_EARLY", "WATCHLIST_CATALYST"]
-            tickers = registry.get_watchlist_tickers_for_reanalysis(states, min_hours=20)
+            tickers = registry.get_watchlist_tickers_for_reanalysis(states, min_hours=args.min_hours)
             tickers = tickers[:limit]
 
             if tickers:
@@ -461,6 +461,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Override composite_score threshold for post-screen-analyze")
     p_cron.add_argument("--premarket", action="store_true",
                         help="Run premarket mode (monitor job only)")
+    p_cron.add_argument("--min-hours", type=int, default=20,
+                        help="Min hours since last analysis (daily-watchlist-analyze)")
 
     # migrate
     subs.add_parser("migrate", help="Run database migrations")
