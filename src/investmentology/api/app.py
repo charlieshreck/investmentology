@@ -177,6 +177,8 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
+            "https://haute-banque.kernow.io",
+            "https://tamar.kernow.io",
             "https://invest.kernow.cloud",
             "http://localhost:5173",
             "http://localhost:4173",
