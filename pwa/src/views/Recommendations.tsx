@@ -235,6 +235,18 @@ function RecCard({
           {stabilityPill(rec.stabilityLabel)}
           {buzzPill(rec.buzzLabel)}
           {earningsPill(rec.earningsMomentum)}
+          {(rec as any).suggestedType && (
+            <span style={{
+              display: "inline-flex", padding: "1px 6px", borderRadius: 99,
+              fontSize: 9, fontWeight: 600,
+              background: (rec as any).suggestedType === "core"
+                ? "rgba(59, 130, 246, 0.12)" : "rgba(251, 191, 36, 0.12)",
+              color: (rec as any).suggestedType === "core"
+                ? "#3b82f6" : "var(--color-warning)",
+            }}>
+              {(rec as any).suggestedType === "core" ? "Core" : "Tactical"}
+            </span>
+          )}
           {rec.contrarianFlag && (
             <span style={{
               display: "inline-flex", alignItems: "center", gap: 2,

@@ -132,6 +132,35 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
             "beatStreak": earnings_m["beat_streak"],
         }
 
+    # Suggest position type: core (long-term hold) vs tactical (shorter-term)
+    core_signals = 0
+    tactical_signals = 0
+    verdict = row.get("verdict", "")
+    if verdict == "STRONG_BUY":
+        core_signals += 2
+    elif verdict == "ACCUMULATE":
+        core_signals += 1
+    conf = float(row["confidence"]) if row.get("confidence") else 0
+    if conf >= 0.75:
+        core_signals += 1
+    elif conf < 0.55:
+        tactical_signals += 1
+    if stability and stability[1] == "STABLE":
+        core_signals += 1
+    elif stability and stability[1] == "UNSTABLE":
+        tactical_signals += 1
+    if cons_tier == "HIGH_CONVICTION":
+        core_signals += 1
+    elif cons_tier == "CONTRARIAN":
+        tactical_signals += 1
+    div_yield = result.get("dividendYield", 0) or 0
+    if div_yield >= 1.5:
+        core_signals += 1
+    buzz_label = result.get("buzzLabel")
+    if buzz_label == "HIGH":
+        tactical_signals += 1
+    result["suggestedType"] = "core" if core_signals > tactical_signals else "tactical"
+
     return result
 
 

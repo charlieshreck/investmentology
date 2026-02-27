@@ -188,6 +188,7 @@ export function Portfolio() {
   const [closeStatus, setCloseStatus] = useState<string | null>(null);
   const [advisorCards, setAdvisorCards] = useState<AdvisorCard[]>([]);
   const [briefing, setBriefing] = useState<BriefingSummary | null>(null);
+  const [corrOpen, setCorrOpen] = useState(false);
   const balance = usePortfolioBalance(positions.length);
 
   // Fetch advisor cards
@@ -553,13 +554,24 @@ export function Portfolio() {
           </>
         )}
 
-        {/* Correlation Heatmap */}
+        {/* Correlation Heatmap (collapsible) */}
         {corrData && corrData.tickers.length >= 2 && corrData.correlations.length > 0 && (
-          <BentoCard title="Correlation Matrix (90d)">
-            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-md)" }}>
-              Pairwise price correlations across holdings
+          <BentoCard title="">
+            <div
+              onClick={() => setCorrOpen((v) => !v)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}
+            >
+              <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>Correlation Matrix (90d)</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{corrOpen ? "▲" : "▼"}</span>
             </div>
-            <CorrelationHeatmap tickers={corrData.tickers} correlations={corrData.correlations} />
+            {corrOpen && (
+              <div style={{ marginTop: "var(--space-md)" }}>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-md)" }}>
+                  Pairwise price correlations across holdings
+                </div>
+                <CorrelationHeatmap tickers={corrData.tickers} correlations={corrData.correlations} />
+              </div>
+            )}
           </BentoCard>
         )}
 
