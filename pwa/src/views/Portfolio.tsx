@@ -69,7 +69,7 @@ function ClosePositionModal({
   onClose: () => void;
   onSubmit: (positionId: number, exitPrice: number) => void;
 }) {
-  const [exitPrice, setExitPrice] = useState(position.currentPrice.toString());
+  const [exitPrice, setExitPrice] = useState((position.currentPrice ?? position.avgCost).toString());
 
   return (
     <div
@@ -335,8 +335,8 @@ export function Portfolio() {
         {performance && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "var(--space-md)" }}>
             <BentoCard title="Alpha vs SPY">
-              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: pnlColor(performance.alphaPct) }}>
-                {performance.alphaPct >= 0 ? "+" : ""}{performance.alphaPct.toFixed(1)}%
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: performance.alphaPct != null ? pnlColor(performance.alphaPct) : undefined }}>
+                {performance.alphaPct != null ? `${performance.alphaPct >= 0 ? "+" : ""}${performance.alphaPct.toFixed(1)}%` : "—"}
               </div>
             </BentoCard>
             <BentoCard title="Sharpe">
@@ -351,12 +351,12 @@ export function Portfolio() {
             </BentoCard>
             <BentoCard title="Win Rate">
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
-                {(performance.winRate * 100).toFixed(0)}%
+                {performance.winRate != null ? `${(performance.winRate * 100).toFixed(0)}%` : "—"}
               </div>
             </BentoCard>
             <BentoCard title="Max DD">
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>
-                {performance.maxDrawdownPct.toFixed(1)}%
+                {performance.maxDrawdownPct != null ? `${performance.maxDrawdownPct.toFixed(1)}%` : "—"}
               </div>
             </BentoCard>
           </div>
