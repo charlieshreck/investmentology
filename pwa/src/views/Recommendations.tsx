@@ -10,14 +10,14 @@ import type { Recommendation, AgentStance } from "../types/models";
 import { useStore } from "../stores/useStore";
 
 function formatCap(n: number): string {
-  if (n >= 1e12) return `£${(n / 1e12).toFixed(1)}T`;
-  if (n >= 1e9) return `£${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `£${(n / 1e6).toFixed(0)}M`;
-  return `£${n.toLocaleString()}`;
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  return `$${n.toLocaleString()}`;
 }
 
 function formatPrice(n: number): string {
-  return n > 0 ? `£${n.toFixed(2)}` : "\u2014";
+  return n > 0 ? `$${n.toFixed(2)}` : "\u2014";
 }
 
 function buzzPill(buzzLabel?: string) {

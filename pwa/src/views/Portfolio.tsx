@@ -13,7 +13,7 @@ import type { Position, Alert } from "../types/models";
 import { useStore } from "../stores/useStore";
 
 function formatCurrency(n: number): string {
-  return n.toLocaleString("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 function formatPct(n: number): string {
@@ -154,6 +154,18 @@ function ClosePositionModal({
   );
 }
 
+interface AdvisorCard {
+  action: string;
+  ticker: string;
+  reasoning: string;
+  priority: number;
+}
+
+interface BriefingSummary {
+  headline: string;
+  summary: string;
+}
+
 export function Portfolio() {
   const {
     positions, totalValue, dayPnl, dayPnlPct, cash, alerts,
@@ -161,9 +173,30 @@ export function Portfolio() {
     loading, error, closePosition,
   } = usePortfolio();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
+  const performance = useStore((s) => s.performance);
   const [closeTarget, setCloseTarget] = useState<Position | null>(null);
   const [closeStatus, setCloseStatus] = useState<string | null>(null);
+  const [advisorCards, setAdvisorCards] = useState<AdvisorCard[]>([]);
+  const [briefing, setBriefing] = useState<BriefingSummary | null>(null);
   const balance = usePortfolioBalance(positions.length);
+
+  // Fetch advisor cards
+  useEffect(() => {
+    if (positions.length === 0) return;
+    fetch("/api/invest/portfolio/advisor")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.actions) setAdvisorCards(data.actions); })
+      .catch(() => {});
+  }, [positions.length]);
+
+  // Fetch daily briefing summary
+  useEffect(() => {
+    if (positions.length === 0) return;
+    fetch("/api/invest/daily/briefing/summary")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.headline) setBriefing(data); })
+      .catch(() => {});
+  }, [positions.length]);
   const tickerFingerprint = positions.map((p) => p.ticker).sort().join(",");
   const { data: corrData } = useCorrelations(positions.length, tickerFingerprint);
   const { fire } = useConfetti();
@@ -288,6 +321,85 @@ export function Portfolio() {
           </BentoCard>
         </div>
 
+        {/* Performance Metrics */}
+        {performance && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "var(--space-md)" }}>
+            <BentoCard title="Alpha vs SPY">
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: pnlColor(performance.spyAlpha) }}>
+                {performance.spyAlpha >= 0 ? "+" : ""}{performance.spyAlpha.toFixed(1)}%
+              </div>
+            </BentoCard>
+            <BentoCard title="Sharpe">
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
+                {performance.sharpeRatio.toFixed(2)}
+              </div>
+            </BentoCard>
+            <BentoCard title="Sortino">
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
+                {performance.sortinoRatio.toFixed(2)}
+              </div>
+            </BentoCard>
+            <BentoCard title="Win Rate">
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
+                {(performance.winRate * 100).toFixed(0)}%
+              </div>
+            </BentoCard>
+            <BentoCard title="Max DD">
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>
+                {performance.maxDrawdown.toFixed(1)}%
+              </div>
+            </BentoCard>
+          </div>
+        )}
+
+        {/* Daily Briefing */}
+        {briefing && (
+          <BentoCard title="Daily Briefing">
+            <div style={{ fontWeight: 600, fontSize: "var(--text-base)", color: "var(--color-accent-bright)", marginBottom: "var(--space-sm)", lineHeight: 1.4 }}>
+              {briefing.headline}
+            </div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+              {briefing.summary}
+            </div>
+          </BentoCard>
+        )}
+
+        {/* Advisor Actions */}
+        {advisorCards.length > 0 && (
+          <BentoCard title="Advisor Actions">
+            <div style={{ display: "flex", gap: "var(--space-sm)", overflowX: "auto", paddingBottom: "var(--space-xs)" }}>
+              {advisorCards.map((card, i) => {
+                const actionColors: Record<string, string> = {
+                  SELL: "var(--color-error)", TRIM: "var(--color-warning)", ADD_MORE: "var(--color-success)",
+                  DEPLOY_CASH: "var(--color-accent)", DIVERSIFY: "var(--color-info)", REANALYZE: "var(--color-text-muted)",
+                };
+                const color = actionColors[card.action] || "var(--color-text-muted)";
+                return (
+                  <div
+                    key={i}
+                    onClick={() => card.ticker && setOverlayTicker(card.ticker)}
+                    style={{
+                      flexShrink: 0, minWidth: 160, padding: "var(--space-md)",
+                      background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)",
+                      borderLeft: `3px solid ${color}`, cursor: card.ticker ? "pointer" : "default",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: "var(--space-xs)" }}>
+                      <Badge variant={card.action === "SELL" ? "error" : card.action === "TRIM" ? "warning" : card.action === "ADD_MORE" ? "success" : "accent"}>
+                        {card.action.replace(/_/g, " ")}
+                      </Badge>
+                      {card.ticker && <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>{card.ticker}</span>}
+                    </div>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.4 }}>
+                      {card.reasoning.length > 80 ? card.reasoning.slice(0, 80) + "..." : card.reasoning}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </BentoCard>
+        )}
+
         {/* Portfolio Balance */}
         {balance && balance.sectors.length > 0 && (
           <>
@@ -373,7 +485,7 @@ export function Portfolio() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" }}>
               <thead>
                 <tr>
-                  {["Ticker", "Weight", "P&L %", "Day %", "Value", ""].map((h) => (
+                  {["Ticker", "Avg Cost", "P&L %", "Day %", "Weight", "Value", "Days", ""].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -385,6 +497,7 @@ export function Portfolio() {
                         textTransform: "uppercase",
                         letterSpacing: "0.05em",
                         borderBottom: "1px solid var(--glass-border)",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {h}
@@ -405,7 +518,7 @@ export function Portfolio() {
                       {p.ticker}
                     </td>
                     <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                      {p.weight.toFixed(1)}%
+                      {formatCurrency(p.avgCost)}
                     </td>
                     <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)", color: pnlColor(p.unrealizedPnlPct) }}>
                       {formatPct(p.unrealizedPnlPct)}
@@ -414,7 +527,13 @@ export function Portfolio() {
                       {formatPct(p.dayChangePct)}
                     </td>
                     <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                      {p.weight.toFixed(1)}%
+                    </td>
+                    <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
                       {formatCurrency(p.marketValue)}
+                    </td>
+                    <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--color-text-muted)" }}>
+                      {p.entryDate ? Math.floor((Date.now() - new Date(p.entryDate).getTime()) / 86400000) : "—"}
                     </td>
                     <td style={{ padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right" }}>
                       <button
@@ -525,10 +644,10 @@ export function Portfolio() {
                         {cp.ticker}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                        £{cp.entryPrice.toFixed(2)}
+                        ${cp.entryPrice.toFixed(2)}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
-                        {cp.exitPrice != null ? `£${cp.exitPrice.toFixed(2)}` : "—"}
+                        {cp.exitPrice != null ? `$${cp.exitPrice.toFixed(2)}` : "—"}
                       </td>
                       <td style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)", textAlign: "right", fontFamily: "var(--font-mono)" }}>
                         {cp.shares}

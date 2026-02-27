@@ -8,6 +8,14 @@ import type {
   AnalysisProgress,
 } from "../types/models";
 
+interface PortfolioPerformance {
+  spyAlpha: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  winRate: number;
+  maxDrawdown: number;
+}
+
 interface PortfolioSlice {
   positions: Position[];
   totalValue: number;
@@ -15,6 +23,7 @@ interface PortfolioSlice {
   dayPnlPct: number;
   cash: number;
   alerts: Alert[];
+  performance: PortfolioPerformance | null;
   setPortfolio: (data: {
     positions: Position[];
     totalValue: number;
@@ -22,6 +31,7 @@ interface PortfolioSlice {
     dayPnlPct: number;
     cash: number;
     alerts: Alert[];
+    performance?: PortfolioPerformance;
   }) => void;
 }
 
@@ -59,6 +69,7 @@ export const useStore = create<AppState>((set) => ({
   dayPnlPct: 0,
   cash: 0,
   alerts: [],
+  performance: null,
   setPortfolio: (data) =>
     set({
       positions: data.positions,
@@ -67,6 +78,7 @@ export const useStore = create<AppState>((set) => ({
       dayPnlPct: data.dayPnlPct,
       cash: data.cash,
       alerts: data.alerts,
+      performance: data.performance ?? null,
     }),
 
   // Watchlist

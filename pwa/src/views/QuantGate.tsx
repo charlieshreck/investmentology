@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
@@ -192,6 +192,44 @@ export function QuantGate() {
   }, [setOverlayTicker]);
   const { analyzing, triggerAnalysis } = useAnalyze(onAnalyzeComplete, refetch);
 
+  // Run Screen on demand
+  const [screenRunning, setScreenRunning] = useState(false);
+  const [screenStatus, setScreenStatus] = useState<{ stage: string; percent: number; detail: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const runScreen = async () => {
+    try {
+      setScreenRunning(true);
+      setScreenStatus({ stage: "Starting", percent: 0, detail: "" });
+      const res = await fetch("/api/invest/quant-gate/run", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch("/api/invest/quant-gate/status");
+          if (!statusRes.ok) return;
+          const status = await statusRes.json();
+          setScreenStatus({ stage: status.stage || "Running", percent: status.percent || 0, detail: status.detail || "" });
+          if (status.stage === "complete" || status.stage === "done" || status.percent >= 100) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setScreenRunning(false);
+            setScreenStatus(null);
+            refetch();
+          }
+        } catch { /* polling error — continue */ }
+      }, 5000);
+    } catch (err) {
+      console.error("Screen run failed", err);
+      setScreenRunning(false);
+      setScreenStatus(null);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
@@ -238,9 +276,33 @@ export function QuantGate() {
         title="Quant Gate"
         subtitle={`Run: ${new Date(latestRun.runDate).toLocaleDateString()}`}
         right={
-          <Badge variant="accent">
-            {latestRun.stocksPassed} passed
-          </Badge>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            {screenStatus && (
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
+                {screenStatus.stage} {screenStatus.percent > 0 ? `${screenStatus.percent}%` : ""}
+              </span>
+            )}
+            <button
+              onClick={runScreen}
+              disabled={screenRunning}
+              style={{
+                padding: "var(--space-xs) var(--space-md)",
+                fontSize: "var(--text-xs)",
+                fontWeight: 600,
+                background: screenRunning ? "var(--color-surface-2)" : "var(--gradient-active)",
+                color: screenRunning ? "var(--color-text-muted)" : "#fff",
+                border: "none",
+                borderRadius: "var(--radius-full)",
+                cursor: screenRunning ? "wait" : "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {screenRunning ? "Screening..." : "Run Screen"}
+            </button>
+            <Badge variant="accent">
+              {latestRun.stocksPassed} passed
+            </Badge>
+          </div>
         }
       />
 

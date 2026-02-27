@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { PriceChart } from "../components/charts/PriceChart";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
+import { useAnalyze } from "../hooks/useAnalyze";
 
 interface Fundamentals {
   market_cap: number;
@@ -187,16 +188,16 @@ interface StockResponse {
 
 function formatCap(cap: number): string {
   if (!cap) return "—";
-  if (cap >= 1e12) return `£${(cap / 1e12).toFixed(1)}T`;
-  if (cap >= 1e9) return `£${(cap / 1e9).toFixed(1)}B`;
-  if (cap >= 1e6) return `£${(cap / 1e6).toFixed(0)}M`;
-  return `£${cap.toLocaleString()}`;
+  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(1)}T`;
+  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(1)}B`;
+  if (cap >= 1e6) return `$${(cap / 1e6).toFixed(0)}M`;
+  return `$${cap.toLocaleString()}`;
 }
 
 function formatNum(n: number): string {
-  if (Math.abs(n) >= 1e9) return `£${(n / 1e9).toFixed(1)}B`;
-  if (Math.abs(n) >= 1e6) return `£${(n / 1e6).toFixed(0)}M`;
-  return `£${n.toLocaleString()}`;
+  if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  return `$${n.toLocaleString()}`;
 }
 
 function formatVol(v: number): string {
@@ -318,12 +319,46 @@ function FiftyTwoWeekBar({ low, high, current }: { low: number; high: number; cu
     <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: "var(--space-sm)" }}>52-Week Range</div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>£{low.toFixed(0)}</span>
+        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>${low.toFixed(0)}</span>
         <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--color-surface-2)", position: "relative" }}>
           <div style={{ position: "absolute", left: `${pct}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: "var(--color-accent-bright)", transform: "translateX(-50%)" }} />
         </div>
-        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>£{high.toFixed(0)}</span>
+        <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-success)" }}>${high.toFixed(0)}</span>
       </div>
+    </div>
+  );
+}
+
+function SignalRow({ signal }: { signal: Signal }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={{ background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex", alignItems: "center", gap: "var(--space-md)",
+          padding: "var(--space-sm) var(--space-md)", cursor: "pointer",
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>
+          {signal.agentName.charAt(0).toUpperCase() + signal.agentName.slice(1)}
+        </span>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", minWidth: 60 }}>{signal.model}</span>
+        <div style={{ flex: 1 }} />
+        {signal.confidence != null && (
+          <Badge variant={signal.confidence >= 0.7 ? "success" : signal.confidence >= 0.4 ? "warning" : "error"}>
+            {(signal.confidence * 100).toFixed(0)}%
+          </Badge>
+        )}
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          ▼
+        </span>
+      </div>
+      {expanded && (
+        <div style={{ padding: "0 var(--space-md) var(--space-md)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6, borderTop: "1px solid var(--glass-border)" }}>
+          {signal.reasoning}
+        </div>
+      )}
     </div>
   );
 }
@@ -335,6 +370,20 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
   const [error, setError] = useState<string | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeExitPrice, setCloseExitPrice] = useState("");
+  const [refetchKey, setRefetchKey] = useState(0);
+
+  const refetchStock = useCallback(() => {
+    setRefetchKey((k) => k + 1);
+  }, []);
+
+  const onAnalyzeComplete = useCallback(() => {
+    refetchStock();
+  }, [refetchStock]);
+
+  const { analyzing, triggerAnalysis } = useAnalyze(onAnalyzeComplete);
+  const isAnalyzing = analyzing.has(ticker);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,7 +412,28 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
     fetchStock();
     fetchNews();
     return () => { cancelled = true; };
-  }, [ticker]);
+  }, [ticker, refetchKey]);
+
+  const handleClosePosition = async () => {
+    if (!data?.position?.id) return;
+    const ep = parseFloat(closeExitPrice);
+    if (isNaN(ep) || ep <= 0) return;
+    try {
+      const res = await fetch(`/api/invest/portfolio/positions/${data.position.id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exit_price: ep }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setShowCloseModal(false);
+      setAddStatus("Position closed");
+      setTimeout(() => setAddStatus(null), 3000);
+      refetchStock();
+    } catch (err) {
+      setAddStatus(`Error: ${err instanceof Error ? err.message : "failed"}`);
+      setTimeout(() => setAddStatus(null), 3000);
+    }
+  };
 
   if (loading) return <p style={{ padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>Loading {ticker}...</p>;
   if (error || !data) return <BentoCard><p style={{ color: "var(--color-error)" }}>Failed to load {ticker}: {error ?? "No data"}</p></BentoCard>;
@@ -408,28 +478,46 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         </div>
         <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-xs)" }}>
           <MarketStatus />
-          {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>£{f.price.toFixed(2)}</div>}
+          {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
           {f && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatCap(f.market_cap)}</div>}
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
-          {f && (
+          <div style={{ display: "flex", gap: "var(--space-sm)", marginTop: "var(--space-xs)" }}>
             <button
-              onClick={() => setShowPortfolioModal(true)}
+              onClick={() => triggerAnalysis(ticker)}
+              disabled={isAnalyzing}
               style={{
-                marginTop: "var(--space-xs)",
                 padding: "var(--space-xs) var(--space-md)",
                 borderRadius: "var(--radius-sm)",
-                background: "var(--gradient-active)",
+                background: isAnalyzing ? "var(--color-surface-2)" : "var(--color-accent-ghost)",
                 border: "none",
-                color: "#fff",
-                cursor: "pointer",
+                color: isAnalyzing ? "var(--color-text-muted)" : "var(--color-accent-bright)",
+                cursor: isAnalyzing ? "wait" : "pointer",
                 fontSize: "var(--text-xs)",
                 fontWeight: 600,
                 whiteSpace: "nowrap",
               }}
             >
-              + Portfolio
+              {isAnalyzing ? "Analyzing..." : "Analyze"}
             </button>
-          )}
+            {f && (
+              <button
+                onClick={() => setShowPortfolioModal(true)}
+                style={{
+                  padding: "var(--space-xs) var(--space-md)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--gradient-active)",
+                  border: "none",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                + Portfolio
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -468,8 +556,32 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
               </span>
             } />
             {data.position.weight != null && <Metric label="Weight" value={`${(data.position.weight * 100).toFixed(1)}%`} mono />}
+            {data.position.entryDate && <Metric label="Held" value={`${Math.floor((Date.now() - new Date(data.position.entryDate).getTime()) / 86400000)}d`} mono />}
             {data.position.stopLoss != null && <Metric label="Stop Loss" value={`$${data.position.stopLoss.toFixed(2)}`} mono />}
             {data.position.fairValue != null && <Metric label="Fair Value" value={`$${data.position.fairValue.toFixed(2)}`} mono />}
+          </div>
+          <div style={{ marginTop: "var(--space-md)", display: "flex", gap: "var(--space-sm)" }}>
+            {data.position.positionType && (
+              <Badge variant={data.position.positionType === "core" ? "success" : data.position.positionType === "speculative" ? "warning" : "accent"}>
+                {data.position.positionType}
+              </Badge>
+            )}
+            <button
+              onClick={() => { setShowCloseModal(true); setCloseExitPrice(data.position!.currentPrice.toString()); }}
+              style={{
+                marginLeft: "auto",
+                padding: "var(--space-xs) var(--space-md)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--color-error)",
+                border: "none",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+                fontWeight: 600,
+              }}
+            >
+              Sell
+            </button>
           </div>
           {data.position.thesis && (
             <div style={{ marginTop: "var(--space-md)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6, fontStyle: "italic", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
@@ -642,7 +754,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
               {p.analystTarget != null && f && (
                 <div style={{ marginLeft: "auto", textAlign: "right" }}>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>Target</div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>£{p.analystTarget.toFixed(0)}</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>${p.analystTarget.toFixed(0)}</div>
                   <div style={{
                     fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)",
                     color: p.analystTarget > f.price ? "var(--color-success)" : "var(--color-error)",
@@ -709,16 +821,9 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       {/* Agent Signals */}
       {data.signals.length > 0 && (
         <BentoCard title="Agent Signals">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
             {data.signals.map((s, i) => (
-              <div key={i} style={{ padding: "var(--space-md)", borderRadius: "var(--radius-sm)", background: "var(--color-surface-0)", borderLeft: "3px solid var(--color-accent)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-sm)" }}>
-                  <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>{s.agentName}</span>
-                  {s.confidence != null && <Badge variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}>{(s.confidence * 100).toFixed(0)}%</Badge>}
-                </div>
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{s.model}</div>
-                <div style={{ fontSize: "var(--text-sm)", marginTop: "var(--space-sm)", lineHeight: 1.6 }}>{s.reasoning}</div>
-              </div>
+              <SignalRow key={i} signal={s} />
             ))}
           </div>
         </BentoCard>
@@ -808,6 +913,84 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           onSuccess={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
           onError={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
         />
+      )}
+
+      {/* Close Position Modal */}
+      {showCloseModal && data.position && (
+        <div
+          onClick={() => setShowCloseModal(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 100,
+            background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "var(--space-lg)",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--color-surface-1)", borderRadius: "var(--radius-lg)",
+              padding: "var(--space-xl)", width: "100%", maxWidth: 360,
+              display: "flex", flexDirection: "column", gap: "var(--space-md)",
+            }}
+          >
+            <div style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>
+              Sell {data.ticker}
+            </div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+              {data.position.shares} shares @ avg ${data.position.entryPrice.toFixed(2)}
+            </div>
+            <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
+              Exit Price
+              <input
+                type="number"
+                step="0.01"
+                value={closeExitPrice}
+                onChange={(e) => setCloseExitPrice(e.target.value)}
+                style={{
+                  width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
+                  background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+                  fontFamily: "var(--font-mono)",
+                }}
+              />
+            </label>
+            {(() => {
+              const ep = parseFloat(closeExitPrice);
+              if (!isNaN(ep) && ep > 0) {
+                const pnl = (ep - data.position!.entryPrice) * data.position!.shares;
+                const pnlPct = ((ep - data.position!.entryPrice) / data.position!.entryPrice) * 100;
+                return (
+                  <div style={{ fontSize: "var(--text-sm)", fontFamily: "var(--font-mono)", color: pnl >= 0 ? "var(--color-success)" : "var(--color-error)" }}>
+                    Realized P&L: {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            <div style={{ display: "flex", gap: "var(--space-md)", marginTop: "var(--space-sm)" }}>
+              <button
+                onClick={() => setShowCloseModal(false)}
+                style={{
+                  flex: 1, padding: "var(--space-sm) var(--space-md)",
+                  background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-text-secondary)", cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClosePosition}
+                style={{
+                  flex: 1, padding: "var(--space-sm) var(--space-md)",
+                  background: "var(--color-error)", border: "none",
+                  borderRadius: "var(--radius-sm)", color: "#fff", cursor: "pointer", fontWeight: 600,
+                }}
+              >
+                Sell Position
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

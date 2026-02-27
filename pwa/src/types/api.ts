@@ -24,6 +24,14 @@ export interface PaginatedResponse<T> {
   timestamp: string;
 }
 
+export interface PortfolioPerformance {
+  spyAlpha: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  winRate: number;
+  maxDrawdown: number;
+}
+
 export interface PortfolioResponse {
   positions: Position[];
   totalValue: number;
@@ -31,6 +39,7 @@ export interface PortfolioResponse {
   dayPnlPct: number;
   cash: number;
   alerts: Alert[];
+  performance?: PortfolioPerformance;
 }
 
 export interface QuantGateResponse {

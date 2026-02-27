@@ -10,6 +10,9 @@ export interface Position {
   dayChange: number;
   dayChangePct: number;
   weight: number;
+  entryDate?: string;
+  positionType?: string;
+  name?: string;
 }
 
 export interface EarningsMomentum {
