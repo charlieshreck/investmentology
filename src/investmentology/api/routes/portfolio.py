@@ -18,6 +18,17 @@ from investmentology.registry.queries import Registry
 logger = logging.getLogger(__name__)
 
 
+def _safe_decimal(v: Decimal | None) -> float | None:
+    """Return float if v is a valid, finite Decimal; else None."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (InvalidOperation, ValueError, OverflowError):
+        return None
+
+
 class CreatePositionRequest(BaseModel):
     ticker: str
     entry_price: float
@@ -106,16 +117,6 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
                 prev_close[row["ticker"]] = float(row["price"])
         except Exception:
             logger.warning("Failed to fetch previous close prices", exc_info=True)
-
-    def _safe_decimal(v: Decimal | None) -> float | None:
-        """Return float if v is a valid, finite Decimal; else None."""
-        if v is None:
-            return None
-        try:
-            f = float(v)
-            return f if math.isfinite(f) else None
-        except (InvalidOperation, ValueError, OverflowError):
-            return None
 
     items = []
     total_value = Decimal("0")
