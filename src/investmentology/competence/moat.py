@@ -66,6 +66,12 @@ class MoatAnalyzer:
             else Decimal("0")
         )
 
+        debt_ratio = (
+            fundamentals.total_liabilities / fundamentals.total_assets
+            if fundamentals.total_assets > 0
+            else Decimal("0")
+        )
+
         return f"""Analyze the competitive moat for {ticker} (sector: {sector}).
 
 Key financials:
@@ -73,7 +79,7 @@ Key financials:
 - Net margin: {margin:.2%}
 - Market cap: ${fundamentals.market_cap:,.0f}
 - Revenue: ${fundamentals.revenue:,.0f}
-- Debt/Assets: {fundamentals.total_liabilities / fundamentals.total_assets:.2%}
+- Debt/Assets: {debt_ratio:.2%}
 
 Assess:
 1. Moat type: "wide" (durable 10+ year advantage), "narrow" (5-10 year), or "none"

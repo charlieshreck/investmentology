@@ -6,12 +6,14 @@ from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.gateway import LLMGateway
-from investmentology.compatibility.taxonomy import ACTION_TAGS, RISK_TAGS
+from investmentology.compatibility.taxonomy import (
+    ACTION_TAGS, RISK_TAGS, SPECIAL_TAGS, resolve_tag,
+)
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 
 logger = logging.getLogger(__name__)
 
-_VALID_TAGS = RISK_TAGS | ACTION_TAGS
+_VALID_TAGS = RISK_TAGS | SPECIAL_TAGS | ACTION_TAGS
 
 _SYSTEM_PROMPT = """\
 You are a risk analyst — the portfolio's devil's advocate.
@@ -40,10 +42,16 @@ Rules:
 - Use ONLY these signal tags for your analysis:
   Risk: CONCENTRATION, CORRELATION_HIGH, CORRELATION_LOW, LIQUIDITY_LOW, LIQUIDITY_OK, \
 DRAWDOWN_RISK, ACCOUNTING_RED_FLAG, GOVERNANCE_CONCERN, LEVERAGE_HIGH, LEVERAGE_OK, \
-VOLATILITY_HIGH, VOLATILITY_LOW, SECTOR_OVERWEIGHT, SECTOR_UNDERWEIGHT
+VOLATILITY_HIGH, VOLATILITY_LOW, SECTOR_OVERWEIGHT, SECTOR_UNDERWEIGHT, \
+RISK_LITIGATION, RISK_KEY_PERSON, RISK_CUSTOMER_CONCENTRATION, \
+PORTFOLIO_OVER_EXPOSED, PORTFOLIO_UNDERWEIGHT_CASH
+  Special (use when relevant): INSIDER_CLUSTER_BUY, INSIDER_CLUSTER_SELL, \
+MANAGEMENT_CHANGE, REGULATORY_CHANGE
   Action: BUY_NEW, BUY_ADD, TRIM, SELL_FULL, SELL_PARTIAL, HOLD, HOLD_STRONG, \
 WATCHLIST_ADD, WATCHLIST_REMOVE, WATCHLIST_PROMOTE, REJECT, REJECT_HARD, NO_ACTION, \
 REVIEW_REQUIRED, CONFLICT_FLAG
+- CRITICAL: Use ONLY the tags listed above. If a concept is not covered, use the CLOSEST \
+matching tag and explain in the "detail" field. Do NOT invent new tag names.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON."""
 
 
@@ -249,14 +257,14 @@ class AuditorAgent(BaseAgent):
 
         signals: list[Signal] = []
         for s in data.get("signals", []):
-            tag_str = s.get("tag", "")
+            tag_str = resolve_tag(s.get("tag", ""))
             try:
                 tag = SignalTag(tag_str)
             except ValueError:
                 logger.warning("Auditor: unknown signal tag %r, skipping", tag_str)
                 continue
             if tag not in _VALID_TAGS:
-                logger.warning("Auditor: tag %s not in risk/action set, skipping", tag)
+                logger.warning("Auditor: tag %s not in valid set, skipping", tag)
                 continue
             strength = s.get("strength", "moderate")
             if strength not in ("strong", "moderate", "weak"):

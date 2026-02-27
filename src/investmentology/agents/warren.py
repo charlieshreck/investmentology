@@ -6,12 +6,14 @@ from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.gateway import LLMGateway
-from investmentology.compatibility.taxonomy import ACTION_TAGS, FUNDAMENTAL_TAGS
+from investmentology.compatibility.taxonomy import (
+    ACTION_TAGS, FUNDAMENTAL_TAGS, RISK_TAGS, SPECIAL_TAGS, resolve_tag,
+)
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 
 logger = logging.getLogger(__name__)
 
-_VALID_TAGS = FUNDAMENTAL_TAGS | ACTION_TAGS
+_VALID_TAGS = FUNDAMENTAL_TAGS | RISK_TAGS | SPECIAL_TAGS | ACTION_TAGS
 
 _SYSTEM_PROMPT = """\
 You are a fundamental equity analyst modeled on Warren Buffett's investment philosophy.
@@ -38,9 +40,15 @@ Rules:
   Fundamental: UNDERVALUED, OVERVALUED, FAIRLY_VALUED, DEEP_VALUE, MOAT_WIDENING, MOAT_STABLE, \
 MOAT_NARROWING, NO_MOAT, EARNINGS_QUALITY_HIGH, EARNINGS_QUALITY_LOW, REVENUE_ACCELERATING, \
 REVENUE_DECELERATING, MARGIN_EXPANDING, MARGIN_COMPRESSING, BALANCE_SHEET_STRONG, \
-BALANCE_SHEET_WEAK, DIVIDEND_GROWING, BUYBACK_ACTIVE, MANAGEMENT_ALIGNED
+BALANCE_SHEET_WEAK, DIVIDEND_GROWING, BUYBACK_ACTIVE, MANAGEMENT_ALIGNED, \
+MANAGEMENT_MISALIGNED, ROIC_IMPROVING, ROIC_DECLINING, CAPITAL_ALLOCATION_EXCELLENT, \
+CAPITAL_ALLOCATION_POOR
+  Risk (use when you identify red flags): ACCOUNTING_RED_FLAG, GOVERNANCE_CONCERN, \
+LEVERAGE_HIGH, RISK_LITIGATION, RISK_KEY_PERSON, RISK_CUSTOMER_CONCENTRATION
   Action: BUY_NEW, BUY_ADD, TRIM, SELL_FULL, SELL_PARTIAL, HOLD, HOLD_STRONG, \
 WATCHLIST_ADD, WATCHLIST_REMOVE, WATCHLIST_PROMOTE, REJECT, REJECT_HARD, NO_ACTION
+- CRITICAL: Use ONLY the tags listed above. If a concept is not covered, use the CLOSEST \
+matching tag and explain in the "detail" field. Do NOT invent new tag names.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON."""
 
 
@@ -232,14 +240,14 @@ class WarrenAgent(BaseAgent):
 
         signals: list[Signal] = []
         for s in data.get("signals", []):
-            tag_str = s.get("tag", "")
+            tag_str = resolve_tag(s.get("tag", ""))
             try:
                 tag = SignalTag(tag_str)
             except ValueError:
                 logger.warning("Warren: unknown signal tag %r, skipping", tag_str)
                 continue
             if tag not in _VALID_TAGS:
-                logger.warning("Warren: tag %s not in fundamental/action set, skipping", tag)
+                logger.warning("Warren: tag %s not in valid set, skipping", tag)
                 continue
             strength = s.get("strength", "moderate")
             if strength not in ("strong", "moderate", "weak"):

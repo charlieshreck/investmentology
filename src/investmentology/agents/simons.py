@@ -6,12 +6,14 @@ from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.gateway import LLMGateway
-from investmentology.compatibility.taxonomy import ACTION_TAGS, TECHNICAL_TAGS
+from investmentology.compatibility.taxonomy import (
+    ACTION_TAGS, RISK_TAGS, SPECIAL_TAGS, TECHNICAL_TAGS, resolve_tag,
+)
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 
 logger = logging.getLogger(__name__)
 
-_VALID_TAGS = TECHNICAL_TAGS | ACTION_TAGS
+_VALID_TAGS = TECHNICAL_TAGS | RISK_TAGS | SPECIAL_TAGS | ACTION_TAGS
 
 _SYSTEM_PROMPT = """\
 You are a quantitative technical analyst modeled on Jim Simons's Renaissance Technologies approach.
@@ -54,12 +56,17 @@ Rules:
 - "confidence" is a float between 0.0 and 1.0
 - "target_price" is optional for technical analysis (use null if not applicable)
 - Use ONLY these signal tags for your analysis:
-  Technical: TREND_UPTREND, TREND_DOWNTREND, TREND_SIDEWAYS, MOMENTUM_STRONG, MOMENTUM_WEAK, \
-MOMENTUM_DIVERGENCE, BREAKOUT_CONFIRMED, BREAKDOWN_CONFIRMED, SUPPORT_NEAR, RESISTANCE_NEAR, \
+  Technical: TREND_UPTREND, TREND_DOWNTREND, TREND_SIDEWAYS, TREND_REVERSAL_BULLISH, \
+TREND_REVERSAL_BEARISH, MOMENTUM_STRONG, MOMENTUM_WEAK, MOMENTUM_DIVERGENCE, \
+BREAKOUT_CONFIRMED, BREAKDOWN_CONFIRMED, SUPPORT_NEAR, RESISTANCE_NEAR, \
 VOLUME_SURGE, VOLUME_DRY, VOLUME_CLIMAX, RSI_OVERSOLD, RSI_OVERBOUGHT, GOLDEN_CROSS, \
-DEATH_CROSS, RELATIVE_STRENGTH_HIGH, RELATIVE_STRENGTH_LOW
+DEATH_CROSS, RELATIVE_STRENGTH_HIGH, RELATIVE_STRENGTH_LOW, PATTERN_BULL_FLAG, \
+PATTERN_BASE_FORMING
+  Risk (use when you identify red flags): VOLATILITY_HIGH, DRAWDOWN_RISK, LIQUIDITY_LOW
   Action: BUY_NEW, BUY_ADD, TRIM, SELL_FULL, SELL_PARTIAL, HOLD, HOLD_STRONG, \
 WATCHLIST_ADD, WATCHLIST_REMOVE, WATCHLIST_PROMOTE, REJECT, REJECT_HARD, NO_ACTION
+- CRITICAL: Use ONLY the tags listed above. If a concept is not covered, use the CLOSEST \
+matching tag and explain in the "detail" field. Do NOT invent new tag names.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON.
 - You MUST include at least one bearish/cautionary signal if ANY indicator suggests weakness."""
 
@@ -196,14 +203,14 @@ class SimonsAgent(BaseAgent):
 
         signals: list[Signal] = []
         for s in data.get("signals", []):
-            tag_str = s.get("tag", "")
+            tag_str = resolve_tag(s.get("tag", ""))
             try:
                 tag = SignalTag(tag_str)
             except ValueError:
                 logger.warning("Simons: unknown signal tag %r, skipping", tag_str)
                 continue
             if tag not in _VALID_TAGS:
-                logger.warning("Simons: tag %s not in technical/action set, skipping", tag)
+                logger.warning("Simons: tag %s not in valid set, skipping", tag)
                 continue
             strength = s.get("strength", "moderate")
             if strength not in ("strong", "moderate", "weak"):

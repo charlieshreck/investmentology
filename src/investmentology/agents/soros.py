@@ -6,12 +6,14 @@ from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.gateway import LLMGateway
-from investmentology.compatibility.taxonomy import ACTION_TAGS, MACRO_TAGS
+from investmentology.compatibility.taxonomy import (
+    ACTION_TAGS, MACRO_TAGS, RISK_TAGS, SPECIAL_TAGS, resolve_tag,
+)
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 
 logger = logging.getLogger(__name__)
 
-_VALID_TAGS = MACRO_TAGS | ACTION_TAGS
+_VALID_TAGS = MACRO_TAGS | RISK_TAGS | SPECIAL_TAGS | ACTION_TAGS
 
 _SYSTEM_PROMPT = """\
 You are a macro/cycle analyst modeled on George Soros's investment philosophy.
@@ -35,13 +37,20 @@ Rules:
 - "confidence" is a float between 0.0 and 1.0
 - "target_price" is optional for macro analysis (use null if not applicable)
 - Use ONLY these signal tags for your analysis:
-  Macro: REGIME_BULL, REGIME_BEAR, REGIME_NEUTRAL, REGIME_TRANSITION, SECTOR_ROTATION_INTO, \
-SECTOR_ROTATION_OUT, CREDIT_TIGHTENING, CREDIT_EASING, RATE_RISING, RATE_FALLING, \
-INFLATION_HIGH, INFLATION_LOW, DOLLAR_STRONG, DOLLAR_WEAK, GEOPOLITICAL_RISK, \
-SUPPLY_CHAIN_DISRUPTION, FISCAL_STIMULUS, FISCAL_CONTRACTION, LIQUIDITY_ABUNDANT, \
-LIQUIDITY_TIGHT, REFLEXIVITY_DETECTED
+  Macro: REGIME_BULL, REGIME_BEAR, REGIME_NEUTRAL, REGIME_TRANSITION, \
+REGIME_TRANSITION_UP, REGIME_TRANSITION_DOWN, REGIME_CHOPPY, \
+SECTOR_ROTATION_INTO, SECTOR_ROTATION_OUT, CREDIT_TIGHTENING, CREDIT_EASING, \
+RATE_RISING, RATE_FALLING, RATES_STABLE, INFLATION_HIGH, INFLATION_LOW, \
+DOLLAR_STRONG, DOLLAR_WEAK, GEOPOLITICAL_RISK, SUPPLY_CHAIN_DISRUPTION, \
+FISCAL_STIMULUS, FISCAL_CONTRACTION, LIQUIDITY_ABUNDANT, LIQUIDITY_TIGHT, \
+REFLEXIVITY_DETECTED, CYCLE_EARLY, CYCLE_MID, CYCLE_LATE, CYCLE_CONTRACTION, \
+MACRO_CATALYST
+  Risk (use when you identify red flags): ACCOUNTING_RED_FLAG, GOVERNANCE_CONCERN, \
+LEVERAGE_HIGH, VOLATILITY_HIGH, DRAWDOWN_RISK
   Action: BUY_NEW, BUY_ADD, TRIM, SELL_FULL, SELL_PARTIAL, HOLD, HOLD_STRONG, \
 WATCHLIST_ADD, WATCHLIST_REMOVE, WATCHLIST_PROMOTE, REJECT, REJECT_HARD, NO_ACTION
+- CRITICAL: Use ONLY the tags listed above. If a concept is not covered, use the CLOSEST \
+matching tag and explain in the "detail" field. Do NOT invent new tag names.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON."""
 
 
@@ -191,14 +200,14 @@ class SorosAgent(BaseAgent):
 
         signals: list[Signal] = []
         for s in data.get("signals", []):
-            tag_str = s.get("tag", "")
+            tag_str = resolve_tag(s.get("tag", ""))
             try:
                 tag = SignalTag(tag_str)
             except ValueError:
                 logger.warning("Soros: unknown signal tag %r, skipping", tag_str)
                 continue
             if tag not in _VALID_TAGS:
-                logger.warning("Soros: tag %s not in macro/action set, skipping", tag)
+                logger.warning("Soros: tag %s not in valid set, skipping", tag)
                 continue
             strength = s.get("strength", "moderate")
             if strength not in ("strong", "moderate", "weak"):
