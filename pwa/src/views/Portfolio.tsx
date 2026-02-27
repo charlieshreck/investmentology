@@ -173,7 +173,7 @@ interface BriefingSummary {
   newRecommendationCount: number;
   alertCount: number;
   overallRiskLevel: string;
-  topActions: Array<{ type: string; ticker: string; title: string }>;
+  topActions: Array<{ category: string; ticker: string; action: string }>;
 }
 
 export function Portfolio() {
@@ -383,7 +383,7 @@ export function Portfolio() {
             {briefing.topActions.length > 0 && (
               <div style={{ marginTop: "var(--space-sm)", display: "flex", gap: "var(--space-xs)", flexWrap: "wrap" }}>
                 {briefing.topActions.map((a, i) => (
-                  <Badge key={i} variant="neutral">{a.type.replace(/_/g, " ")} {a.ticker}</Badge>
+                  <Badge key={i} variant="neutral">{a.ticker}: {a.action}</Badge>
                 ))}
               </div>
             )}
