@@ -10,6 +10,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>Investmentology</title>
+    <script>
+      // Purge stale caches from old synapse-hb service worker (pre-K8s deployment)
+      if('caches'in window){caches.keys().then(function(n){n.forEach(function(k){
+        if(k.startsWith('synapse-'))caches.delete(k)})})}
+    </script>
   </head>
   <body>
     <div id="root"></div>
