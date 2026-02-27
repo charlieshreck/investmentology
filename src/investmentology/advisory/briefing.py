@@ -314,8 +314,21 @@ class BriefingBuilder:
 
     # ---- Portfolio Snapshot ----
 
+    @staticmethod
+    def _has_valid_price(p) -> bool:
+        """Return True if position has a finite, usable current_price."""
+        if p.current_price is None:
+            return False
+        try:
+            return math.isfinite(float(p.current_price))
+        except (InvalidOperation, ValueError, OverflowError):
+            return False
+
     def _build_portfolio_snapshot(self) -> PortfolioSnapshot:
-        raw_positions = self._registry.get_open_positions()
+        raw_positions = [
+            p for p in self._registry.get_open_positions()
+            if self._has_valid_price(p)
+        ]
 
         # Aggregate by ticker
         aggregated: dict[str, dict] = {}
@@ -508,8 +521,9 @@ class BriefingBuilder:
                 ))
 
             # Fair value overshoot (>10% above estimate)
-            if p.fair_value_estimate and p.current_price > p.fair_value_estimate * Decimal("1.1"):
-                overshoot = float((p.current_price - p.fair_value_estimate) / p.fair_value_estimate * 100)
+            fv = _safe_float(p.fair_value_estimate)
+            if cur is not None and fv is not None and cur > fv * 1.1:
+                overshoot = (cur - fv) / fv * 100
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
                     severity="medium",
@@ -518,7 +532,7 @@ class BriefingBuilder:
                 ))
 
             # Large winner (>30% gain) — profit-taking consideration
-            if pnl > 0.30:
+            if pnl is not None and pnl > 0.30:
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
                     severity="low",
