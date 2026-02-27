@@ -9,11 +9,11 @@ import type {
 } from "../types/models";
 
 interface PortfolioPerformance {
-  spyAlpha: number;
-  sharpeRatio: number;
-  sortinoRatio: number;
+  alphaPct: number;
+  sharpeRatio: number | null;
+  sortinoRatio: number | null;
   winRate: number;
-  maxDrawdown: number;
+  maxDrawdownPct: number;
 }
 
 interface PortfolioSlice {

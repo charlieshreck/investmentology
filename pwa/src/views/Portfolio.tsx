@@ -155,15 +155,25 @@ function ClosePositionModal({
 }
 
 interface AdvisorCard {
-  action: string;
+  type: string;
   ticker: string;
+  title: string;
+  detail: string;
   reasoning: string;
-  priority: number;
+  priority: string;
 }
 
 interface BriefingSummary {
-  headline: string;
-  summary: string;
+  date: string;
+  pendulumLabel: string;
+  pendulumScore: number;
+  positionCount: number;
+  totalValue: number;
+  totalUnrealizedPnl: number;
+  newRecommendationCount: number;
+  alertCount: number;
+  overallRiskLevel: string;
+  topActions: Array<{ type: string; ticker: string; title: string }>;
 }
 
 export function Portfolio() {
@@ -194,7 +204,7 @@ export function Portfolio() {
     if (positions.length === 0) return;
     fetch("/api/invest/daily/briefing/summary")
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.headline) setBriefing(data); })
+      .then((data) => { if (data?.date) setBriefing(data); })
       .catch(() => {});
   }, [positions.length]);
   const tickerFingerprint = positions.map((p) => p.ticker).sort().join(",");
@@ -325,18 +335,18 @@ export function Portfolio() {
         {performance && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "var(--space-md)" }}>
             <BentoCard title="Alpha vs SPY">
-              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: pnlColor(performance.spyAlpha) }}>
-                {performance.spyAlpha >= 0 ? "+" : ""}{performance.spyAlpha.toFixed(1)}%
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: pnlColor(performance.alphaPct) }}>
+                {performance.alphaPct >= 0 ? "+" : ""}{performance.alphaPct.toFixed(1)}%
               </div>
             </BentoCard>
             <BentoCard title="Sharpe">
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
-                {performance.sharpeRatio.toFixed(2)}
+                {performance.sharpeRatio != null ? performance.sharpeRatio.toFixed(2) : "—"}
               </div>
             </BentoCard>
             <BentoCard title="Sortino">
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
-                {performance.sortinoRatio.toFixed(2)}
+                {performance.sortinoRatio != null ? performance.sortinoRatio.toFixed(2) : "—"}
               </div>
             </BentoCard>
             <BentoCard title="Win Rate">
@@ -346,7 +356,7 @@ export function Portfolio() {
             </BentoCard>
             <BentoCard title="Max DD">
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>
-                {performance.maxDrawdown.toFixed(1)}%
+                {performance.maxDrawdownPct.toFixed(1)}%
               </div>
             </BentoCard>
           </div>
@@ -355,12 +365,28 @@ export function Portfolio() {
         {/* Daily Briefing */}
         {briefing && (
           <BentoCard title="Daily Briefing">
-            <div style={{ fontWeight: 600, fontSize: "var(--text-base)", color: "var(--color-accent-bright)", marginBottom: "var(--space-sm)", lineHeight: 1.4 }}>
-              {briefing.headline}
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", marginBottom: "var(--space-sm)" }}>
+              <span style={{ fontWeight: 600, fontSize: "var(--text-base)", color: "var(--color-accent-bright)" }}>
+                {briefing.pendulumLabel}
+              </span>
+              <Badge variant={briefing.overallRiskLevel === "low" ? "success" : briefing.overallRiskLevel === "medium" ? "warning" : "error"}>
+                {briefing.overallRiskLevel} risk
+              </Badge>
+              {briefing.alertCount > 0 && (
+                <Badge variant="warning">{briefing.alertCount} alert{briefing.alertCount !== 1 ? "s" : ""}</Badge>
+              )}
             </div>
             <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
-              {briefing.summary}
+              {briefing.positionCount} positions · {formatCurrency(briefing.totalValue)} total · {formatCurrency(briefing.totalUnrealizedPnl)} unrealized P&L
+              {briefing.newRecommendationCount > 0 && ` · ${briefing.newRecommendationCount} new recommendation${briefing.newRecommendationCount !== 1 ? "s" : ""}`}
             </div>
+            {briefing.topActions.length > 0 && (
+              <div style={{ marginTop: "var(--space-sm)", display: "flex", gap: "var(--space-xs)", flexWrap: "wrap" }}>
+                {briefing.topActions.map((a, i) => (
+                  <Badge key={i} variant="neutral">{a.type.replace(/_/g, " ")} {a.ticker}</Badge>
+                ))}
+              </div>
+            )}
           </BentoCard>
         )}
 
@@ -373,7 +399,8 @@ export function Portfolio() {
                   SELL: "var(--color-error)", TRIM: "var(--color-warning)", ADD_MORE: "var(--color-success)",
                   DEPLOY_CASH: "var(--color-accent)", DIVERSIFY: "var(--color-info)", REANALYZE: "var(--color-text-muted)",
                 };
-                const color = actionColors[card.action] || "var(--color-text-muted)";
+                const color = actionColors[card.type] || "var(--color-text-muted)";
+                const text = card.reasoning || card.detail || card.title || "";
                 return (
                   <div
                     key={i}
@@ -385,13 +412,13 @@ export function Portfolio() {
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: "var(--space-xs)" }}>
-                      <Badge variant={card.action === "SELL" ? "error" : card.action === "TRIM" ? "warning" : card.action === "ADD_MORE" ? "success" : "accent"}>
-                        {card.action.replace(/_/g, " ")}
+                      <Badge variant={card.type === "SELL" ? "error" : card.type === "TRIM" ? "warning" : card.type === "ADD_MORE" ? "success" : "accent"}>
+                        {card.type.replace(/_/g, " ")}
                       </Badge>
                       {card.ticker && <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>{card.ticker}</span>}
                     </div>
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.4 }}>
-                      {card.reasoning.length > 80 ? card.reasoning.slice(0, 80) + "..." : card.reasoning}
+                      {text.length > 80 ? text.slice(0, 80) + "..." : text}
                     </div>
                   </div>
                 );
