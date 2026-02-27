@@ -10,6 +10,5 @@ resources:
   - service.yaml
   - ingress.yaml
   - cronjob-price-refresh.yaml
-  - cronjob-screen.yaml
   - cronjob-portfolio-sync.yaml
   - cronjob-daily-monitor.yaml
