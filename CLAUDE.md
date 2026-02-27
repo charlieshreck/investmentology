@@ -2,6 +2,64 @@
 
 AI-powered institutional-grade investment advisory platform. A hedge fund analyst in a box.
 
+## Deployment Architecture
+
+**CRITICAL: This is a K8s application, NOT an LXC app.**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Agentic K8s Cluster (10.20.0.0/24)                     │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  Pod: investmentology (namespace: investmentology) │  │
+│  │  Image: ghcr.io/charlieshreck/investmentology-api  │  │
+│  │  serve.py → FastAPI (API + Vite PWA on port 80)    │  │
+│  │  NodePort: 30580                                   │  │
+│  └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+         ▲
+         │ Caddy reverse proxy (10.10.0.1)
+         │ haute-banque.kernow.io → 10.20.0.40:30580
+         ▲
+         │ AdGuard DNS rewrite
+         │
+      Browsers
+```
+
+### What runs WHERE
+
+| Component | Where | Details |
+|-----------|-------|---------|
+| **PWA + API** | **Agentic K8s pod** | `serve.py` serves both FastAPI API and Vite PWA static files |
+| **Database** | Agentic K8s (PostgreSQL) | Decision registry, predictions, portfolio |
+| **CI/CD** | GitHub Actions → GHCR → ArgoCD | Push to main → build image → auto-deploy |
+| **Claude CLI agent** | HB LXC (10.10.0.101) | CLI subscription analysis (NOT API) |
+| **Gemini CLI agent** | HB LXC (10.10.0.101) | CLI subscription analysis (NOT API) |
+| **Overnight pipeline** | HB LXC cron (02:00 UTC Tue-Sat) | `scripts/overnight-pipeline.sh` |
+
+### DO NOT
+- **NEVER** treat the LXC as the deployment target for the PWA or API
+- **NEVER** point Caddy/DNS to the LXC for web traffic (10.10.0.101)
+- **NEVER** create Express/nginx servers on the LXC to serve the PWA
+- The LXC is for **CLI agents only** (Claude Code + Gemini CLI screens)
+
+### Build & Deploy
+1. Edit code in `/home/investmentology/pwa/` (frontend) or `src/` (backend)
+2. `cd pwa && npx vite build` to verify locally
+3. `git commit && git push` → GitHub Actions builds multi-stage Docker image
+4. ArgoCD auto-syncs to agentic cluster (`k8s/argocd-app.yaml` → `10.20.0.40:6443`)
+5. Restart deployment if needed: `kubectl rollout restart deployment/investmentology -n investmentology`
+
+### Key Files
+- `Dockerfile` — Multi-stage: builds PWA (node), then Python API + copies `pwa/dist`
+- `serve.py` — FastAPI app that serves API routes AND PWA static files (SPA fallback)
+- `k8s/base/deployment.yaml` — K8s deployment (image, env, probes)
+- `k8s/base/service.yaml` — NodePort 30580
+- `k8s/base/ingress.yaml` — Traefik ingress for `haute-banque.kernow.io`
+- `k8s/argocd-app.yaml` — ArgoCD Application targeting agentic cluster
+- `.github/workflows/ci.yml` — GitHub Actions CI/CD pipeline
+
+---
+
 ## Architecture: 6-Layer Sequential Pipeline
 
 ```
