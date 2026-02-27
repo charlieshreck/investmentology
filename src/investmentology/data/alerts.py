@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
 from investmentology.models.position import PortfolioPosition
@@ -69,8 +70,16 @@ class AlertEngine:
         - TRIGGERED: at or below stop loss (ERROR)
         """
         alerts: list[Alert] = []
+        def _valid_price(v: Decimal | None) -> bool:
+            if v is None:
+                return False
+            try:
+                return math.isfinite(float(v))
+            except (InvalidOperation, ValueError, OverflowError):
+                return False
+
         for pos in positions:
-            if pos.stop_loss is None or pos.current_price <= 0:
+            if pos.stop_loss is None or not _valid_price(pos.current_price):
                 continue
 
             if pos.current_price <= pos.stop_loss:

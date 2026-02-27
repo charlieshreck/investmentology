@@ -629,9 +629,12 @@ def get_portfolio_balance(registry: Registry = Depends(get_registry)) -> dict:
     tickers = [p.ticker for p in positions]
     sector_map = _lookup_sectors(registry._db, tickers)
 
-    # Compute total portfolio value
-    total_value = sum(float(p.market_value) for p in positions)
-    if total_value == 0:
+    # Compute total portfolio value (skip positions with NaN/null prices)
+    total_value = sum(
+        float(p.market_value) for p in positions
+        if _safe_decimal(p.market_value) is not None
+    )
+    if not total_value or total_value == 0:
         return {"sectors": [], "riskCategories": [], "positionCount": 0,
                 "sectorCount": 0, "health": "empty", "insights": []}
 
@@ -640,8 +643,8 @@ def get_portfolio_balance(registry: Registry = Depends(get_registry)) -> dict:
     sector_tickers: dict[str, list[str]] = {}
     for p in positions:
         sector = sector_map.get(p.ticker, "Unknown")
-        mv = float(p.market_value)
-        sector_values[sector] = sector_values.get(sector, 0) + mv
+        mv = _safe_decimal(p.market_value)
+        sector_values[sector] = sector_values.get(sector, 0) + (mv if mv is not None else 0)
         sector_tickers.setdefault(sector, []).append(p.ticker)
 
     sectors = []
@@ -819,7 +822,10 @@ def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
     # Lookups
     pos_by_ticker = {p.ticker: p for p in positions}
     tickers = list(pos_by_ticker.keys())
-    total_value = sum(float(p.market_value) for p in positions)
+    total_value = sum(
+        float(p.market_value) for p in positions
+        if _safe_decimal(p.market_value) is not None
+    )
 
     # -- 1. Sell engine signals --
     try:
@@ -839,8 +845,8 @@ def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
                         "reasoning": f"Sell engine: {sig.reason.value}. Urgency: EXECUTE.",
                         "position_id": p.id,
                         "current_shares": float(p.shares),
-                        "current_price": float(p.current_price),
-                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value else 0,
+                        "current_price": _safe_decimal(p.current_price),
+                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value and _safe_decimal(p.market_value) is not None else 0,
                     })
                 elif sig.urgency == SellUrgency.SIGNAL:
                     actions.append({
@@ -852,8 +858,8 @@ def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
                         "reasoning": f"Sell engine: {sig.reason.value}. Consider reducing position.",
                         "position_id": p.id,
                         "current_shares": float(p.shares),
-                        "current_price": float(p.current_price),
-                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value else 0,
+                        "current_price": _safe_decimal(p.current_price),
+                        "current_weight": round(float(p.market_value) / total_value * 100, 1) if total_value and _safe_decimal(p.market_value) is not None else 0,
                         "suggested_shares": max(1, int(float(p.shares) * 0.5)),
                     })
     except Exception:

@@ -12,7 +12,8 @@ interface BalanceBarProps {
   showIdealRange?: { min: number; max: number };
 }
 
-export function BalanceBar({ label, pct, softMax, warnMax, color, showIdealRange }: BalanceBarProps) {
+export function BalanceBar({ label, pct: rawPct, softMax, warnMax, color, showIdealRange }: BalanceBarProps) {
+  const pct = rawPct ?? 0;
   const zone = pct <= softMax ? "green" : pct <= warnMax ? "amber" : "red";
   const zoneColor =
     zone === "green" ? "var(--color-success)" :
@@ -131,7 +132,7 @@ const RISK_LABELS: Record<string, string> = {
 
 export function RiskSpectrum({ categories }: RiskSpectrumProps) {
   // Stacked bar showing the risk spectrum
-  const active = categories.filter((c) => c.pct > 0);
+  const active = categories.filter((c) => (c.pct ?? 0) > 0);
 
   return (
     <div>
@@ -146,13 +147,13 @@ export function RiskSpectrum({ categories }: RiskSpectrumProps) {
         {active.map((c) => (
           <div
             key={c.name}
-            title={`${RISK_LABELS[c.name] ?? c.name}: ${c.pct.toFixed(1)}%`}
+            title={`${RISK_LABELS[c.name] ?? c.name}: ${(c.pct ?? 0).toFixed(1)}%`}
             style={{
-              width: `${c.pct}%`,
+              width: `${c.pct ?? 0}%`,
               background: RISK_COLORS[c.name] ?? "#94a3b8",
               opacity: c.zone === "green" ? 0.85 : c.zone === "amber" ? 0.95 : 1,
               transition: "width var(--duration-normal) var(--ease-out)",
-              minWidth: c.pct > 0 ? 2 : 0,
+              minWidth: (c.pct ?? 0) > 0 ? 2 : 0,
             }}
           />
         ))}
@@ -173,7 +174,7 @@ export function RiskSpectrum({ categories }: RiskSpectrumProps) {
                 background: RISK_COLORS[c.name] ?? "#94a3b8",
               }} />
               <span style={{ fontSize: "var(--text-xs)", color: zoneColor }}>
-                {RISK_LABELS[c.name] ?? c.name} {c.pct.toFixed(0)}%
+                {RISK_LABELS[c.name] ?? c.name} {(c.pct ?? 0).toFixed(0)}%
               </span>
             </div>
           );

@@ -12,9 +12,10 @@ Combines:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from investmentology.advisory.performance import PerformanceCalculator
 from investmentology.registry.queries import Registry
@@ -467,26 +468,38 @@ class BriefingBuilder:
         positions = self._registry.get_open_positions()
         alerts = []
 
+        def _safe_float(v: Decimal | None) -> float | None:
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                return f if math.isfinite(f) else None
+            except (InvalidOperation, ValueError, OverflowError):
+                return None
+
         for p in positions:
+            cur = _safe_float(p.current_price)
+            sl = _safe_float(p.stop_loss)
+
             # Stop-loss breach
-            if p.stop_loss and p.current_price <= p.stop_loss:
+            if cur is not None and sl is not None and cur <= sl:
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
                     severity="critical",
                     alert_type="stop_loss_breach",
-                    message=f"{p.ticker} at {float(p.current_price):.2f} breached stop-loss {float(p.stop_loss):.2f}",
+                    message=f"{p.ticker} at {cur:.2f} breached stop-loss {sl:.2f}",
                 ))
 
             # Significant drawdown
-            pnl = float(p.pnl_pct)
-            if pnl < -0.15:
+            pnl = _safe_float(p.pnl_pct)
+            if pnl is not None and pnl < -0.15:
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
                     severity="high",
                     alert_type="drawdown",
                     message=f"{p.ticker} down {pnl:.1%} from entry — consider thesis review",
                 ))
-            elif pnl < -0.10:
+            elif pnl is not None and pnl < -0.10:
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
                     severity="medium",
