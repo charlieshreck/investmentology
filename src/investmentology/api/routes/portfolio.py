@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -106,11 +107,43 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
         except Exception:
             logger.warning("Failed to fetch previous close prices", exc_info=True)
 
+    def _safe_decimal(v: Decimal | None) -> float | None:
+        """Return float if v is a valid, finite Decimal; else None."""
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            return f if math.isfinite(f) else None
+        except (InvalidOperation, ValueError, OverflowError):
+            return None
+
     items = []
     total_value = Decimal("0")
     total_day_pnl = 0.0
 
     for a in aggregated.values():
+        cur_price = _safe_decimal(a["current_price"])
+        if cur_price is None:
+            # No valid price — show position but with zeroed P&L
+            items.append({
+                "id": a["id"],
+                "ticker": a["ticker"],
+                "name": stock_names.get(a["ticker"]),
+                "shares": float(a["shares"]),
+                "avgCost": float(a["entry_price"]),
+                "currentPrice": None,
+                "marketValue": 0.0,
+                "unrealizedPnl": 0.0,
+                "unrealizedPnlPct": 0.0,
+                "dayChange": 0.0,
+                "dayChangePct": 0.0,
+                "weight": float(a["weight"]),
+                "positionType": a["position_type"],
+                "entryDate": str(a["entry_date"]) if a.get("entry_date") else None,
+                "priceUnavailable": True,
+            })
+            continue
+
         mv = a["current_price"] * a["shares"]
         total_value += mv
         entry_cost = a["entry_price"] * a["shares"]
@@ -119,8 +152,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
 
         # Day change from previous close
         prev = prev_close.get(a["ticker"])
-        cur = float(a["current_price"])
-        day_change_per_share = (cur - prev) if prev and prev > 0 else 0.0
+        day_change_per_share = (cur_price - prev) if prev and prev > 0 else 0.0
         day_change_pct = (day_change_per_share / prev * 100) if prev and prev > 0 else 0.0
         day_change_total = day_change_per_share * float(a["shares"])
         total_day_pnl += day_change_total
@@ -131,7 +163,7 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
             "name": stock_names.get(a["ticker"]),
             "shares": float(a["shares"]),
             "avgCost": float(a["entry_price"]),
-            "currentPrice": float(a["current_price"]),
+            "currentPrice": cur_price,
             "marketValue": float(mv),
             "unrealizedPnl": unrealised,
             "unrealizedPnlPct": unrealised_pct,
@@ -147,18 +179,20 @@ def get_portfolio(registry: Registry = Depends(get_registry)) -> dict:
     # Fetch alerts inline (same logic as /portfolio/alerts)
     alerts: list[dict] = []
     for p in positions:
-        if p.stop_loss and p.current_price <= p.stop_loss:
+        cur = _safe_decimal(p.current_price)
+        sl = _safe_decimal(p.stop_loss)
+        if cur is not None and sl is not None and cur <= sl:
             alerts.append({
                 "id": f"sl-{p.ticker}",
                 "severity": "critical",
                 "title": "Stop-loss breached",
-                "message": f"{p.ticker} at {float(p.current_price):.2f} breached stop-loss {float(p.stop_loss):.2f}",
+                "message": f"{p.ticker} at {cur:.2f} breached stop-loss {sl:.2f}",
                 "ticker": p.ticker,
                 "timestamp": "",
                 "acknowledged": False,
             })
-        pnl = float(p.pnl_pct)
-        if pnl < -0.15:
+        pnl = _safe_decimal(p.pnl_pct)
+        if pnl is not None and pnl < -0.15:
             alerts.append({
                 "id": f"dd-{p.ticker}",
                 "severity": "high",
