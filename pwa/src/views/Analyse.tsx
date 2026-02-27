@@ -5,11 +5,13 @@ import { Badge } from "../components/shared/Badge";
 import { ProgressSteps } from "../components/shared/ProgressSteps";
 import { useAnalysis } from "../hooks/useAnalysis";
 import { useConfetti } from "../hooks/useConfetti";
+import { useStore } from "../stores/useStore";
 
 export function Analyse() {
   const [ticker, setTicker] = useState("");
   const { analysisProgress, startAnalysis, cancelAnalysis } = useAnalysis();
   const { fire } = useConfetti();
+  const setOverlayTicker = useStore((s) => s.setOverlayTicker);
 
   const isDone = analysisProgress?.steps.every(
     (s) => s.status === "done" || s.status === "error",
@@ -159,6 +161,61 @@ export function Analyse() {
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
                   {analysisProgress.result.reasoning}
                 </div>
+
+                {/* Agent Stances */}
+                {analysisProgress.agentStances && analysisProgress.agentStances.length > 0 && (
+                  <div style={{ marginTop: "var(--space-lg)", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-sm)" }}>
+                      Agent Consensus
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
+                      {analysisProgress.agentStances.map((s) => (
+                        <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-xs) var(--space-sm)", background: "var(--color-surface-1)", borderRadius: "var(--radius-sm)" }}>
+                          <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>
+                            {s.name.charAt(0).toUpperCase() + s.name.slice(1)}
+                          </span>
+                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                            <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--color-surface-2)", overflow: "hidden" }}>
+                              <div style={{
+                                width: `${Math.round((s.sentiment + 1) * 50)}%`,
+                                height: "100%",
+                                borderRadius: 2,
+                                background: s.sentiment > 0.1 ? "var(--color-success)" : s.sentiment < -0.1 ? "var(--color-error)" : "var(--color-warning)",
+                              }} />
+                            </div>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: s.sentiment > 0.1 ? "var(--color-success)" : s.sentiment < -0.1 ? "var(--color-error)" : "var(--color-warning)" }}>
+                              {s.sentiment > 0 ? "+" : ""}{s.sentiment.toFixed(2)}
+                            </span>
+                          </div>
+                          <Badge
+                            variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}
+                          >
+                            {(s.confidence * 100).toFixed(0)}%
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* View Deep Dive button */}
+                <button
+                  onClick={() => setOverlayTicker(analysisProgress.result!.ticker)}
+                  style={{
+                    marginTop: "var(--space-lg)",
+                    width: "100%",
+                    padding: "var(--space-md)",
+                    background: "var(--gradient-active)",
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    color: "#fff",
+                    fontSize: "var(--text-sm)",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  View Full Analysis
+                </button>
               </div>
             )}
 

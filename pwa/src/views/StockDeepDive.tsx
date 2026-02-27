@@ -140,6 +140,28 @@ interface EarningsMomentum {
   beatStreak: number;
 }
 
+interface PositionData {
+  id: string;
+  shares: number;
+  entryPrice: number;
+  currentPrice: number;
+  positionType: string;
+  weight: number | null;
+  stopLoss: number | null;
+  fairValue: number | null;
+  pnl: number;
+  pnlPct: number;
+  entryDate: string | null;
+  thesis: string | null;
+}
+
+interface BriefingData {
+  headline: string;
+  situation: string;
+  action: string;
+  rationale: string;
+}
+
 interface StockResponse {
   ticker: string;
   name: string;
@@ -154,6 +176,8 @@ interface StockResponse {
   signals: Signal[];
   decisions: Decision[];
   watchlist: WatchlistInfo | null;
+  position: PositionData | null;
+  briefing: BriefingData | null;
   buzz: BuzzData | null;
   earningsMomentum: EarningsMomentum | null;
   stabilityScore: number | null;
@@ -411,6 +435,49 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
 
       {/* Price Chart */}
       <PriceChart ticker={data.ticker} />
+
+      {/* Briefing */}
+      {data.briefing && (
+        <BentoCard title="Advisory Briefing">
+          <div style={{ fontWeight: 700, fontSize: "var(--text-base)", color: "var(--color-accent-bright)", marginBottom: "var(--space-md)", lineHeight: 1.4 }}>
+            {data.briefing.headline}
+          </div>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.7, marginBottom: "var(--space-md)" }}>
+            {data.briefing.situation}
+          </div>
+          <div style={{ padding: "var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--color-accent)", marginBottom: "var(--space-md)" }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>Action</div>
+            <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, lineHeight: 1.6 }}>{data.briefing.action}</div>
+          </div>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.7 }}>
+            {data.briefing.rationale}
+          </div>
+        </BentoCard>
+      )}
+
+      {/* Position */}
+      {data.position && (
+        <BentoCard title="Your Position">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-md)" }}>
+            <Metric label="Shares" value={data.position.shares.toFixed(2)} mono />
+            <Metric label="Entry" value={`$${data.position.entryPrice.toFixed(2)}`} mono />
+            <Metric label="Current" value={`$${data.position.currentPrice.toFixed(2)}`} mono />
+            <Metric label="P&L" value={
+              <span style={{ color: data.position.pnl >= 0 ? "var(--color-success)" : "var(--color-error)" }}>
+                {data.position.pnl >= 0 ? "+" : ""}${data.position.pnl.toFixed(2)} ({data.position.pnlPct >= 0 ? "+" : ""}{data.position.pnlPct.toFixed(1)}%)
+              </span>
+            } />
+            {data.position.weight != null && <Metric label="Weight" value={`${(data.position.weight * 100).toFixed(1)}%`} mono />}
+            {data.position.stopLoss != null && <Metric label="Stop Loss" value={`$${data.position.stopLoss.toFixed(2)}`} mono />}
+            {data.position.fairValue != null && <Metric label="Fair Value" value={`$${data.position.fairValue.toFixed(2)}`} mono />}
+          </div>
+          {data.position.thesis && (
+            <div style={{ marginTop: "var(--space-md)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6, fontStyle: "italic", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
+              {data.position.thesis}
+            </div>
+          )}
+        </BentoCard>
+      )}
 
       {/* Business Summary */}
       {p?.businessSummary && (

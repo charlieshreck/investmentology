@@ -193,11 +193,22 @@ export interface PipelineStep {
   status: "pending" | "active" | "done" | "error";
 }
 
+export interface AnalysisAgentStance {
+  name: string;
+  sentiment: number;
+  confidence: number;
+  key_signals: string[];
+  summary: string;
+}
+
 export interface AnalysisProgress {
   ticker: string;
   steps: PipelineStep[];
   currentStep: number;
   result?: Decision;
+  agentStances?: AnalysisAgentStance[];
+  riskFlags?: string[];
+  consensusScore?: number | null;
 }
 
 export interface SystemHealth {

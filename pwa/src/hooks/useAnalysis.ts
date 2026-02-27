@@ -78,6 +78,9 @@ export function useAnalysis() {
                   layer: "L2",
                 }
               : undefined,
+          agentStances: verdict?.agent_stances ?? undefined,
+          riskFlags: verdict?.risk_flags ?? undefined,
+          consensusScore: verdict?.consensus_score ?? null,
         });
       } catch (err) {
         setAnalysisProgress((prev) =>
