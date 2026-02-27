@@ -78,8 +78,15 @@ ACTION_TAGS: frozenset[SignalTag] = frozenset({
     SignalTag.REASON_TAX_LOSS, SignalTag.REASON_POSITION_LIMIT, SignalTag.FORCED_SELLING_OVERRIDE,
 })
 
-# Cross-cutting tags that all agents may emit (risk flags + special situations)
-CROSS_CUTTING_TAGS: frozenset[SignalTag] = RISK_TAGS | SPECIAL_TAGS
+# Cross-cutting tags that all agents may emit.
+# During peer-review rounds agents naturally reference other domains' signals,
+# so we allow all domain tags as cross-cutting rather than restricting per-agent.
+CROSS_CUTTING_TAGS: frozenset[SignalTag] = (
+    FUNDAMENTAL_TAGS | MACRO_TAGS | TECHNICAL_TAGS | RISK_TAGS | SPECIAL_TAGS
+)
+
+# All valid tags (any domain + actions) — used by agents during peer review
+ALL_DOMAIN_TAGS: frozenset[SignalTag] = CROSS_CUTTING_TAGS | ACTION_TAGS
 
 CATEGORY_MAP: dict[str, frozenset[SignalTag]] = {
     "fundamental": FUNDAMENTAL_TAGS,
@@ -169,6 +176,15 @@ TAG_ALIASES: dict[str, str] = {
     "COMPLACENCY_RISK": "DRAWDOWN_RISK",
     "FUNDAMENTAL_DETERIORATION": "EARNINGS_QUALITY_LOW",
     "MACRO_RISK": "GEOPOLITICAL_RISK",
+    "MACRO_HEADWIND": "GEOPOLITICAL_RISK",
+    "VALUATION_EXTREME": "OVERVALUED",
+    "MOMENTUM_STALLING": "MOMENTUM_WEAK",
+    "REFLEXIVITY_RISK": "REFLEXIVITY_DETECTED",
+    "REFLEXIVITY_TRAP": "REFLEXIVITY_DETECTED",
+    "CURRENCY_HEADWIND": "DOLLAR_STRONG",
+    "CURRENCY_RISK": "DOLLAR_STRONG",
+    "VOLUME_EXHAUSTION": "VOLUME_DRY",
+    "TECHNICAL_CAUTION": "RESISTANCE_NEAR",
 }
 
 

@@ -6,14 +6,12 @@ from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.gateway import LLMGateway
-from investmentology.compatibility.taxonomy import (
-    ACTION_TAGS, RISK_TAGS, SPECIAL_TAGS, TECHNICAL_TAGS, resolve_tag,
-)
+from investmentology.compatibility.taxonomy import ALL_DOMAIN_TAGS, resolve_tag
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 
 logger = logging.getLogger(__name__)
 
-_VALID_TAGS = TECHNICAL_TAGS | RISK_TAGS | SPECIAL_TAGS | ACTION_TAGS
+_VALID_TAGS = ALL_DOMAIN_TAGS
 
 _SYSTEM_PROMPT = """\
 You are a quantitative technical analyst modeled on Jim Simons's Renaissance Technologies approach.
