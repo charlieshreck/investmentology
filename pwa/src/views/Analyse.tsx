@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
@@ -6,6 +6,7 @@ import { ProgressSteps } from "../components/shared/ProgressSteps";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useConfetti } from "../hooks/useConfetti";
 import { useStore } from "../stores/useStore";
+import type { AnalysisProgress } from "../types/models";
 
 export function Analyse() {
   const [ticker, setTicker] = useState("");
@@ -14,7 +15,23 @@ export function Analyse() {
   const { fire } = useConfetti();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
 
+  // Keep a local snapshot of the last completed analysis so it survives
+  // the status bar's auto-dismiss (which clears analysisProgress to null)
+  const lastResult = useRef<AnalysisProgress | null>(null);
   const isDone = analysisProgress?.steps.every(
+    (s) => s.status === "done" || s.status === "error",
+  );
+
+  // Capture completed analysis into local snapshot
+  useEffect(() => {
+    if (isDone && analysisProgress) {
+      lastResult.current = analysisProgress;
+    }
+  }, [isDone, analysisProgress]);
+
+  // Use live progress when available, otherwise show the last completed snapshot
+  const displayProgress = analysisProgress ?? lastResult.current;
+  const displayDone = displayProgress?.steps.every(
     (s) => s.status === "done" || s.status === "error",
   );
 
@@ -28,6 +45,7 @@ export function Analyse() {
     e.preventDefault();
     const t = ticker.trim().toUpperCase();
     if (t) {
+      lastResult.current = null; // Clear old result when starting new analysis
       startAnalysis([t]);
     }
   };
@@ -102,16 +120,16 @@ export function Analyse() {
           </form>
         </BentoCard>
 
-        {/* Progress */}
-        {analysisProgress && (
-          <BentoCard title={`Analyzing ${analysisProgress.ticker}`}>
-            <ProgressSteps steps={analysisProgress.steps} />
+        {/* Progress / Result */}
+        {displayProgress && (
+          <BentoCard title={displayDone ? `Analysis: ${displayProgress.ticker}` : `Analyzing ${displayProgress.ticker}`}>
+            <ProgressSteps steps={displayProgress.steps} />
 
             {/* Current step detail */}
-            {!isDone && (
+            {!displayDone && (
               <div style={{ marginTop: "var(--space-lg)", textAlign: "center" }}>
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-                  Running: {analysisProgress.steps[analysisProgress.currentStep]?.label ?? "..."}
+                  Running: {displayProgress.steps[displayProgress.currentStep]?.label ?? "..."}
                 </div>
                 <div
                   style={{
@@ -136,41 +154,41 @@ export function Analyse() {
             )}
 
             {/* Result */}
-            {isDone && analysisProgress.result && (
+            {displayDone && displayProgress.result && (
               <div style={{ marginTop: "var(--space-lg)", padding: "var(--space-lg)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-md)" }}>
                   <span style={{ fontWeight: 600, color: "var(--color-accent-bright)" }}>
-                    {analysisProgress.result.ticker}
+                    {displayProgress.result.ticker}
                   </span>
                   <Badge
                     variant={
-                      analysisProgress.result.decisionType === "BUY" ? "success" :
-                      analysisProgress.result.decisionType === "SELL" ? "error" :
-                      analysisProgress.result.decisionType === "REJECT" ? "error" :
+                      displayProgress.result.decisionType === "BUY" ? "success" :
+                      displayProgress.result.decisionType === "SELL" ? "error" :
+                      displayProgress.result.decisionType === "REJECT" ? "error" :
                       "accent"
                     }
                   >
-                    {analysisProgress.result.decisionType}
+                    {displayProgress.result.decisionType}
                   </Badge>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-sm)" }}>
                   <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>Confidence</span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                    {(analysisProgress.result.confidence * 100).toFixed(0)}%
+                    {(displayProgress.result.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                  {analysisProgress.result.reasoning}
+                  {displayProgress.result.reasoning}
                 </div>
 
                 {/* Agent Stances */}
-                {analysisProgress.agentStances && analysisProgress.agentStances.length > 0 && (
+                {displayProgress.agentStances && displayProgress.agentStances.length > 0 && (
                   <div style={{ marginTop: "var(--space-lg)", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-sm)" }}>
                       Agent Consensus
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
-                      {analysisProgress.agentStances.map((s) => (
+                      {displayProgress.agentStances.map((s) => (
                         <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-xs) var(--space-sm)", background: "var(--color-surface-1)", borderRadius: "var(--radius-sm)" }}>
                           <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>
                             {s.name.charAt(0).toUpperCase() + s.name.slice(1)}
@@ -201,7 +219,7 @@ export function Analyse() {
 
                 {/* View Deep Dive button */}
                 <button
-                  onClick={() => setOverlayTicker(analysisProgress.result!.ticker)}
+                  onClick={() => setOverlayTicker(displayProgress.result!.ticker)}
                   style={{
                     marginTop: "var(--space-lg)",
                     width: "100%",
@@ -221,7 +239,7 @@ export function Analyse() {
             )}
 
             {/* Error state */}
-            {isDone && !analysisProgress.result && analysisProgress.steps.some((s) => s.status === "error") && (
+            {displayDone && !displayProgress.result && displayProgress.steps.some((s) => s.status === "error") && (
               <div style={{ marginTop: "var(--space-lg)", padding: "var(--space-lg)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
                 <Badge variant="error">Analysis failed</Badge>
                 <p style={{ color: "var(--color-text-secondary)", fontSize: "var(--text-sm)", marginTop: "var(--space-md)" }}>
@@ -233,7 +251,7 @@ export function Analyse() {
         )}
 
         {/* Help text when idle */}
-        {!analysisProgress && (
+        {!displayProgress && (
           <BentoCard>
             <div style={{ textAlign: "center", padding: "var(--space-xl) 0" }}>
               <div style={{ fontSize: "var(--text-lg)", fontWeight: 600, marginBottom: "var(--space-md)" }}>
