@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+
+# Type for optional progress callback: (ticker, stage, step_index, total_steps) -> None
+ProgressCallback = Callable[[str, str, int, int], Awaitable[None]]
+TOTAL_PIPELINE_STEPS = 9
 
 from investmentology.adversarial.munger import AdversarialResult, MungerOrchestrator, MungerVerdict
 from investmentology.agents.auditor import AuditorAgent
@@ -156,6 +161,7 @@ class AnalysisOrchestrator:
         macro_context: dict | None = None,
         portfolio_context: dict | None = None,
         technical_indicators: dict[str, dict] | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> PipelineResult:
         """Run the full analysis pipeline on a list of candidates.
 
@@ -164,6 +170,7 @@ class AnalysisOrchestrator:
             macro_context: Shared macro data for Soros agent.
             portfolio_context: Current portfolio state for Auditor agent.
             technical_indicators: Per-ticker technical indicators for Simons.
+            progress_callback: Optional async callback for real-time stage updates.
 
         Returns:
             PipelineResult with all analysis details.
@@ -175,6 +182,7 @@ class AnalysisOrchestrator:
             analysis = await self._analyze_single(
                 ticker, macro_context, portfolio_context,
                 (technical_indicators or {}).get(ticker),
+                progress_callback=progress_callback,
             )
             result.results.append(analysis)
 
@@ -195,9 +203,19 @@ class AnalysisOrchestrator:
         macro_context: dict | None,
         portfolio_context: dict | None,
         technical_indicators: dict | None,
+        progress_callback: ProgressCallback | None = None,
     ) -> CandidateAnalysis:
         """Run full pipeline for a single ticker."""
         analysis = CandidateAnalysis(ticker=ticker)
+
+        async def _emit(stage: str, step: int) -> None:
+            if progress_callback:
+                try:
+                    await progress_callback(ticker, stage, step, TOTAL_PIPELINE_STEPS)
+                except Exception:
+                    pass
+
+        await _emit("Fundamentals", 1)
 
         # Phase 0: Capture market snapshot at analysis time
         market_snapshot: dict | None = None
@@ -246,6 +264,7 @@ class AnalysisOrchestrator:
         industry = stock_info.industry if stock_info else ""
 
         # --- L2: Competence Filter + Moat ---
+        await _emit("Competence", 2)
         try:
             analysis.competence = await self._competence.assess(
                 ticker, sector, industry,
@@ -351,6 +370,7 @@ class AnalysisOrchestrator:
                 logger.warning("Data enrichment failed for %s, continuing without", ticker)
 
         # Run all configured agents concurrently
+        await _emit("Agents", 3)
         agent_tasks = [self._run_agent(agent, request) for agent in self._agents]
         responses = await asyncio.gather(*agent_tasks, return_exceptions=True)
 
@@ -365,6 +385,7 @@ class AnalysisOrchestrator:
                 logger.error("Agent %s failed for %s: %s", agent.name, ticker, resp)
 
         # --- L3.5: Debate Round ---
+        await _emit("Debate", 4)
         if self._debate and len(initial_responses) >= 2:
             try:
                 revised = await self._debate.debate(
@@ -397,6 +418,7 @@ class AnalysisOrchestrator:
             return analysis
 
         # --- L4: Compatibility Matrix + Adversarial ---
+        await _emit("Adversarial", 5)
         analysis.compatibility = self._compat_engine.evaluate(
             ticker, analysis.agent_signal_sets,
         )
@@ -439,6 +461,7 @@ class AnalysisOrchestrator:
                 logger.exception("Munger review failed for %s", ticker)
 
         # --- Synthesize verdict ---
+        await _emit("Verdict", 6)
         # First pass with weighted vote to determine direction
         initial_verdict = synthesize_verdict(
             agent_signals=analysis.agent_signal_sets,
@@ -469,6 +492,7 @@ class AnalysisOrchestrator:
             )
 
         # --- Phase 2: Thesis-aware verdict gating ---
+        await _emit("Gating", 7)
         gating_result = None
         if held_position and thesis_context.get("position_type"):
             try:
@@ -554,6 +578,7 @@ class AnalysisOrchestrator:
                 logger.exception("L5 sizing failed for %s", ticker)
 
         # Persist verdict to DB
+        await _emit("Persisting", 8)
         self._save_verdict(ticker, analysis.verdict)
 
         # Build consensus breakdown for logging
@@ -607,6 +632,7 @@ class AnalysisOrchestrator:
         # Phase 4+5: Store in semantic + graph memory (fire-and-forget)
         self._store_memory_async(ticker, analysis, thesis_context)
 
+        await _emit("Complete", 9)
         return analysis
 
 

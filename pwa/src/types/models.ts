@@ -222,6 +222,9 @@ export interface AnalysisProgress {
   ticker: string;
   steps: PipelineStep[];
   currentStep: number;
+  tickerIndex?: number;
+  tickerTotal?: number;
+  errorMessage?: string;
   result?: Decision;
   agentStances?: AnalysisAgentStance[];
   riskFlags?: string[];

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from investmentology.api.deps import get_orchestrator, get_registry
@@ -101,6 +103,11 @@ async def trigger_analysis(
         portfolio_context=portfolio_context,
     )
 
+    return _format_pipeline_result(analysis_id, result)
+
+
+def _format_pipeline_result(analysis_id: str, result) -> dict:
+    """Format PipelineResult into API response dict."""
     return {
         "analysis_id": analysis_id,
         "candidates_in": result.candidates_in,
@@ -151,3 +158,83 @@ async def trigger_analysis(
             for r in result.results
         ],
     }
+
+
+@router.post("/analyse/stream")
+async def trigger_analysis_stream(
+    body: AnalyseRequest,
+    request: Request,
+    orchestrator: AnalysisOrchestrator = Depends(get_orchestrator),
+    registry: Registry = Depends(get_registry),
+):
+    """Trigger analysis with real-time SSE progress streaming.
+
+    Returns a text/event-stream with progress events followed by the final result.
+    """
+    analysis_id = str(uuid.uuid4())
+    tickers = [t.upper() for t in body.tickers]
+    ticker_total = len(tickers)
+    portfolio_context = _build_portfolio_context(registry)
+
+    queue: asyncio.Queue = asyncio.Queue()
+    ticker_index = 0
+
+    async def progress_callback(ticker: str, stage: str, step: int, total: int) -> None:
+        nonlocal ticker_index
+        # Track which ticker we're on
+        if stage == "Fundamentals":
+            ticker_index += 1
+        await queue.put({
+            "type": "progress",
+            "ticker": ticker,
+            "stage": stage,
+            "step": step,
+            "totalSteps": total,
+            "tickerIndex": ticker_index,
+            "tickerTotal": ticker_total,
+        })
+
+    async def run_analysis() -> None:
+        try:
+            result = await orchestrator.analyze_candidates(
+                tickers,
+                portfolio_context=portfolio_context,
+                progress_callback=progress_callback,
+            )
+            await queue.put({
+                "type": "result",
+                **_format_pipeline_result(analysis_id, result),
+            })
+        except Exception as exc:
+            logger.exception("Streaming analysis failed")
+            await queue.put({"type": "error", "message": str(exc)})
+        finally:
+            await queue.put(None)  # Sentinel to close stream
+
+    async def event_generator():
+        task = asyncio.create_task(run_analysis())
+        try:
+            while True:
+                if await request.is_disconnected():
+                    task.cancel()
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        except asyncio.CancelledError:
+            task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

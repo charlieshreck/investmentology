@@ -16,6 +16,7 @@ import { StockDeepDive } from "./views/StockDeepDive";
 import { Login } from "./views/Login";
 import { useAuth } from "./hooks/useAuth";
 import { useStore } from "./stores/useStore";
+import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
 
 // Intercept all fetch calls — on 401 force reload to show login
 const originalFetch = window.fetch;
@@ -96,6 +97,7 @@ export default function App() {
             Offline — showing cached data
           </div>
         )}
+        <AnalysisStatusBar />
         <div style={{ flex: 1, overflow: "hidden" }}>
           <Routes>
             <Route path="/" element={<Portfolio />} />
