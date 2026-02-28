@@ -15,12 +15,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 from decimal import Decimal
-
-# Type for optional progress callback: (ticker, stage, step_index, total_steps) -> None
-ProgressCallback = Callable[[str, str, int, int], Awaitable[None]]
-TOTAL_PIPELINE_STEPS = 9
 
 from investmentology.adversarial.munger import AdversarialResult, MungerOrchestrator, MungerVerdict
 from investmentology.agents.auditor import AuditorAgent
@@ -43,10 +38,13 @@ from investmentology.learning.registry import DecisionLogger
 from investmentology.models.decision import DecisionType
 from investmentology.models.lifecycle import WatchlistState
 from investmentology.models.signal import AgentSignalSet
-from investmentology.models.stock import FundamentalsSnapshot
 from investmentology.registry.queries import Registry
 from investmentology.timing.sizing import PositionSizer, SizingResult
 from investmentology.verdict import VerdictResult, VotingMethod, synthesize as synthesize_verdict
+
+# Type for optional progress callback: (ticker, stage, step_index, total_steps) -> None
+ProgressCallback = Callable[[str, str, int, int], Awaitable[None]]
+TOTAL_PIPELINE_STEPS = 9
 
 logger = logging.getLogger(__name__)
 
