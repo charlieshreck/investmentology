@@ -121,6 +121,7 @@ def _format_pipeline_result(analysis_id: str, result) -> dict:
                 "passed_competence": r.passed_competence,
                 "final_action": r.final_action,
                 "final_confidence": float(r.final_confidence),
+                "data_quality_error": r.data_quality_error,
                 "competence": {
                     "in_circle": r.competence.in_circle,
                     "confidence": float(r.competence.confidence),

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -11,6 +14,16 @@ class ValidationResult:
     is_valid: bool
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        """Human-readable summary of validation issues."""
+        parts = []
+        if self.errors:
+            parts.append(f"Errors: {'; '.join(self.errors)}")
+        if self.warnings:
+            parts.append(f"Warnings: {'; '.join(self.warnings)}")
+        return " | ".join(parts) if parts else "OK"
 
 
 # Reasonable bounds for fundamental data
@@ -23,15 +36,24 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "pe_ratio": (-1000, 10_000),  # very wide range
 }
 
+# Companies above this market cap MUST have non-zero revenue
+# (catches yfinance returning $0 revenue for established companies like PSN)
+REVENUE_REQUIRED_ABOVE_MARKET_CAP = 1e8  # $100M
+
 
 def validate_fundamentals(data: dict) -> ValidationResult:
-    """Validate fundamental data is within reasonable bounds."""
+    """Validate fundamental data is within reasonable bounds.
+
+    Returns ValidationResult with is_valid=False if data is too corrupt
+    to produce a meaningful analysis. The pipeline should abort rather
+    than feed garbage to LLM agents.
+    """
     ticker = data.get("ticker", "UNKNOWN")
     warnings: list[str] = []
     errors: list[str] = []
 
-    # Check required fields
-    required = ["market_cap", "operating_income", "price", "shares_outstanding"]
+    # Check required fields exist and are not None
+    required = ["market_cap", "price", "shares_outstanding"]
     for field_name in required:
         val = data.get(field_name)
         if val is None:
@@ -62,9 +84,13 @@ def validate_fundamentals(data: dict) -> ValidationResult:
         except (ValueError, TypeError):
             warnings.append(f"Invalid fetched_at format: {fetched_at_str}")
 
-    # Anomaly detection
+    # Anomaly detection (warnings)
     anomalies = detect_anomalies(data)
     warnings.extend(anomalies)
+
+    # Critical sanity checks — these are ERRORS that abort the pipeline
+    critical = detect_critical_anomalies(data)
+    errors.extend(critical)
 
     is_valid = len(errors) == 0
     return ValidationResult(
@@ -86,7 +112,7 @@ def detect_staleness(
 
 
 def detect_anomalies(data: dict) -> list[str]:
-    """Flag suspicious data combinations."""
+    """Flag suspicious data combinations (warnings — don't block pipeline)."""
     anomalies: list[str] = []
 
     revenue = _to_float(data.get("revenue"))
@@ -129,6 +155,59 @@ def detect_anomalies(data: dict) -> list[str]:
         )
 
     return anomalies
+
+
+def detect_critical_anomalies(data: dict) -> list[str]:
+    """Detect data corruption that would produce nonsensical analysis.
+
+    These are ERRORS — the pipeline must NOT proceed with this data.
+    Catches the classic yfinance bug where established companies return
+    $0 revenue, $0 income, leading to "pre-revenue startup" moat analysis
+    on a $16B revenue defense contractor.
+    """
+    errors: list[str] = []
+
+    revenue = _to_float(data.get("revenue"))
+    operating_income = _to_float(data.get("operating_income"))
+    net_income = _to_float(data.get("net_income"))
+    market_cap = _to_float(data.get("market_cap"))
+    price = _to_float(data.get("price"))
+
+    # Established company with zeroed financials = corrupted data
+    # Any company with market_cap > $100M should have revenue
+    if market_cap is not None and market_cap > REVENUE_REQUIRED_ABOVE_MARKET_CAP:
+        if revenue is None or revenue == 0:
+            errors.append(
+                f"Zeroed revenue for ${market_cap/1e9:.1f}B market cap company — "
+                f"likely corrupted data source"
+            )
+        elif (
+            (operating_income is None or operating_income == 0)
+            and (net_income is None or net_income == 0)
+        ):
+            errors.append(
+                f"Both operating_income and net_income are zero/missing "
+                f"for ${market_cap/1e9:.1f}B company with ${revenue/1e9:.1f}B revenue — "
+                f"likely corrupted data source"
+            )
+
+    # Price is zero or missing for a company with market cap
+    if market_cap is not None and market_cap > 0 and (price is None or price <= 0):
+        errors.append(
+            f"Zero/missing price for company with ${market_cap/1e9:.1f}B market cap"
+        )
+
+    # All key financial fields are zero for a company that should have them
+    if (
+        market_cap is not None
+        and market_cap > REVENUE_REQUIRED_ABOVE_MARKET_CAP
+        and (revenue is None or revenue == 0)
+        and (operating_income is None or operating_income == 0)
+        and (net_income is None or net_income == 0)
+    ):
+        errors.append("All financial fields zeroed — data source returned empty data")
+
+    return errors
 
 
 def _to_float(val: Decimal | float | int | None) -> float | None:

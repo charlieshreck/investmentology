@@ -84,7 +84,12 @@ class YFinanceClient:
         """Fetch fundamental data for a single ticker.
 
         Returns dict with standardized keys or None on failure.
+        Validates data quality before caching — retries once if data
+        appears corrupted (e.g. yfinance returning $0 revenue for
+        established companies).
         """
+        from investmentology.data.validation import validate_fundamentals
+
         cache_key = f"fundamentals:{ticker}"
         cached = self._get_cached(cache_key)
         if cached is not None:
@@ -98,6 +103,46 @@ class YFinanceClient:
             )
             return None
 
+        # Try up to 2 times — yfinance intermittently returns garbage
+        for attempt in range(2):
+            result = self._fetch_fundamentals_raw(ticker)
+            if result is None:
+                return None
+
+            validation = validate_fundamentals(result)
+            if validation.is_valid:
+                if validation.warnings:
+                    logger.warning(
+                        "Data quality warnings for %s: %s",
+                        ticker, validation.summary,
+                    )
+                self._circuit_breaker.record_success()
+                self._set_cached(cache_key, result)
+                return result
+
+            # Data failed validation
+            if attempt == 0:
+                logger.warning(
+                    "Data validation failed for %s (attempt 1), retrying: %s",
+                    ticker, validation.summary,
+                )
+                # Don't cache — try fresh fetch
+                continue
+
+            # Second attempt also failed — return None with clear log
+            logger.error(
+                "Data validation failed for %s after retry: %s",
+                ticker, validation.summary,
+            )
+            # Store the validation errors so the orchestrator can report them
+            result["_validation_errors"] = validation.errors
+            result["_validation_warnings"] = validation.warnings
+            return result
+
+        return None
+
+    def _fetch_fundamentals_raw(self, ticker: str) -> dict | None:
+        """Raw yfinance fetch without validation or caching."""
         try:
             info = yf.Ticker(ticker).info
             if not info or info.get("quoteType") is None:
@@ -154,9 +199,6 @@ class YFinanceClient:
                 "name": info.get("shortName"),
                 "enterprise_value": _to_decimal(info.get("enterpriseValue")),
             }
-
-            self._circuit_breaker.record_success()
-            self._set_cached(cache_key, result)
             return result
 
         except Exception:

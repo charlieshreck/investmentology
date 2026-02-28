@@ -108,39 +108,54 @@ export function useAnalysisStream() {
               } else if (event.type === "result") {
                 const result = event.results?.[0];
                 const verdict = result?.verdict;
-                setAnalysisProgress((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        steps: makeSteps(STAGE_LABELS.length),
-                        currentStep: STAGE_LABELS.length - 1,
-                        result: verdict
-                          ? {
-                              id: event.analysis_id,
-                              ticker: result.ticker,
-                              decisionType: verdict.recommendation,
-                              confidence: verdict.confidence,
-                              reasoning: verdict.reasoning,
-                              createdAt: new Date().toISOString(),
-                              layer: "L4",
-                            }
-                          : result?.competence && !result.passed_competence
+
+                // Data quality error — bad fundamentals detected, analysis aborted
+                if (result?.data_quality_error) {
+                  setAnalysisProgress((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          steps: makeSteps(0, true),
+                          currentStep: 0,
+                          errorMessage: result.data_quality_error,
+                        }
+                      : null,
+                  );
+                } else {
+                  setAnalysisProgress((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          steps: makeSteps(STAGE_LABELS.length),
+                          currentStep: STAGE_LABELS.length - 1,
+                          result: verdict
                             ? {
                                 id: event.analysis_id,
                                 ticker: result.ticker,
-                                decisionType: "COMPETENCE_FAIL",
-                                confidence: result.competence.confidence,
-                                reasoning: result.competence.reasoning,
+                                decisionType: verdict.recommendation,
+                                confidence: verdict.confidence,
+                                reasoning: verdict.reasoning,
                                 createdAt: new Date().toISOString(),
-                                layer: "L2",
+                                layer: "L4",
                               }
-                            : undefined,
-                        agentStances: verdict?.agent_stances ?? undefined,
-                        riskFlags: verdict?.risk_flags ?? undefined,
-                        consensusScore: verdict?.consensus_score ?? null,
-                      }
-                    : null,
-                );
+                            : result?.competence && !result.passed_competence
+                              ? {
+                                  id: event.analysis_id,
+                                  ticker: result.ticker,
+                                  decisionType: "COMPETENCE_FAIL",
+                                  confidence: result.competence.confidence,
+                                  reasoning: result.competence.reasoning,
+                                  createdAt: new Date().toISOString(),
+                                  layer: "L2",
+                                }
+                              : undefined,
+                          agentStances: verdict?.agent_stances ?? undefined,
+                          riskFlags: verdict?.risk_flags ?? undefined,
+                          consensusScore: verdict?.consensus_score ?? null,
+                        }
+                      : null,
+                  );
+                }
               } else if (event.type === "error") {
                 setAnalysisProgress((prev) =>
                   prev

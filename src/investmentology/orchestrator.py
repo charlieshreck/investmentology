@@ -27,6 +27,7 @@ from investmentology.agents.soros import SorosAgent
 from investmentology.agents.warren import WarrenAgent
 from investmentology.data.enricher import DataEnricher
 from investmentology.data.snapshots import fetch_market_snapshot
+from investmentology.data.validation import validate_fundamentals
 from investmentology.data.yfinance_client import YFinanceClient
 from investmentology.quant_gate.screener import _dict_to_snapshot
 from investmentology.compatibility.matrix import CompatibilityEngine, CompatibilityResult
@@ -73,6 +74,8 @@ class CandidateAnalysis:
     final_confidence: Decimal = Decimal("0")
     # Market context at analysis time (Phase 0)
     market_snapshot: dict | None = None
+    # Data quality — set when fundamentals fail validation
+    data_quality_error: str | None = None
 
 
 @dataclass
@@ -245,15 +248,67 @@ class AnalysisOrchestrator:
 
         # Fetch fundamentals — try DB cache first, then on-demand yfinance
         fundamentals = self._registry.get_latest_fundamentals(ticker)
+        yf_data: dict | None = None
         if fundamentals is None:
             logger.info("No cached fundamentals for %s, trying on-demand yfinance fetch", ticker)
             yf_data = self._yfinance.get_fundamentals(ticker)
             if yf_data:
+                # Check if yfinance returned data that failed validation
+                validation_errors = yf_data.get("_validation_errors")
+                if validation_errors:
+                    msg = (
+                        f"Data quality check failed for {ticker}: "
+                        + "; ".join(validation_errors)
+                        + ". Analysis aborted to prevent incorrect verdicts. "
+                        + "Try again later when Yahoo Finance data refreshes."
+                    )
+                    logger.error(msg)
+                    analysis.data_quality_error = msg
+                    if _emit:
+                        await _emit("DataQualityError", 0)
+                    return analysis
                 fundamentals = _dict_to_snapshot(yf_data)
             if fundamentals is None:
                 logger.warning("No fundamentals for %s (yfinance fallback also failed), skipping", ticker)
                 return analysis
             logger.info("Got on-demand fundamentals for %s via yfinance", ticker)
+
+        # Validate DB-cached fundamentals too (they may have been cached before validation existed)
+        if yf_data is None and fundamentals is not None:
+            check_data = {
+                "ticker": ticker,
+                "market_cap": fundamentals.market_cap,
+                "revenue": fundamentals.revenue,
+                "operating_income": fundamentals.operating_income,
+                "net_income": fundamentals.net_income,
+                "price": fundamentals.price,
+                "shares_outstanding": fundamentals.shares_outstanding,
+            }
+            validation = validate_fundamentals(check_data)
+            if not validation.is_valid:
+                msg = (
+                    f"Cached data quality check failed for {ticker}: "
+                    + "; ".join(validation.errors)
+                    + ". Clearing cache and retrying."
+                )
+                logger.warning(msg)
+                # Try a fresh yfinance fetch instead
+                yf_data = self._yfinance.get_fundamentals(ticker)
+                if yf_data and not yf_data.get("_validation_errors"):
+                    fundamentals = _dict_to_snapshot(yf_data)
+                if fundamentals is None or (yf_data and yf_data.get("_validation_errors")):
+                    err_details = yf_data.get("_validation_errors", ["unknown"]) if yf_data else ["fetch failed"]
+                    msg = (
+                        f"Data quality check failed for {ticker}: "
+                        + "; ".join(err_details)
+                        + ". Analysis aborted to prevent incorrect verdicts. "
+                        + "Try again later when Yahoo Finance data refreshes."
+                    )
+                    logger.error(msg)
+                    analysis.data_quality_error = msg
+                    if _emit:
+                        await _emit("DataQualityError", 0)
+                    return analysis
 
         # Get stock info for sector/industry
         stocks = self._registry.get_active_stocks()

@@ -79,13 +79,21 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 
 ### Layer 3: Multi-Agent Analysis (Tri-Modal Consensus)
 Four independent agents with weighted voting:
-| Agent | Focus | Model |
-|-------|-------|-------|
-| Warren | Fundamentals, intrinsic value | DeepSeek R1 |
-| Soros | Macro, cycles, geopolitics | Gemini |
-| Simons | Technicals, momentum, timing | Groq Llama |
-| Auditor | Risk, correlation, portfolio | DeepSeek V3 |
-- Source: `src/investmentology/agents/`
+| Agent | Focus | Provider | Where it runs |
+|-------|-------|----------|---------------|
+| Warren | Fundamentals, intrinsic value | DeepSeek API | K8s pod + HB LXC |
+| Soros | Macro, cycles, geopolitics | Gemini CLI (subscription) | HB LXC only |
+| Simons | Technicals, momentum, timing | Groq API | K8s pod + HB LXC |
+| Auditor | Risk, correlation, portfolio | Claude CLI (subscription) | HB LXC only |
+
+**Agent architecture is split by design to save on API costs:**
+- **K8s pod** (web UI analysis): Runs Warren + Simons only (cheap HTTP APIs)
+- **HB LXC** (overnight pipeline): Runs all 4 agents (CLI subscriptions for Soros + Auditor)
+- `USE_GEMINI_CLI=1` / `USE_CLAUDE_CLI=1` env vars enable CLI providers — set on HB LXC, NOT on K8s pod
+- Agents that can't resolve their provider are silently skipped at startup (`orchestrator.py:134-141`)
+- **NEVER add ANTHROPIC_API_KEY or GROK_API_KEY to the K8s pod** — CLI subscriptions are the intended path
+
+Source: `src/investmentology/agents/`
 
 ### Layer 4: Adversarial Check (Munger)
 - Bias checklist (25 cognitive biases)
@@ -103,6 +111,41 @@ Four independent agents with weighted voting:
 - Prediction tracking with settlement dates
 - Calibration feedback loop
 - Source: `src/investmentology/learning/`
+
+## Data Quality Gate
+
+**Source**: `src/investmentology/data/validation.py`
+
+yfinance intermittently returns corrupted data (zeroed revenue, missing income) for
+established companies. Without validation, this garbage flows through the pipeline and
+produces nonsensical verdicts (e.g. labelling a $16B revenue defense contractor as a
+"pre-revenue startup" because revenue came back as $0).
+
+### How it works
+
+1. **`validate_fundamentals()`** runs critical checks on fetched data:
+   - Market cap > $100M but revenue is $0 → **REJECT** (corrupted source)
+   - Both operating_income and net_income are $0 with real revenue → **REJECT**
+   - Price is $0/missing for company with market cap → **REJECT**
+   - Small pre-revenue companies (< $100M) are unaffected
+
+2. **`yfinance_client.py`** validates BEFORE caching:
+   - If validation fails, retries once (yfinance is flaky)
+   - If retry also fails, attaches `_validation_errors` to the result dict
+   - Bad data is NEVER cached — prevents 24-hour poison cache windows
+
+3. **`orchestrator.py`** aborts analysis on bad data:
+   - Checks `_validation_errors` on fresh yfinance data
+   - Re-validates DB-cached fundamentals (may predate validation)
+   - Sets `data_quality_error` on `CandidateAnalysis` with clear message
+   - Emits `DataQualityError` SSE event for PWA progress display
+
+4. **PWA** (`useAnalysisStream.ts`) shows error on Fundamentals step instead of proceeding
+
+### Key principle
+**Better to show "data unavailable, try later" than to produce a confident wrong verdict.**
+
+---
 
 ## Current Phase: Phase 1 (Foundation)
 
