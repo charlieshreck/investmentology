@@ -40,7 +40,10 @@ export function useAnalysisStream() {
   const abortRef = useRef<AbortController | null>(null);
 
   const startAnalysis = useCallback(
-    async (ticker: string) => {
+    async (tickers: string[]) => {
+      if (tickers.length === 0) return;
+      const primaryTicker = tickers[0];
+
       // Abort any existing stream
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -48,9 +51,11 @@ export function useAnalysisStream() {
 
       // Show initial progress
       setAnalysisProgress({
-        ticker,
+        ticker: primaryTicker,
         steps: makeSteps(0),
         currentStep: 0,
+        tickerTotal: tickers.length > 1 ? tickers.length : undefined,
+        tickerIndex: tickers.length > 1 ? 1 : undefined,
       });
 
       try {
@@ -58,7 +63,7 @@ export function useAnalysisStream() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ tickers: [ticker] }),
+          body: JSON.stringify({ tickers }),
           signal: controller.signal,
         });
 

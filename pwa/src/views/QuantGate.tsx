@@ -1,10 +1,10 @@
-import { useCallback, useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { FunnelChart } from "../components/charts/FunnelChart";
 import { useQuantGate } from "../hooks/useQuantGate";
-import { useAnalyze } from "../hooks/useAnalyze";
+import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
 import { verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 import type { QuantGateResult } from "../types/models";
@@ -187,14 +187,15 @@ function Th({
 export function QuantGate() {
   const { latestRun, topResults, loading, error, refetch } = useQuantGate();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
-  const onAnalyzeComplete = useCallback((ticker: string) => {
-    setOverlayTicker(ticker);
-  }, [setOverlayTicker]);
-  const { analyzing, triggerAnalysis } = useAnalyze(onAnalyzeComplete, refetch);
+  const setScreenerProgress = useStore((s) => s.setScreenerProgress);
+  const analysisProgress = useStore((s) => s.analysisProgress);
+  const { startAnalysis, isRunning: analysisRunning } = useAnalysis();
+
+  // Track which ticker the analysis is currently on
+  const analyzingTicker = analysisRunning ? analysisProgress?.ticker : null;
 
   // Run Screen on demand
   const [screenRunning, setScreenRunning] = useState(false);
-  const [screenStatus, setScreenStatus] = useState<{ stage: string; percent: number; detail: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -202,9 +203,10 @@ export function QuantGate() {
   }, []);
 
   const runScreen = async () => {
+    if (analysisRunning) return;
     try {
       setScreenRunning(true);
-      setScreenStatus({ stage: "Starting", percent: 0, detail: "" });
+      setScreenerProgress({ stage: "Starting", detail: "Initializing...", pct: 0 });
       const res = await fetch("/api/invest/quant-gate/run", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -213,20 +215,29 @@ export function QuantGate() {
           const statusRes = await fetch("/api/invest/quant-gate/status");
           if (!statusRes.ok) return;
           const status = await statusRes.json();
-          setScreenStatus({ stage: status.stage || "Running", percent: status.percent || 0, detail: status.detail || "" });
-          if (status.stage === "complete" || status.stage === "done" || status.percent >= 100) {
+          const p = status.progress ?? {};
+          setScreenerProgress({
+            stage: p.stage || "Running",
+            detail: p.detail || "",
+            pct: p.pct || 0,
+          });
+          if (!status.running) {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
             setScreenRunning(false);
-            setScreenStatus(null);
-            refetch();
+            if (p.stage === "error") {
+              setTimeout(() => setScreenerProgress(null), 5000);
+            } else {
+              setTimeout(() => setScreenerProgress(null), 3000);
+              refetch();
+            }
           }
         } catch { /* polling error — continue */ }
       }, 5000);
     } catch (err) {
       console.error("Screen run failed", err);
       setScreenRunning(false);
-      setScreenStatus(null);
+      setScreenerProgress(null);
     }
   };
 
@@ -277,23 +288,18 @@ export function QuantGate() {
         subtitle={`Run: ${new Date(latestRun.runDate).toLocaleDateString()}`}
         right={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-            {screenStatus && (
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
-                {screenStatus.stage} {screenStatus.percent > 0 ? `${screenStatus.percent}%` : ""}
-              </span>
-            )}
             <button
               onClick={runScreen}
-              disabled={screenRunning}
+              disabled={screenRunning || analysisRunning}
               style={{
                 padding: "var(--space-xs) var(--space-md)",
                 fontSize: "var(--text-xs)",
                 fontWeight: 600,
-                background: screenRunning ? "var(--color-surface-2)" : "var(--gradient-active)",
-                color: screenRunning ? "var(--color-text-muted)" : "#fff",
+                background: screenRunning || analysisRunning ? "var(--color-surface-2)" : "var(--gradient-active)",
+                color: screenRunning || analysisRunning ? "var(--color-text-muted)" : "#fff",
                 border: "none",
                 borderRadius: "var(--radius-full)",
-                cursor: screenRunning ? "wait" : "pointer",
+                cursor: screenRunning || analysisRunning ? "not-allowed" : "pointer",
                 whiteSpace: "nowrap",
               }}
             >
@@ -395,8 +401,8 @@ export function QuantGate() {
                     result={r}
                     rank={i + 1}
                     onClick={() => setOverlayTicker(r.ticker)}
-                    onAnalyze={() => triggerAnalysis(r.ticker)}
-                    isAnalyzing={analyzing.has(r.ticker)}
+                    onAnalyze={() => { if (!analysisRunning) startAnalysis([r.ticker]); }}
+                    isAnalyzing={analyzingTicker === r.ticker}
                   />
                 ))}
               </tbody>

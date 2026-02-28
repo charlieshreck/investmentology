@@ -1,10 +1,10 @@
-import { useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { useWatchlist } from "../hooks/useWatchlist";
-import { useAnalyze } from "../hooks/useAnalyze";
+import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
 
 import type { WatchlistItem, AgentStance } from "../types/models";
@@ -250,10 +250,20 @@ function ItemCard({
 export function Watchlist() {
   const { groupedByState, loading, error, refetch } = useWatchlist();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
-  const onAnalyzeComplete = useCallback((ticker: string) => {
-    setOverlayTicker(ticker);
-  }, [setOverlayTicker]);
-  const { analyzing, triggerAnalysis } = useAnalyze(onAnalyzeComplete, refetch);
+  const { startAnalysis, isRunning: analysisRunning } = useAnalysis();
+  const analysisProgress = useStore((s) => s.analysisProgress);
+  const analyzingTicker = analysisRunning ? analysisProgress?.ticker : null;
+
+  // Refetch when a batch analysis completes
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (analysisRunning) {
+      wasRunning.current = true;
+    } else if (wasRunning.current) {
+      wasRunning.current = false;
+      refetch();
+    }
+  }, [analysisRunning, refetch]);
 
   if (loading) {
     return (
@@ -281,13 +291,37 @@ export function Watchlist() {
 
   const sectors = Object.keys(groupedByState);
   const totalItems = sectors.reduce((s, k) => s + groupedByState[k].length, 0);
+  const allTickers = sectors.flatMap((k) => groupedByState[k].map((item) => item.ticker));
 
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
       <ViewHeader
         title="Watch"
         subtitle={`${totalItems} stock${totalItems !== 1 ? "s" : ""} tagged by agents`}
-        right={<MarketStatus />}
+        right={
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            {allTickers.length > 0 && (
+              <button
+                onClick={() => { if (!analysisRunning) startAnalysis(allTickers); }}
+                disabled={analysisRunning}
+                style={{
+                  padding: "var(--space-xs) var(--space-md)",
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 600,
+                  background: analysisRunning ? "var(--color-surface-2)" : "var(--gradient-active)",
+                  color: analysisRunning ? "var(--color-text-muted)" : "#fff",
+                  border: "none",
+                  borderRadius: "var(--radius-full)",
+                  cursor: analysisRunning ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {analysisRunning ? "Running..." : `Analyze All (${allTickers.length})`}
+              </button>
+            )}
+            <MarketStatus />
+          </div>
+        }
       />
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
@@ -320,8 +354,8 @@ export function Watchlist() {
                   key={item.ticker}
                   item={item}
                   onClick={() => setOverlayTicker(item.ticker)}
-                  onAnalyze={() => triggerAnalysis(item.ticker)}
-                  isAnalyzing={analyzing.has(item.ticker)}
+                  onAnalyze={() => { if (!analysisRunning) startAnalysis([item.ticker]); }}
+                  isAnalyzing={analyzingTicker === item.ticker}
                 />
               ))}
             </div>

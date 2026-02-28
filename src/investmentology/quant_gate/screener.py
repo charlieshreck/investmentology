@@ -283,7 +283,7 @@ class QuantGateScreener:
             })
 
         # Sort by composite score descending (highest = best)
-        top_results.sort(key=lambda r: r["composite_score"], reverse=True)
+        top_results.sort(key=lambda r: r["composite_score"] or Decimal("0"), reverse=True)
 
         # 7. Data quality report
         missing_ebit_pct = (missing_ebit / len(snapshots) * 100) if snapshots else 0.0

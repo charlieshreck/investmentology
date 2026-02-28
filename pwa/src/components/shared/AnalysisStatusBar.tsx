@@ -11,9 +11,34 @@ const VERDICT_COLORS: Record<string, string> = {
   COMPETENCE_FAIL: "var(--color-text-muted)",
 };
 
+const BAR_STYLE: React.CSSProperties = {
+  background: "var(--color-surface-1)",
+  borderBottom: "1px solid var(--glass-border)",
+  padding: "0 var(--space-md)",
+  height: 40,
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-md)",
+  fontSize: "var(--text-xs)",
+  zIndex: 90,
+  flexShrink: 0,
+};
+
+const DISMISS_STYLE: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: "var(--color-text-muted)",
+  cursor: "pointer",
+  padding: 2,
+  fontSize: 14,
+  lineHeight: 1,
+};
+
 export function AnalysisStatusBar() {
   const progress = useStore((s) => s.analysisProgress);
   const setProgress = useStore((s) => s.setAnalysisProgress);
+  const screener = useStore((s) => s.screenerProgress);
+  const setScreener = useStore((s) => s.setScreenerProgress);
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -23,7 +48,7 @@ export function AnalysisStatusBar() {
   const hasError = progress?.steps.some((s) => s.status === "error");
   const verdict = progress?.result?.decisionType;
 
-  // Auto-dismiss 8s after completion
+  // Auto-dismiss 8s after analysis completion
   useEffect(() => {
     if (isDone && !hasError) {
       dismissTimer.current = setTimeout(() => {
@@ -34,6 +59,73 @@ export function AnalysisStatusBar() {
       if (dismissTimer.current) clearTimeout(dismissTimer.current);
     };
   }, [isDone, hasError, setProgress]);
+
+  // Screener mode: show linear progress bar when no analysis is active
+  if (!progress && screener) {
+    const isComplete = screener.stage === "complete";
+    const isError = screener.stage === "error";
+    return (
+      <div style={BAR_STYLE}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontWeight: 700,
+            color: "var(--color-accent-bright)",
+            letterSpacing: "0.05em",
+          }}
+        >
+          SCREEN
+        </span>
+        <span
+          style={{
+            color: isError
+              ? "var(--color-error)"
+              : isComplete
+                ? "var(--color-success)"
+                : "var(--color-text-secondary)",
+            fontWeight: isComplete || isError ? 600 : 400,
+          }}
+        >
+          {screener.stage}
+          {screener.detail ? ` \u2014 ${screener.detail}` : ""}
+        </span>
+        <div style={{ flex: 1 }} />
+        <div
+          style={{
+            width: 80,
+            height: 3,
+            borderRadius: 2,
+            background: "var(--color-surface-3)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${screener.pct}%`,
+              height: "100%",
+              background: isError ? "var(--color-error)" : "var(--gradient-active)",
+              borderRadius: 2,
+              transition: "width 0.5s ease",
+            }}
+          />
+        </div>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-xs)",
+            color: "var(--color-text-muted)",
+            minWidth: 28,
+            textAlign: "right",
+          }}
+        >
+          {screener.pct}%
+        </span>
+        <button onClick={() => setScreener(null)} style={DISMISS_STYLE} aria-label="Dismiss">
+          ×
+        </button>
+      </div>
+    );
+  }
 
   if (!progress) return null;
 
@@ -48,20 +140,7 @@ export function AnalysisStatusBar() {
       : progress.ticker;
 
   return (
-    <div
-      style={{
-        background: "var(--color-surface-1)",
-        borderBottom: "1px solid var(--glass-border)",
-        padding: "0 var(--space-md)",
-        height: 40,
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-md)",
-        fontSize: "var(--text-xs)",
-        zIndex: 90,
-        flexShrink: 0,
-      }}
-    >
+    <div style={BAR_STYLE}>
       {/* Left: ticker + stage */}
       <div
         style={{
@@ -182,15 +261,7 @@ export function AnalysisStatusBar() {
         )}
         <button
           onClick={() => setProgress(null)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--color-text-muted)",
-            cursor: "pointer",
-            padding: 2,
-            fontSize: 14,
-            lineHeight: 1,
-          }}
+          style={DISMISS_STYLE}
           aria-label="Dismiss"
         >
           ×

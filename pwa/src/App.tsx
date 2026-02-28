@@ -17,6 +17,7 @@ import { Login } from "./views/Login";
 import { useAuth } from "./hooks/useAuth";
 import { useStore } from "./stores/useStore";
 import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
+import { AnalysisProvider } from "./contexts/AnalysisContext";
 
 // Intercept all fetch calls — on 401 force reload to show login
 const originalFetch = window.fetch;
@@ -81,6 +82,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <AnalysisProvider>
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         {offline && (
           <div
@@ -123,6 +125,7 @@ export default function App() {
           {overlayTicker && <StockDeepDive ticker={overlayTicker} />}
         </LayerOverlay>
       </div>
+      </AnalysisProvider>
     </BrowserRouter>
   );
 }

@@ -3,13 +3,14 @@ import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { ProgressSteps } from "../components/shared/ProgressSteps";
-import { useAnalysisStream } from "../hooks/useAnalysisStream";
+import { useAnalysis } from "../contexts/AnalysisContext";
 import { useConfetti } from "../hooks/useConfetti";
 import { useStore } from "../stores/useStore";
 
 export function Analyse() {
   const [ticker, setTicker] = useState("");
-  const { analysisProgress, startAnalysis, cancelAnalysis } = useAnalysisStream();
+  const { startAnalysis, cancelAnalysis } = useAnalysis();
+  const analysisProgress = useStore((s) => s.analysisProgress);
   const { fire } = useConfetti();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
 
@@ -27,7 +28,7 @@ export function Analyse() {
     e.preventDefault();
     const t = ticker.trim().toUpperCase();
     if (t) {
-      startAnalysis(t);
+      startAnalysis([t]);
     }
   };
 

@@ -9,6 +9,7 @@ import { usePortfolio } from "../hooks/usePortfolio";
 import { useCorrelations } from "../hooks/useCorrelations";
 import { useConfetti } from "../hooks/useConfetti";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { useAnalysis } from "../contexts/AnalysisContext";
 import type { Position, Alert } from "../types/models";
 import { useStore } from "../stores/useStore";
 
@@ -184,6 +185,7 @@ export function Portfolio() {
   } = usePortfolio();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const performance = useStore((s) => s.performance);
+  const { startAnalysis, isRunning: analysisRunning } = useAnalysis();
   const [closeTarget, setCloseTarget] = useState<Position | null>(null);
   const [closeStatus, setCloseStatus] = useState<string | null>(null);
   const [advisorCards, setAdvisorCards] = useState<AdvisorCard[]>([]);
@@ -285,7 +287,34 @@ export function Portfolio() {
 
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
-      <ViewHeader title="Portfolio" subtitle={`${positions.length} positions`} right={<MarketStatus wsStatus={wsStatus} />} />
+      <ViewHeader
+        title="Portfolio"
+        subtitle={`${positions.length} positions`}
+        right={
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            {positions.length > 0 && (
+              <button
+                onClick={() => { if (!analysisRunning) startAnalysis(positions.map((p) => p.ticker)); }}
+                disabled={analysisRunning}
+                style={{
+                  padding: "var(--space-xs) var(--space-md)",
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 600,
+                  background: analysisRunning ? "var(--color-surface-2)" : "var(--gradient-active)",
+                  color: analysisRunning ? "var(--color-text-muted)" : "#fff",
+                  border: "none",
+                  borderRadius: "var(--radius-full)",
+                  cursor: analysisRunning ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {analysisRunning ? "Running..." : `Re-analyze All (${positions.length})`}
+              </button>
+            )}
+            <MarketStatus wsStatus={wsStatus} />
+          </div>
+        }
+      />
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
         {/* Metrics row */}

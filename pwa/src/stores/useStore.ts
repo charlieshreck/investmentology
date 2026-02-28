@@ -50,13 +50,21 @@ interface QuantGateSlice {
   setQuantGate: (run: QuantGateRun) => void;
 }
 
+export interface ScreenerProgress {
+  stage: string;
+  detail: string;
+  pct: number;
+}
+
 interface UiSlice {
   activeView: string;
   overlayTicker: string | null;
   analysisProgress: AnalysisProgress | null;
+  screenerProgress: ScreenerProgress | null;
   setActiveView: (view: string) => void;
   setOverlayTicker: (ticker: string | null) => void;
   setAnalysisProgress: (progress: AnalysisProgress | null | ((prev: AnalysisProgress | null) => AnalysisProgress | null)) => void;
+  setScreenerProgress: (progress: ScreenerProgress | null) => void;
 }
 
 type AppState = PortfolioSlice & WatchlistSlice & QuantGateSlice & UiSlice;
@@ -97,6 +105,7 @@ export const useStore = create<AppState>((set) => ({
   activeView: "portfolio",
   overlayTicker: null,
   analysisProgress: null,
+  screenerProgress: null,
   setActiveView: (view) => set({ activeView: view }),
   setOverlayTicker: (ticker) => set({ overlayTicker: ticker }),
   setAnalysisProgress: (progress) =>
@@ -106,4 +115,5 @@ export const useStore = create<AppState>((set) => ({
           ? progress(state.analysisProgress)
           : progress,
     })),
+  setScreenerProgress: (progress) => set({ screenerProgress: progress }),
 }));

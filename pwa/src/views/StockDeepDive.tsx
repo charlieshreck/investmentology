@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { PriceChart } from "../components/charts/PriceChart";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
-import { useAnalyze } from "../hooks/useAnalyze";
+import { useAnalysis } from "../contexts/AnalysisContext";
+import { useStore } from "../stores/useStore";
 
 interface Fundamentals {
   market_cap: number;
@@ -378,12 +379,20 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
     setRefetchKey((k) => k + 1);
   }, []);
 
-  const onAnalyzeComplete = useCallback(() => {
-    refetchStock();
-  }, [refetchStock]);
+  const { startAnalysis, isRunning: analysisRunning } = useAnalysis();
+  const analysisProgress = useStore((s) => s.analysisProgress);
+  const isAnalyzing = analysisRunning && analysisProgress?.ticker === ticker;
 
-  const { analyzing, triggerAnalysis } = useAnalyze(onAnalyzeComplete);
-  const isAnalyzing = analyzing.has(ticker);
+  // Refetch when analysis for this ticker completes
+  const wasAnalyzing = useRef(false);
+  useEffect(() => {
+    if (isAnalyzing) {
+      wasAnalyzing.current = true;
+    } else if (wasAnalyzing.current) {
+      wasAnalyzing.current = false;
+      refetchStock();
+    }
+  }, [isAnalyzing, refetchStock]);
 
   useEffect(() => {
     let cancelled = false;
@@ -483,7 +492,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
           <div style={{ display: "flex", gap: "var(--space-sm)", marginTop: "var(--space-xs)" }}>
             <button
-              onClick={() => triggerAnalysis(ticker)}
+              onClick={() => { if (!analysisRunning) startAnalysis([ticker]); }}
               disabled={isAnalyzing}
               style={{
                 padding: "var(--space-xs) var(--space-md)",
