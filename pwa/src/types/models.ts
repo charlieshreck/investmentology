@@ -32,6 +32,17 @@ export interface PortfolioFit {
   alreadyHeld: boolean;
 }
 
+export interface HeldPosition {
+  positionType: string;
+  daysHeld: number;
+  pnlPct: number;
+  entryPrice: number;
+  thesisHealth: string;
+  convictionTrend: number;
+  entryThesis: string;
+  reasoning: string;
+}
+
 export interface Recommendation {
   ticker: string;
   name: string;
@@ -61,6 +72,9 @@ export interface Recommendation {
   portfolioFit?: PortfolioFit;
   dividendYield?: number;
   changePct?: number;
+  suggestedType?: string;
+  suggestedLabel?: string;
+  heldPosition?: HeldPosition;
 }
 
 export interface AgentStance {

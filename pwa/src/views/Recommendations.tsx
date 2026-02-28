@@ -235,16 +235,24 @@ function RecCard({
           {stabilityPill(rec.stabilityLabel)}
           {buzzPill(rec.buzzLabel)}
           {earningsPill(rec.earningsMomentum)}
-          {(rec as any).suggestedType && (
+          {rec.suggestedLabel && (
             <span style={{
               display: "inline-flex", padding: "1px 6px", borderRadius: 99,
               fontSize: 9, fontWeight: 600,
-              background: (rec as any).suggestedType === "core"
-                ? "rgba(59, 130, 246, 0.12)" : "rgba(251, 191, 36, 0.12)",
-              color: (rec as any).suggestedType === "core"
-                ? "#3b82f6" : "var(--color-warning)",
+              background: {
+                core: "rgba(59, 130, 246, 0.12)",
+                tactical: "rgba(251, 191, 36, 0.12)",
+                income: "rgba(52, 211, 153, 0.12)",
+                contrarian: "rgba(168, 85, 247, 0.12)",
+              }[rec.suggestedType || "tactical"] || "rgba(251, 191, 36, 0.12)",
+              color: {
+                core: "#3b82f6",
+                tactical: "var(--color-warning)",
+                income: "var(--color-success)",
+                contrarian: "#a855f7",
+              }[rec.suggestedType || "tactical"] || "var(--color-warning)",
             }}>
-              {(rec as any).suggestedType === "core" ? "Core" : "Tactical"}
+              {rec.suggestedLabel}
             </span>
           )}
           {rec.contrarianFlag && (
@@ -267,6 +275,53 @@ function RecCard({
             </span>
           )}
         </div>
+        {/* Held position thesis strip */}
+        {rec.heldPosition && (
+          <div style={{
+            marginTop: 4, padding: "4px 8px", borderRadius: 6,
+            background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+          }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 3,
+              fontSize: 9, fontWeight: 700, color: "var(--color-accent-bright)",
+            }}>
+              HELD — {rec.heldPosition.positionType}
+            </span>
+            <span style={{
+              fontSize: 9, fontWeight: 600,
+              color: {
+                INTACT: "var(--color-success)",
+                UNDER_REVIEW: "var(--color-warning)",
+                CHALLENGED: "var(--color-error)",
+                BROKEN: "var(--color-error)",
+              }[rec.heldPosition.thesisHealth] || "var(--color-text-muted)",
+            }}>
+              {rec.heldPosition.thesisHealth === "INTACT" ? "\u25CF" :
+               rec.heldPosition.thesisHealth === "UNDER_REVIEW" ? "\u25CF" :
+               "\u25CF"}{" "}
+              Thesis {rec.heldPosition.thesisHealth.replace("_", " ").toLowerCase()}
+            </span>
+            <span style={{ fontSize: 9, color: "var(--color-text-muted)" }}>
+              {rec.heldPosition.daysHeld}d held
+            </span>
+            <span style={{
+              fontSize: 9, fontFamily: "var(--font-mono)",
+              color: rec.heldPosition.pnlPct >= 0 ? "var(--color-success)" : "var(--color-error)",
+            }}>
+              {rec.heldPosition.pnlPct >= 0 ? "+" : ""}{rec.heldPosition.pnlPct.toFixed(1)}%
+            </span>
+            {rec.heldPosition.entryThesis && (
+              <span style={{
+                fontSize: 9, color: "var(--color-text-muted)", fontStyle: "italic",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                maxWidth: 300,
+              }}>
+                "{rec.heldPosition.entryThesis}"
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Consensus */}

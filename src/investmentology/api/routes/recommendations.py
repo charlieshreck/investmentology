@@ -132,9 +132,10 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
             "beatStreak": earnings_m["beat_streak"],
         }
 
-    # Suggest position type: core (long-term hold) vs tactical (shorter-term)
+    # Suggest position category with richer labels
     core_signals = 0
     tactical_signals = 0
+    income_signals = 0
     verdict = row.get("verdict", "")
     if verdict == "STRONG_BUY":
         core_signals += 2
@@ -154,12 +155,40 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
     elif cons_tier == "CONTRARIAN":
         tactical_signals += 1
     div_yield = result.get("dividendYield", 0) or 0
-    if div_yield >= 1.5:
+    if div_yield >= 3.0:
+        income_signals += 2
+    elif div_yield >= 1.5:
+        income_signals += 1
         core_signals += 1
     buzz_label = result.get("buzzLabel")
     if buzz_label == "HIGH":
         tactical_signals += 1
-    result["suggestedType"] = "core" if core_signals > tactical_signals else "tactical"
+
+    # Determine category and label
+    if income_signals >= 2 and core_signals >= 1:
+        suggested_type = "income"
+        suggested_label = "Income Builder"
+    elif result.get("contrarianFlag") and tactical_signals > core_signals:
+        suggested_type = "contrarian"
+        suggested_label = "Contrarian Bet"
+    elif core_signals > tactical_signals:
+        if conf >= 0.8 and stability and stability[1] == "STABLE":
+            suggested_type = "core"
+            suggested_label = "Strong Conviction"
+        else:
+            suggested_type = "core"
+            suggested_label = "Core Hold"
+    else:
+        suggested_type = "tactical"
+        suggested_label = "Momentum Play"
+
+    result["suggestedType"] = suggested_type
+    result["suggestedLabel"] = suggested_label
+
+    # Thesis data for held positions
+    held_info = row.get("_held_info")
+    if held_info:
+        result["heldPosition"] = held_info
 
     return result
 
@@ -191,6 +220,49 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
             row["_portfolio_fit"] = scorer.score(row.get("ticker", ""), row.get("sector"))
     except Exception:
         pass
+
+    # Enrich held positions with thesis lifecycle data
+    try:
+        from investmentology.advisory.thesis_health import assess_thesis_health
+        from datetime import date
+
+        positions = registry.get_open_positions()
+        held_map = {p.ticker: p for p in positions}
+
+        for row in positive_rows:
+            ticker = row.get("ticker", "")
+            pos = held_map.get(ticker)
+            if not pos:
+                continue
+            assessment = assess_thesis_health(ticker, registry, pos.position_type)
+            days_held = (date.today() - pos.entry_date).days if pos.entry_date else 0
+            pnl_pct = float(pos.pnl_pct * 100) if pos.entry_price else 0
+
+            # Get entry thesis
+            entry_thesis = pos.thesis
+            try:
+                et_rows = registry._db.execute(
+                    "SELECT entry_thesis FROM invest.portfolio_positions "
+                    "WHERE ticker = %s AND is_closed = false LIMIT 1",
+                    (ticker,),
+                )
+                if et_rows and et_rows[0].get("entry_thesis"):
+                    entry_thesis = et_rows[0]["entry_thesis"]
+            except Exception:
+                pass
+
+            row["_held_info"] = {
+                "positionType": pos.position_type,
+                "daysHeld": days_held,
+                "pnlPct": round(pnl_pct, 2),
+                "entryPrice": float(pos.entry_price),
+                "thesisHealth": assessment.health.value,
+                "convictionTrend": assessment.conviction_trend,
+                "entryThesis": (entry_thesis or "")[:200],
+                "reasoning": assessment.reasoning,
+            }
+    except Exception:
+        logger.debug("Could not enrich held positions with thesis data")
 
     # Enrichment from DB (populated by daily monitor cronjob — no external API calls)
     rec_tickers = [r.get("ticker", "") for r in positive_rows if r.get("ticker")]
