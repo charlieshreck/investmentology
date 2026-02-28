@@ -12,6 +12,8 @@ export function Analyse() {
   const [ticker, setTicker] = useState("");
   const { startAnalysis, cancelAnalysis } = useAnalysis();
   const analysisProgress = useStore((s) => s.analysisProgress);
+  const recentAnalyses = useStore((s) => s.recentAnalyses);
+  const pushRecentAnalysis = useStore((s) => s.pushRecentAnalysis);
   const { fire } = useConfetti();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
 
@@ -22,12 +24,24 @@ export function Analyse() {
     (s) => s.status === "done" || s.status === "error",
   );
 
-  // Capture completed analysis into local snapshot
+  // Capture completed analysis into local snapshot + recent history
   useEffect(() => {
     if (isDone && analysisProgress) {
       lastResult.current = analysisProgress;
+      if (analysisProgress.result) {
+        pushRecentAnalysis({
+          ticker: analysisProgress.result.ticker,
+          decisionType: analysisProgress.result.decisionType,
+          confidence: analysisProgress.result.confidence,
+          reasoning: analysisProgress.result.reasoning,
+          agentStances: analysisProgress.agentStances,
+          riskFlags: analysisProgress.riskFlags,
+          consensusScore: analysisProgress.consensusScore,
+          completedAt: new Date().toISOString(),
+        });
+      }
     }
-  }, [isDone, analysisProgress]);
+  }, [isDone, analysisProgress, pushRecentAnalysis]);
 
   // Use live progress when available, otherwise show the last completed snapshot
   const displayProgress = analysisProgress ?? lastResult.current;
@@ -268,6 +282,64 @@ export function Analyse() {
                 <Badge variant="neutral">L4 Adversarial</Badge>
                 <Badge variant="neutral">L5 Timing</Badge>
               </div>
+            </div>
+          </BentoCard>
+        )}
+
+        {/* Recent Analyses */}
+        {recentAnalyses.length > 0 && (
+          <BentoCard title="Recent Analyses">
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+              {recentAnalyses.map((a) => {
+                const verdictColor =
+                  a.decisionType === "BUY" || a.decisionType === "STRONG_BUY" || a.decisionType === "ACCUMULATE"
+                    ? "success"
+                    : a.decisionType === "SELL" || a.decisionType === "REJECT"
+                      ? "error"
+                      : a.decisionType === "HOLD"
+                        ? "warning"
+                        : "neutral";
+                const timeAgo = (() => {
+                  const ms = Date.now() - new Date(a.completedAt).getTime();
+                  const mins = Math.floor(ms / 60000);
+                  if (mins < 1) return "just now";
+                  if (mins < 60) return `${mins}m ago`;
+                  const hrs = Math.floor(mins / 60);
+                  if (hrs < 24) return `${hrs}h ago`;
+                  return `${Math.floor(hrs / 24)}d ago`;
+                })();
+                return (
+                  <div
+                    key={`${a.ticker}-${a.completedAt}`}
+                    onClick={() => setOverlayTicker(a.ticker)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "var(--space-md)",
+                      padding: "var(--space-sm) var(--space-md)",
+                      borderRadius: "var(--radius-sm)",
+                      cursor: "pointer",
+                      transition: "background var(--duration-fast) var(--ease-out)",
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-1)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  >
+                    <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", minWidth: 48 }}>
+                      {a.ticker}
+                    </span>
+                    <Badge variant={verdictColor}>{a.decisionType}</Badge>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>
+                      {(a.confidence * 100).toFixed(0)}%
+                    </span>
+                    <div style={{ flex: 1, fontSize: "var(--text-xs)", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {a.reasoning}
+                    </div>
+                    <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", flexShrink: 0 }}>
+                      {timeAgo}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </BentoCard>
         )}

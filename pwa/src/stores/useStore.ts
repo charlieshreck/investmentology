@@ -56,15 +56,28 @@ export interface ScreenerProgress {
   pct: number;
 }
 
+export interface CompletedAnalysis {
+  ticker: string;
+  decisionType: string;
+  confidence: number;
+  reasoning: string;
+  agentStances?: AnalysisProgress["agentStances"];
+  riskFlags?: string[];
+  consensusScore?: number | null;
+  completedAt: string;
+}
+
 interface UiSlice {
   activeView: string;
   overlayTicker: string | null;
   analysisProgress: AnalysisProgress | null;
   screenerProgress: ScreenerProgress | null;
+  recentAnalyses: CompletedAnalysis[];
   setActiveView: (view: string) => void;
   setOverlayTicker: (ticker: string | null) => void;
   setAnalysisProgress: (progress: AnalysisProgress | null | ((prev: AnalysisProgress | null) => AnalysisProgress | null)) => void;
   setScreenerProgress: (progress: ScreenerProgress | null) => void;
+  pushRecentAnalysis: (analysis: CompletedAnalysis) => void;
 }
 
 type AppState = PortfolioSlice & WatchlistSlice & QuantGateSlice & UiSlice;
@@ -106,6 +119,7 @@ export const useStore = create<AppState>((set) => ({
   overlayTicker: null,
   analysisProgress: null,
   screenerProgress: null,
+  recentAnalyses: [],
   setActiveView: (view) => set({ activeView: view }),
   setOverlayTicker: (ticker) => set({ overlayTicker: ticker }),
   setAnalysisProgress: (progress) =>
@@ -116,4 +130,11 @@ export const useStore = create<AppState>((set) => ({
           : progress,
     })),
   setScreenerProgress: (progress) => set({ screenerProgress: progress }),
+  pushRecentAnalysis: (analysis) =>
+    set((state) => ({
+      recentAnalyses: [
+        analysis,
+        ...state.recentAnalyses.filter((a) => a.ticker !== analysis.ticker),
+      ].slice(0, 5),
+    })),
 }));
