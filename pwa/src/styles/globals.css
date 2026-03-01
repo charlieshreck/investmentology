@@ -109,6 +109,7 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --nav-height: 72px;
   --header-height: 60px;
+  --sidebar-width: 220px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }

@@ -18,6 +18,7 @@ import { SettingsView } from "./views/SettingsView";
 import { StockDeepDive } from "./views/StockDeepDive";
 import { Login } from "./views/Login";
 import { useAuth } from "./hooks/useAuth";
+import { useIsDesktop } from "./hooks/useMediaQuery";
 import { useStore } from "./stores/useStore";
 import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
 import { CommandPalette } from "./components/shared/CommandPalette";
@@ -96,9 +97,15 @@ function AppShell({ offline }: { offline: boolean }) {
   const location = useLocation();
   const overlayTicker = useStore((s) => s.overlayTicker);
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
+  const isDesktop = useIsDesktop();
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      marginLeft: isDesktop ? "var(--sidebar-width)" : undefined,
+    }}>
       <AnimatePresence>
         {offline && (
           <motion.div
@@ -138,7 +145,7 @@ function AppShell({ offline }: { offline: boolean }) {
         style={{
           flex: 1,
           overflow: "hidden",
-          maxWidth: "520px",
+          maxWidth: isDesktop ? "960px" : "520px",
           width: "100%",
           margin: "0 auto",
         }}
