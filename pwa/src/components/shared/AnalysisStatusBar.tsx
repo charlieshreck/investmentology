@@ -40,7 +40,6 @@ export function AnalysisStatusBar() {
   const setProgress = useStore((s) => s.setAnalysisProgress);
   const screener = useStore((s) => s.screenerProgress);
   const setScreener = useStore((s) => s.setScreenerProgress);
-  const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
