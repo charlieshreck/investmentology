@@ -31,6 +31,8 @@ spec:
               value: "200000000"
             - name: MIN_HOLD_HOURS
               value: "48"
+            - name: HB_PROXY_URL
+              value: "http://10.10.0.101:9100"
           resources:
             requests:
               memory: "256Mi"

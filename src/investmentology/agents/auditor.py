@@ -62,8 +62,8 @@ class AuditorAgent(BaseAgent):
     Signal category: Risk/Portfolio (14 tags).
     """
 
-    # Provider preference: claude-cli (subscription) > anthropic (API)
-    PROVIDER_PREFERENCE = ["claude-cli", "anthropic"]
+    # Provider preference: claude-cli (subscription) > remote proxy > anthropic (API)
+    PROVIDER_PREFERENCE = ["claude-cli", "remote-auditor", "anthropic"]
 
     def __init__(self, gateway: LLMGateway) -> None:
         self.gateway = gateway
@@ -77,11 +77,14 @@ class AuditorAgent(BaseAgent):
         if "claude-cli" in gateway._cli_providers:
             cfg = gateway._cli_providers["claude-cli"]
             return "claude-cli", cfg.default_model or "claude-opus-4-6"
+        if "remote-auditor" in gateway._remote_cli_providers:
+            cfg = gateway._remote_cli_providers["remote-auditor"]
+            return "remote-auditor", cfg.default_model or "claude-opus-4-6"
         if "anthropic" in gateway._providers:
             cfg = gateway._providers["anthropic"]
             return "anthropic", cfg.default_model
         raise ValueError(
-            "Auditor requires claude-cli (USE_CLAUDE_CLI=1) or anthropic API key"
+            "Auditor requires claude-cli, remote-auditor proxy, or anthropic API key"
         )
 
     def build_system_prompt(self) -> str:

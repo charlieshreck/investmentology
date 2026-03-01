@@ -46,8 +46,16 @@ export function PriceChart({ ticker }: { ticker: string }) {
   const [period, setPeriod] = useState<Period>("3mo");
   const [data, setData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Refs for direct DOM updates during scrub (no re-render per frame)
+  const crosshairRef = useRef<SVGLineElement>(null);
+  const dotRef = useRef<SVGCircleElement>(null);
+  const priceRef = useRef<HTMLSpanElement>(null);
+  const dateRef = useRef<HTMLSpanElement>(null);
+  const changeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,28 +65,13 @@ export function PriceChart({ ticker }: { ticker: string }) {
       .then((res) => {
         if (!cancelled) {
           setData(res.data || []);
-          setHover(null);
+          setScrubIdx(null);
         }
       })
       .catch(() => { if (!cancelled) setData([]); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [ticker, period]);
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
-      if (!svgRef.current || data.length < 2) return;
-      const rect = svgRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const pad = 0;
-      const w = rect.width - pad * 2;
-      const idx = Math.round(((x - pad) / w) * (data.length - 1));
-      if (idx >= 0 && idx < data.length) {
-        setHover({ idx, x: e.clientX - rect.left, y: e.clientY - rect.top });
-      }
-    },
-    [data],
-  );
 
   const prices = data.map((d) => d.close).filter((p) => p > 0);
   const first = prices[0] ?? 0;
@@ -127,26 +120,154 @@ export function PriceChart({ ticker }: { ticker: string }) {
     }
   }
 
-  // Hover point data
-  const hoverPoint = hover != null ? data[hover.idx] : null;
+  // Convert client X to data index
+  const clientXToIdx = useCallback((clientX: number): number | null => {
+    if (!svgRef.current || data.length < 2) return null;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const frac = x / rect.width;
+    const idx = Math.round(frac * (data.length - 1));
+    if (idx >= 0 && idx < data.length) return idx;
+    return null;
+  }, [data]);
+
+  // Update crosshair + header via DOM refs (no setState during scrub)
+  const updateScrub = useCallback((idx: number | null) => {
+    if (idx === null || !points[idx]) {
+      // Hide crosshair
+      if (crosshairRef.current) crosshairRef.current.style.display = "none";
+      if (dotRef.current) dotRef.current.style.display = "none";
+      // Reset header to default
+      if (priceRef.current) priceRef.current.textContent = "";
+      if (dateRef.current) dateRef.current.textContent = "";
+      if (changeRef.current) {
+        changeRef.current.textContent = isPositive ? `+${changePct.toFixed(2)}%` : `${changePct.toFixed(2)}%`;
+        changeRef.current.style.color = isPositive ? "var(--color-success)" : "var(--color-error)";
+      }
+      return;
+    }
+
+    const pt = points[idx];
+    const dp = data[idx];
+    const scrubChange = first > 0 ? ((dp.close - first) / first) * 100 : 0;
+    const scrubPositive = scrubChange >= 0;
+
+    // Move crosshair line
+    if (crosshairRef.current) {
+      crosshairRef.current.setAttribute("x1", String(pt.x));
+      crosshairRef.current.setAttribute("x2", String(pt.x));
+      crosshairRef.current.style.display = "";
+    }
+    // Move dot
+    if (dotRef.current) {
+      dotRef.current.setAttribute("cx", String(pt.x));
+      dotRef.current.setAttribute("cy", String(pt.y));
+      dotRef.current.style.display = "";
+    }
+    // Update header: show scrubbed price + date
+    if (priceRef.current) {
+      priceRef.current.textContent = formatPrice(dp.close);
+    }
+    if (dateRef.current) {
+      dateRef.current.textContent = formatDate(dp.date, period);
+    }
+    if (changeRef.current) {
+      changeRef.current.textContent = scrubPositive ? `+${scrubChange.toFixed(2)}%` : `${scrubChange.toFixed(2)}%`;
+      changeRef.current.style.color = scrubPositive ? "var(--color-success)" : "var(--color-error)";
+    }
+  }, [points, data, first, changePct, isPositive, period]);
+
+  // Mouse handlers
+  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    const idx = clientXToIdx(e.clientX);
+    setScrubIdx(idx);
+    updateScrub(idx);
+  }, [clientXToIdx, updateScrub]);
+
+  const handleMouseLeave = useCallback(() => {
+    setScrubIdx(null);
+    updateScrub(null);
+  }, [updateScrub]);
+
+  // Touch handlers — prevent scroll while scrubbing
+  const handleTouchStart = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length !== 1) return;
+    const idx = clientXToIdx(e.touches[0].clientX);
+    setScrubIdx(idx);
+    updateScrub(idx);
+  }, [clientXToIdx, updateScrub]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length !== 1) return;
+    e.preventDefault(); // prevent scroll while scrubbing chart
+    const idx = clientXToIdx(e.touches[0].clientX);
+    setScrubIdx(idx);
+    updateScrub(idx);
+  }, [clientXToIdx, updateScrub]);
+
+  const handleTouchEnd = useCallback(() => {
+    setScrubIdx(null);
+    updateScrub(null);
+  }, [updateScrub]);
+
+  // Scrub active state for header swap
+  const isScrubbing = scrubIdx !== null;
+  const scrubPoint = isScrubbing ? data[scrubIdx] : null;
 
   return (
-    <div style={{ background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
-      {/* Period selector */}
+    <div
+      ref={containerRef}
+      style={{ background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}
+    >
+      {/* Header — swaps between default and scrub mode */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           padding: "var(--space-md) var(--space-lg)",
+          minHeight: 44,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-sm)", minWidth: 0 }}>
+          {/* Scrub price — shown when scrubbing, hidden otherwise */}
+          <span
+            ref={priceRef}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--text-lg)",
+              fontWeight: 700,
+              color: "var(--color-text)",
+              transition: "opacity 150ms ease",
+              opacity: isScrubbing ? 1 : 0,
+              width: isScrubbing ? "auto" : 0,
+              overflow: "hidden",
+            }}
+          >
+            {scrubPoint ? formatPrice(scrubPoint.close) : ""}
+          </span>
+
+          {/* Label */}
+          <span
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--color-text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              transition: "opacity 150ms ease",
+              opacity: isScrubbing ? 0 : 1,
+              width: isScrubbing ? 0 : "auto",
+              overflow: "hidden",
+            }}
+          >
             Price
           </span>
+
+          {/* Change % — always visible, updates during scrub */}
           {!loading && prices.length > 0 && (
             <span
+              ref={changeRef}
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: "var(--text-sm)",
@@ -154,11 +275,27 @@ export function PriceChart({ ticker }: { ticker: string }) {
                 color: lineColor,
               }}
             >
-              {isPositive ? "+" : ""}
-              {changePct.toFixed(2)}%
+              {isPositive ? "+" : ""}{changePct.toFixed(2)}%
             </span>
           )}
+
+          {/* Scrub date */}
+          <span
+            ref={dateRef}
+            style={{
+              fontSize: 10,
+              color: "var(--color-text-muted)",
+              fontFamily: "var(--font-mono)",
+              transition: "opacity 150ms ease",
+              opacity: isScrubbing ? 1 : 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {scrubPoint ? formatDate(scrubPoint.date, period) : ""}
+          </span>
         </div>
+
+        {/* Period selector */}
         <div style={{ display: "flex", gap: 2 }}>
           {PERIODS.map((p) => (
             <button
@@ -187,132 +324,94 @@ export function PriceChart({ ticker }: { ticker: string }) {
       <div style={{ padding: "0 var(--space-lg) var(--space-md)", position: "relative" }}>
         {loading ? (
           <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>Loading...</span>
+            <div className="skeleton" style={{ width: "100%", height: H - 40, borderRadius: "var(--radius-sm)" }} />
           </div>
         ) : prices.length < 2 ? (
           <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>No data</span>
           </div>
         ) : (
-          <>
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${W} ${H}`}
-              width="100%"
-              height={H}
-              style={{ display: "block", cursor: "crosshair" }}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={() => setHover(null)}
-            >
-              <defs>
-                <linearGradient id={`grad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={lineColor} stopOpacity="0.15" />
-                  <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
-                </linearGradient>
-              </defs>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            width="100%"
+            height={H}
+            style={{ display: "block", cursor: "crosshair", touchAction: "pan-y" }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            <defs>
+              <linearGradient id={`grad-${ticker}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={lineColor} stopOpacity="0.15" />
+                <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
+              </linearGradient>
+            </defs>
 
-              {/* Y gridlines */}
-              {[0.25, 0.5, 0.75].map((frac) => {
-                const y = padTop + frac * (H - padTop - padBot);
-                return (
-                  <line
-                    key={frac}
-                    x1={0}
-                    y1={y}
-                    x2={W}
-                    y2={y}
-                    stroke="var(--color-surface-2)"
-                    strokeWidth={1}
-                    strokeDasharray="4 4"
-                  />
-                );
-              })}
+            {/* Y gridlines */}
+            {[0.25, 0.5, 0.75].map((frac) => {
+              const y = padTop + frac * (H - padTop - padBot);
+              return (
+                <line
+                  key={frac}
+                  x1={0} y1={y} x2={W} y2={y}
+                  stroke="var(--color-surface-2)"
+                  strokeWidth={1}
+                  strokeDasharray="4 4"
+                />
+              );
+            })}
 
-              {/* Area fill */}
-              {areaPath && <path d={areaPath} fill={`url(#grad-${ticker})`} />}
+            {/* Area fill */}
+            {areaPath && <path d={areaPath} fill={`url(#grad-${ticker})`} />}
 
-              {/* Price line */}
-              <polyline
-                points={polyline}
-                fill="none"
-                stroke={lineColor}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            {/* Price line */}
+            <polyline
+              points={polyline}
+              fill="none"
+              stroke={lineColor}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
 
-              {/* Hover crosshair */}
-              {hover != null && points[hover.idx] && (
-                <>
-                  <line
-                    x1={points[hover.idx].x}
-                    y1={padTop}
-                    x2={points[hover.idx].x}
-                    y2={H - padBot}
-                    stroke="var(--color-text-muted)"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                    opacity={0.5}
-                  />
-                  <circle
-                    cx={points[hover.idx].x}
-                    cy={points[hover.idx].y}
-                    r={4}
-                    fill={lineColor}
-                    stroke="var(--color-surface-0)"
-                    strokeWidth={2}
-                  />
-                </>
-              )}
+            {/* Crosshair line — positioned via ref */}
+            <line
+              ref={crosshairRef}
+              x1={0} y1={padTop} x2={0} y2={H - padBot}
+              stroke="var(--color-text-secondary)"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              style={{ display: "none" }}
+            />
 
-              {/* X labels */}
-              {xLabels.map((lbl, i) => (
-                <text
-                  key={i}
-                  x={lbl.x}
-                  y={H - 4}
-                  textAnchor="middle"
-                  fill="var(--color-text-muted)"
-                  fontSize={10}
-                  fontFamily="var(--font-mono)"
-                >
-                  {lbl.label}
-                </text>
-              ))}
-            </svg>
+            {/* Crosshair dot — positioned via ref */}
+            <circle
+              ref={dotRef}
+              cx={0} cy={0} r={5}
+              fill={lineColor}
+              stroke="var(--color-surface-0)"
+              strokeWidth={2.5}
+              style={{ display: "none" }}
+            />
 
-            {/* Hover tooltip */}
-            {hoverPoint && hover && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: Math.min(hover.x + 12, W - 140),
-                  top: 8,
-                  background: "var(--color-surface-1)",
-                  border: "1px solid var(--glass-border)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "var(--space-sm) var(--space-md)",
-                  pointerEvents: "none",
-                  zIndex: 10,
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  whiteSpace: "nowrap",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-                }}
+            {/* X labels */}
+            {xLabels.map((lbl, i) => (
+              <text
+                key={i}
+                x={lbl.x}
+                y={H - 4}
+                textAnchor="middle"
+                fill="var(--color-text-muted)"
+                fontSize={10}
+                fontFamily="var(--font-mono)"
               >
-                <div style={{ fontWeight: 700, marginBottom: 2 }}>{formatPrice(hoverPoint.close)}</div>
-                <div style={{ color: "var(--color-text-muted)", fontSize: 10 }}>
-                  O:{formatPrice(hoverPoint.open)} H:{formatPrice(hoverPoint.high)} L:{formatPrice(hoverPoint.low)}
-                </div>
-                <div style={{ color: "var(--color-text-muted)", fontSize: 10 }}>
-                  Vol: {formatVol(hoverPoint.volume)}
-                </div>
-                <div style={{ color: "var(--color-text-muted)", fontSize: 9 }}>
-                  {formatDate(hoverPoint.date, period)}
-                </div>
-              </div>
-            )}
-          </>
+                {lbl.label}
+              </text>
+            ))}
+          </svg>
         )}
       </div>
     </div>

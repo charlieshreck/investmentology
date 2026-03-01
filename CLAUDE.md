@@ -79,18 +79,20 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 
 ### Layer 3: Multi-Agent Analysis (Tri-Modal Consensus)
 Four independent agents with weighted voting:
-| Agent | Focus | Provider | Where it runs |
-|-------|-------|----------|---------------|
-| Warren | Fundamentals, intrinsic value | DeepSeek API | K8s pod + HB LXC |
-| Soros | Macro, cycles, geopolitics | Gemini CLI (subscription) | HB LXC only |
-| Simons | Technicals, momentum, timing | Groq API | K8s pod + HB LXC |
-| Auditor | Risk, correlation, portfolio | Claude CLI (subscription) | HB LXC only |
+| Agent | Focus | Provider (K8s pod) | Provider (HB LXC) |
+|-------|-------|--------------------|--------------------|
+| Warren | Fundamentals, intrinsic value | DeepSeek API | DeepSeek API |
+| Soros | Macro, cycles, geopolitics | Remote proxy → HB LXC → Gemini CLI | Gemini CLI (local) |
+| Simons | Technicals, momentum, timing | Groq API | Groq API |
+| Auditor | Risk, correlation, portfolio | Remote proxy → HB LXC → Claude CLI | Claude CLI (local) |
 
-**Agent architecture is split by design to save on API costs:**
-- **K8s pod** (web UI analysis): Runs Warren + Simons only (cheap HTTP APIs)
-- **HB LXC** (overnight pipeline): Runs all 4 agents (CLI subscriptions for Soros + Auditor)
-- `USE_GEMINI_CLI=1` / `USE_CLAUDE_CLI=1` env vars enable CLI providers — set on HB LXC, NOT on K8s pod
-- Agents that can't resolve their provider are silently skipped at startup (`orchestrator.py:134-141`)
+**All 4 agents run on every analysis** (web UI and overnight pipeline):
+- **K8s pod**: Warren + Simons use HTTP APIs directly; Soros + Auditor delegate to HB LXC proxy (`HB_PROXY_URL`)
+- **HB LXC**: All 4 agents run locally (CLI subscriptions for Soros + Auditor)
+- Provider preference order: local CLI > remote proxy > HTTP API fallback
+- `HB_PROXY_URL` + `HB_PROXY_TOKEN` env vars enable remote proxy on K8s pod
+- `USE_GEMINI_CLI=1` / `USE_CLAUDE_CLI=1` env vars enable local CLI on HB LXC
+- Proxy service: `scripts/hb-agent-proxy.py` on HB LXC:9100 (systemd: `hb-agent-proxy.service`)
 - **NEVER add ANTHROPIC_API_KEY or GROK_API_KEY to the K8s pod** — CLI subscriptions are the intended path
 
 Source: `src/investmentology/agents/`

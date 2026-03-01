@@ -44,6 +44,18 @@ class CLIProviderConfig:
 
 
 @dataclass
+class RemoteCLIProviderConfig:
+    """Configuration for a remote CLI provider proxied via HTTP."""
+
+    name: str  # e.g. "remote-soros", "remote-auditor"
+    remote_url: str  # e.g. "http://10.10.0.101:9100"
+    agent_name: str  # "soros" or "auditor"
+    auth_token: str
+    default_model: str = ""
+    timeout_seconds: int = 300
+
+
+@dataclass
 class _RateLimiter:
     """Simple sliding window rate limiter."""
 
@@ -76,6 +88,7 @@ class LLMGateway:
     def __init__(self) -> None:
         self._providers: dict[str, ProviderConfig] = {}
         self._cli_providers: dict[str, CLIProviderConfig] = {}
+        self._remote_cli_providers: dict[str, RemoteCLIProviderConfig] = {}
         self._limiters: dict[str, _RateLimiter] = {}
         self._client: httpx.AsyncClient | None = None
 
@@ -87,6 +100,10 @@ class LLMGateway:
     def register_cli_provider(self, config: CLIProviderConfig) -> None:
         """Register a CLI-based provider (claude, gemini)."""
         self._cli_providers[config.name] = config
+
+    def register_remote_cli_provider(self, config: RemoteCLIProviderConfig) -> None:
+        """Register a remote CLI provider (proxied via HTTP to HB LXC)."""
+        self._remote_cli_providers[config.name] = config
 
     async def start(self) -> None:
         """Initialize the HTTP client."""
@@ -107,10 +124,14 @@ class LLMGateway:
         max_tokens: int = 4096,
         temperature: float = 0.3,
     ) -> LLMResponse:
-        """Call an LLM provider (HTTP API or CLI subprocess)."""
-        # Dispatch CLI providers
+        """Call an LLM provider (HTTP API, CLI subprocess, or remote CLI proxy)."""
+        # Dispatch CLI providers (local)
         if provider in self._cli_providers:
             return await self._call_cli(provider, system_prompt, user_prompt)
+
+        # Dispatch remote CLI providers (HB LXC proxy)
+        if provider in self._remote_cli_providers:
+            return await self._call_remote_cli(provider, system_prompt, user_prompt)
 
         if provider not in self._providers:
             raise ValueError(f"Unknown provider: {provider}")
@@ -281,6 +302,54 @@ class LLMGateway:
             return self._parse_claude_cli_output(output, provider, config, latency_ms)
         return self._parse_gemini_cli_output(output, provider, config, latency_ms)
 
+    async def _call_remote_cli(
+        self, provider: str, system_prompt: str, user_prompt: str
+    ) -> LLMResponse:
+        """Call a remote CLI provider via HTTP proxy (HB LXC)."""
+        config = self._remote_cli_providers[provider]
+
+        if not self._client:
+            await self.start()
+
+        url = f"{config.remote_url}/agent/{config.agent_name}"
+        logger.info("Remote CLI provider %s: calling %s", provider, url)
+        start_time = time.monotonic()
+
+        try:
+            resp = await self._client.post(  # type: ignore[union-attr]
+                url,
+                json={"system_prompt": system_prompt, "user_prompt": user_prompt},
+                headers={"Authorization": f"Bearer {config.auth_token}"},
+                timeout=httpx.Timeout(float(config.timeout_seconds)),
+            )
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"Remote CLI provider {provider} timed out after {config.timeout_seconds}s"
+            )
+        except httpx.ConnectError:
+            raise RuntimeError(
+                f"Remote CLI provider {provider}: cannot connect to {config.remote_url}"
+            )
+
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+
+        if resp.status_code != 200:
+            detail = resp.text[:300]
+            raise RuntimeError(
+                f"Remote CLI provider {provider} returned {resp.status_code}: {detail}"
+            )
+
+        data = resp.json()
+        logger.info("Remote CLI provider %s: completed in %dms", provider, latency_ms)
+
+        return LLMResponse(
+            content=data["content"],
+            model=data.get("model", config.default_model),
+            provider=provider,
+            token_usage=data.get("token_usage", {}),
+            latency_ms=latency_ms,
+        )
+
     @staticmethod
     def _parse_claude_cli_output(
         output: str, provider: str, config: CLIProviderConfig, latency_ms: int
@@ -433,6 +502,29 @@ class LLMGateway:
                     default_model="claude-sonnet-4-5-20250929",
                     rpm_limit=60,
                     timeout_seconds=60,
+                )
+            )
+
+        # Register remote CLI providers (K8s pod delegates to HB LXC)
+        if config.hb_proxy_url and config.hb_proxy_token:
+            gw.register_remote_cli_provider(
+                RemoteCLIProviderConfig(
+                    name="remote-soros",
+                    remote_url=config.hb_proxy_url,
+                    agent_name="soros",
+                    auth_token=config.hb_proxy_token,
+                    default_model="gemini-2.5-pro",
+                    timeout_seconds=300,
+                )
+            )
+            gw.register_remote_cli_provider(
+                RemoteCLIProviderConfig(
+                    name="remote-auditor",
+                    remote_url=config.hb_proxy_url,
+                    agent_name="auditor",
+                    auth_token=config.hb_proxy_token,
+                    default_model="claude-opus-4-6",
+                    timeout_seconds=300,
                 )
             )
 

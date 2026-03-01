@@ -3,6 +3,7 @@ import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { ProgressSteps } from "../components/shared/ProgressSteps";
+import { StreamText } from "../components/shared/StreamText";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useConfetti } from "../hooks/useConfetti";
 import { useStore } from "../stores/useStore";
@@ -192,7 +193,7 @@ export function Analyse() {
                   </span>
                 </div>
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                  {displayProgress.result.reasoning}
+                  <StreamText text={displayProgress.result.reasoning} speed={6} />
                 </div>
 
                 {/* Agent Stances */}

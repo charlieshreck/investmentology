@@ -60,8 +60,8 @@ class SorosAgent(BaseAgent):
     Signal category: Macro/Cycle (21 tags).
     """
 
-    # Provider preference: gemini-cli (subscription) > xai (API)
-    PROVIDER_PREFERENCE = ["gemini-cli", "xai"]
+    # Provider preference: gemini-cli (subscription) > remote proxy > xai (API)
+    PROVIDER_PREFERENCE = ["gemini-cli", "remote-soros", "xai"]
 
     def __init__(self, gateway: LLMGateway) -> None:
         self.gateway = gateway
@@ -75,11 +75,14 @@ class SorosAgent(BaseAgent):
         if "gemini-cli" in gateway._cli_providers:
             cfg = gateway._cli_providers["gemini-cli"]
             return "gemini-cli", cfg.default_model or "gemini-2.5-pro"
+        if "remote-soros" in gateway._remote_cli_providers:
+            cfg = gateway._remote_cli_providers["remote-soros"]
+            return "remote-soros", cfg.default_model or "gemini-2.5-pro"
         if "xai" in gateway._providers:
             cfg = gateway._providers["xai"]
             return "xai", cfg.default_model
         raise ValueError(
-            "Soros requires gemini-cli (USE_GEMINI_CLI=1) or xAI/Grok API key"
+            "Soros requires gemini-cli, remote-soros proxy, or xAI/Grok API key"
         )
 
     def build_system_prompt(self) -> str:

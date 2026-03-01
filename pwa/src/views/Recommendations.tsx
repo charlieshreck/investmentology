@@ -189,29 +189,24 @@ function SuccessRing({ probability }: { probability: number | null }) {
   );
 }
 
-/* ── Agent Stance Bar (wider) ── */
-function AgentBar({ stance }: { stance: AgentStance }) {
-  const pct = Math.abs(stance.sentiment) * 100;
-  const color = stance.sentiment >= 0 ? "var(--color-success)" : "var(--color-error)";
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-      <span style={{
-        fontSize: 10, color: "var(--color-text-muted)", textTransform: "capitalize",
-        fontWeight: 600, width: 38, flexShrink: 0,
-      }}>
-        {stance.name.charAt(0).toUpperCase() + stance.name.slice(1, 4)}
-      </span>
-      <div style={{
-        flex: 1, height: 5, borderRadius: 3,
-        background: "var(--color-surface-2)", overflow: "hidden",
-      }}>
-        <div style={{ height: "100%", width: `${Math.max(pct, 6)}%`, background: color, borderRadius: 3 }} />
-      </div>
-      <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color, fontWeight: 600, width: 28, textAlign: "right" }}>
-        {(stance.confidence * 100).toFixed(0)}%
-      </span>
-    </div>
-  );
+/* ── Agent Colors (signature per agent) ── */
+const agentColor: Record<string, string> = {
+  warren: "#34d399",   // green — fundamentals
+  soros: "#60a5fa",    // blue — macro
+  simons: "#c084fc",   // purple — quant
+  auditor: "#fbbf24",  // amber — risk
+};
+
+const agentIcon: Record<string, string> = {
+  warren: "W", soros: "S", simons: "Q", auditor: "A",
+};
+
+function stanceLabel(s: number): string {
+  if (s >= 0.5) return "BUY";
+  if (s >= 0.15) return "LEAN BUY";
+  if (s > -0.15) return "HOLD";
+  if (s > -0.5) return "LEAN SELL";
+  return "SELL";
 }
 
 /* ── Main Recommendation Card ── */
@@ -329,23 +324,52 @@ function RecCard({
           </div>
         </div>
 
-        {/* Row 2: Agent Stances (wider bars) */}
-        {stances.length > 0 && (
-          <div style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
-            gap: "4px var(--space-md)", marginTop: "var(--space-md)",
-            padding: "var(--space-sm) var(--space-md)",
-            background: "var(--color-surface-1)", borderRadius: "var(--radius-md)",
-          }}>
-            {stances.map((a) => (
-              <AgentBar key={a.name} stance={a} />
-            ))}
-          </div>
-        )}
+        {/* Row 2: Agent consensus segments — proportional fill */}
+        {stances.length > 0 && (() => {
+          const bulls = stances.filter((s) => s.sentiment >= 0.15);
+          const bears = stances.filter((s) => s.sentiment <= -0.15);
+          const holds = stances.filter((s) => s.sentiment > -0.15 && s.sentiment < 0.15);
+          const total = stances.length;
+          const segments: { count: number; label: string; bg: string; fg: string }[] = [];
+          if (bulls.length) segments.push({
+            count: bulls.length, label: `${bulls.length} Bull${bulls.length > 1 ? "ish" : "ish"}`,
+            bg: "rgba(52, 211, 153, 0.15)", fg: "var(--color-success)",
+          });
+          if (holds.length) segments.push({
+            count: holds.length, label: `${holds.length} Hold`,
+            bg: "rgba(251, 191, 36, 0.12)", fg: "var(--color-warning)",
+          });
+          if (bears.length) segments.push({
+            count: bears.length, label: `${bears.length} Bear${bears.length > 1 ? "ish" : "ish"}`,
+            bg: "rgba(248, 113, 113, 0.15)", fg: "var(--color-error)",
+          });
+          return (
+            <div style={{
+              display: "flex", gap: 3, marginTop: "var(--space-md)", width: "100%",
+            }}>
+              {segments.map((seg) => (
+                <div
+                  key={seg.label}
+                  style={{
+                    flex: seg.count,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: "5px 8px", borderRadius: 99,
+                    background: seg.bg, color: seg.fg,
+                    fontSize: 10, fontWeight: 700, letterSpacing: "0.03em",
+                    whiteSpace: "nowrap", overflow: "hidden",
+                    minWidth: 0,
+                  }}
+                >
+                  {seg.label}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Row 3: Signal pills */}
         <div style={{
-          display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-md)",
+          display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-sm)",
           flexWrap: "wrap", alignItems: "center",
         }}>
           {rec.riskFlags && rec.riskFlags.length > 0 && (
@@ -509,51 +533,61 @@ function RecCard({
 
               {/* Agent summaries */}
               {stances.length > 0 && (
-                <div style={{
-                  display: "flex", flexDirection: "column", gap: "var(--space-sm)",
-                  marginTop: "var(--space-md)",
+                <div className="glass-ai" style={{
+                  display: "flex", flexDirection: "column", gap: "var(--space-md)",
+                  marginTop: "var(--space-md)", padding: "var(--space-md)",
                 }}>
-                  {stances.filter((a) => a.summary && a.summary !== "Failed to parse LLM response").map((a) => (
-                    <div key={a.name} style={{
-                      padding: "var(--space-sm) var(--space-md)",
-                      background: "var(--color-surface-0)", borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--glass-border)",
-                    }}>
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: 4,
-                      }}>
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, color: "var(--color-accent-bright)",
-                          textTransform: "capitalize",
-                        }}>
-                          {a.name}
-                        </span>
-                        <span style={{
-                          fontSize: 9, fontFamily: "var(--font-mono)", fontWeight: 600,
-                          color: a.sentiment >= 0 ? "var(--color-success)" : "var(--color-error)",
-                        }}>
-                          {a.sentiment >= 0 ? "+" : ""}{(a.sentiment * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <p style={{
-                        fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.4, margin: 0,
-                      }}>
-                        {a.summary}
-                      </p>
-                      {a.key_signals.length > 0 && (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                          {a.key_signals.map((s, i) => (
-                            <span key={i} style={{
-                              fontSize: 9, padding: "1px 5px", borderRadius: 4,
-                              background: "var(--color-surface-2)", color: "var(--color-text-muted)",
-                            }}>
-                              {s}
-                            </span>
-                          ))}
+                  {stances.filter((a) => a.summary && a.summary !== "Failed to parse LLM response").map((a) => {
+                    const col = agentColor[a.name.toLowerCase()] || "var(--color-text-muted)";
+                    return (
+                      <div key={a.name}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{
+                            width: 22, height: 22, borderRadius: "50%",
+                            background: `${col}20`, border: `1px solid ${col}40`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 9, fontWeight: 800, color: col, flexShrink: 0,
+                          }}>
+                            {agentIcon[a.name.toLowerCase()] || a.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: col, textTransform: "capitalize" }}>
+                            {a.name}
+                          </span>
+                          <span style={{
+                            fontSize: 9, fontWeight: 700,
+                            color: a.sentiment >= 0.15 ? "var(--color-success)" : a.sentiment <= -0.15 ? "var(--color-error)" : "var(--color-text-muted)",
+                          }}>
+                            {stanceLabel(a.sentiment)}
+                          </span>
+                          <span style={{
+                            fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
+                            color: col, marginLeft: "auto",
+                          }}>
+                            {(a.confidence * 100).toFixed(0)}%
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <p style={{
+                          fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5,
+                          margin: "4px 0 0 30px",
+                        }}>
+                          {a.summary}
+                        </p>
+                        {a.key_signals.length > 0 && (
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4, marginLeft: 30 }}>
+                            {a.key_signals.map((s, i) => (
+                              <span key={i} style={{
+                                fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                                background: `${col}10`, color: col, fontWeight: 600,
+                                border: `1px solid ${col}15`,
+                              }}>
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

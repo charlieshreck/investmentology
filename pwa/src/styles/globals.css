@@ -121,9 +121,19 @@ html, body, #root {
   color: var(--color-text);
   font-family: var(--font-sans);
   font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+}
+
+/* Glassmorphism panel for AI output zones */
+.glass-ai {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
 }
 
 /* Subtle noise texture on body */

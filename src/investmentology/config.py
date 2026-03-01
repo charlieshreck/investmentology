@@ -41,6 +41,8 @@ class AppConfig:
     auth_secret_key: str = ""
     auth_token_expiry_hours: int = 168
     internal_api_token: str = ""
+    hb_proxy_url: str = ""
+    hb_proxy_token: str = ""
 
 
 def load_config() -> AppConfig:
@@ -73,4 +75,6 @@ def load_config() -> AppConfig:
         auth_secret_key=os.environ.get("AUTH_SECRET_KEY", ""),
         auth_token_expiry_hours=int(os.environ.get("AUTH_TOKEN_EXPIRY_HOURS", "168")),
         internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
+        hb_proxy_url=os.environ.get("HB_PROXY_URL", ""),
+        hb_proxy_token=os.environ.get("HB_PROXY_TOKEN", ""),
     )
