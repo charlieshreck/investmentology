@@ -521,8 +521,15 @@ class BriefingBuilder:
                 ))
 
             # Fair value overshoot (>10% above estimate)
+            # Skip if fair value is absurdly low relative to entry price (bad estimate)
             fv = _safe_float(p.fair_value_estimate)
-            if cur is not None and fv is not None and cur > fv * 1.1:
+            entry = _safe_float(p.entry_price)
+            if (
+                cur is not None
+                and fv is not None
+                and cur > fv * 1.1
+                and (entry is None or fv > entry * 0.25)  # sanity: FV must be >25% of entry
+            ):
                 overshoot = (cur - fv) / fv * 100
                 alerts.append(PositionAlert(
                     ticker=p.ticker,
@@ -686,16 +693,28 @@ class BriefingBuilder:
                     ))
                 priority += 1
 
-        # Fair value overshoot — profit-taking
+        # Fair value overshoot — profit-taking (cross-reference with verdict)
         for a in alerts:
             if a.alert_type == "above_fair_value":
-                items.append(ActionItem(
-                    priority=priority,
-                    category="sell",
-                    ticker=a.ticker,
-                    action=f"Consider taking partial profit on {a.ticker}",
-                    reasoning=a.message,
-                ))
+                v = latest_verdicts.get(a.ticker)
+                if v and v["verdict"] in positive_verdicts:
+                    # Latest analysis says hold/buy — fair value estimate may be stale
+                    items.append(ActionItem(
+                        priority=priority,
+                        category="watch",
+                        ticker=a.ticker,
+                        action=f"{a.ticker} above fair value estimate — but latest analysis: {v['verdict']}",
+                        reasoning=f"{a.message}. However, analysis on {v['date']} concluded "
+                        f"{v['verdict']} — fair value estimate may need updating.",
+                    ))
+                else:
+                    items.append(ActionItem(
+                        priority=priority,
+                        category="sell",
+                        ticker=a.ticker,
+                        action=f"Consider taking partial profit on {a.ticker}",
+                        reasoning=a.message,
+                    ))
                 priority += 1
 
         # New buy recommendations (top 5)
