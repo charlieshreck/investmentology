@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { Skeleton } from "../components/shared/Skeleton";
 import { CalibrationChart } from "../components/charts/CalibrationChart";
 import { useCalibration } from "../hooks/useCalibration";
 
@@ -55,7 +56,14 @@ export function Learning() {
 
       <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
         {loading ? (
-          <p style={{ color: "var(--color-text-muted)" }}>Loading calibration data...</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+            <Skeleton height={200} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-md)" }}>
+              <Skeleton height={60} />
+              <Skeleton height={60} />
+              <Skeleton height={60} />
+            </div>
+          </div>
         ) : error ? (
           <BentoCard>
             <p style={{ color: "var(--color-error)" }}>Error: {error}</p>

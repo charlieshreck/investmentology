@@ -1,6 +1,7 @@
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { MetricCardSkeleton } from "../components/shared/SkeletonCard";
 import { useSystemHealth } from "../hooks/useSystemHealth";
 
 function statusVariant(ok: boolean): "success" | "error" {
@@ -14,8 +15,11 @@ export function SystemHealth() {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
         <ViewHeader title="System Health" />
-        <div style={{ padding: "var(--space-xl)" }}>
-          <p style={{ color: "var(--color-text-muted)" }}>Checking system health...</p>
+        <div style={{ padding: "var(--space-lg)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
+          <MetricCardSkeleton />
+          <MetricCardSkeleton />
+          <MetricCardSkeleton />
+          <MetricCardSkeleton />
         </div>
       </div>
     );

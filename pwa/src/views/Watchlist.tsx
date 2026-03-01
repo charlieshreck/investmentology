@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { PositionRowSkeleton } from "../components/shared/SkeletonCard";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalysis } from "../contexts/AnalysisContext";
@@ -269,8 +270,13 @@ export function Watchlist() {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
         <ViewHeader title="Watch" />
-        <div style={{ padding: "var(--space-xl)" }}>
-          <p style={{ color: "var(--color-text-muted)" }}>Loading...</p>
+        <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: 0 }}>
+          <PositionRowSkeleton />
+          <PositionRowSkeleton />
+          <PositionRowSkeleton />
+          <PositionRowSkeleton />
+          <PositionRowSkeleton />
+          <PositionRowSkeleton />
         </div>
       </div>
     );

@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import type { PipelineStep } from "../../types/models";
 
 interface ProgressStepsProps {
@@ -41,17 +42,25 @@ export function ProgressSteps({ steps }: ProgressStepsProps) {
               minWidth: 48,
             }}
           >
-            <div
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{
+                scale: step.status === "active" ? [1, 1.3, 1] : 1,
+                backgroundColor: statusColors[step.status],
+              }}
+              transition={
+                step.status === "active"
+                  ? { scale: { repeat: Infinity, duration: 1.5, ease: "easeInOut" }, backgroundColor: { duration: 0.3 } }
+                  : { type: "spring", stiffness: 400, damping: 25 }
+              }
               style={{
                 width: 10,
                 height: 10,
                 borderRadius: "var(--radius-full)",
-                background: statusColors[step.status],
                 boxShadow:
                   step.status === "active"
                     ? `0 0 8px var(--color-accent-glow)`
                     : "none",
-                transition: `all var(--duration-normal) var(--ease-out)`,
               }}
             />
             <span
@@ -74,13 +83,24 @@ export function ProgressSteps({ steps }: ProgressStepsProps) {
               style={{
                 width: 16,
                 height: 1,
-                background:
-                  step.status === "done"
-                    ? "var(--color-success)"
-                    : "var(--color-surface-3)",
                 flexShrink: 0,
+                background: "var(--color-surface-3)",
+                position: "relative",
+                overflow: "hidden",
               }}
-            />
+            >
+              <motion.div
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: step.status === "done" ? 1 : 0 }}
+                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "var(--color-success)",
+                  transformOrigin: "left",
+                }}
+              />
+            </div>
           )}
         </div>
       ))}

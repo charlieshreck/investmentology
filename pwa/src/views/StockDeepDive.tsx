@@ -444,7 +444,14 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
     }
   };
 
-  if (loading) return <p style={{ padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>Loading {ticker}...</p>;
+  if (loading) return (
+    <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+      <div className="skeleton" style={{ height: 24, width: "40%" }} />
+      <div className="skeleton" style={{ height: 200 }} />
+      <div className="skeleton" style={{ height: 16, width: "80%" }} />
+      <div className="skeleton" style={{ height: 16, width: "60%" }} />
+    </div>
+  );
   if (error || !data) return <BentoCard><p style={{ color: "var(--color-error)" }}>Failed to load {ticker}: {error ?? "No data"}</p></BentoCard>;
 
   const f = data.fundamentals;

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
+import { Skeleton } from "../components/shared/Skeleton";
 
 interface LatestAnalysis {
   ticker: string;
@@ -222,7 +223,12 @@ export function Agents() {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
         <ViewHeader title="Agents" subtitle="Multi-agent analysis panel" />
-        <p style={{ padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>Loading agents...</p>
+        <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+        </div>
       </div>
     );
   }

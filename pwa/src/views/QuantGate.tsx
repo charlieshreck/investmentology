@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
@@ -38,7 +39,12 @@ function compositeBar(score: number | null) {
           overflow: "hidden",
         }}
       >
-        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: color }} />
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          style={{ height: "100%", borderRadius: 3, background: color }}
+        />
       </div>
       <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>
         {score.toFixed(2)}
@@ -245,8 +251,10 @@ export function QuantGate() {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
         <ViewHeader title="Quant Gate" />
-        <div style={{ padding: "var(--space-xl)" }}>
-          <p style={{ color: "var(--color-text-muted)" }}>Loading screener results...</p>
+        <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+          <div className="skeleton" style={{ height: 120 }} />
+          <div className="skeleton" style={{ height: 200 }} />
+          <div className="skeleton" style={{ height: 16, width: "60%" }} />
         </div>
       </div>
     );

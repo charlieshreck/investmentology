@@ -1,11 +1,14 @@
 import { NavLink } from "react-router-dom";
+import { motion } from "framer-motion";
+import { LayoutDashboard, Search, Star, Lightbulb, Settings } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-const navItems = [
-  { to: "/", label: "Portfolio", icon: "P" },
-  { to: "/screener", label: "Screener", icon: "S" },
-  { to: "/watchlist", label: "Watch", icon: "W" },
-  { to: "/recommendations", label: "Recs", icon: "R" },
-  { to: "/analyze", label: "+", icon: "+" },
+const navItems: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
+  { to: "/", label: "Portfolio", icon: LayoutDashboard, end: true },
+  { to: "/screener", label: "Screen", icon: Search },
+  { to: "/watchlist", label: "Watch", icon: Star },
+  { to: "/recommendations", label: "Recs", icon: Lightbulb },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
@@ -18,10 +21,10 @@ export function BottomNav() {
         right: 0,
         height: `calc(var(--nav-height) + var(--safe-bottom))`,
         paddingBottom: "var(--safe-bottom)",
-        background: "var(--glass-bg)",
-        backdropFilter: `blur(var(--glass-blur))`,
-        WebkitBackdropFilter: `blur(var(--glass-blur))`,
-        borderTop: "1px solid var(--glass-border)",
+        background: "rgba(8, 8, 14, 0.88)",
+        backdropFilter: "blur(24px) saturate(1.6)",
+        WebkitBackdropFilter: "blur(24px) saturate(1.6)",
+        borderTop: "1px solid rgba(255,255,255,0.06)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-around",
@@ -32,50 +35,80 @@ export function BottomNav() {
         <NavLink
           key={item.to}
           to={item.to}
-          end={item.to === "/"}
-          style={({ isActive }) => ({
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "var(--space-xs)",
-            textDecoration: "none",
-            color: isActive
-              ? "var(--color-accent-bright)"
-              : "var(--color-text-muted)",
-            fontSize: "var(--text-xs)",
-            fontWeight: isActive ? 600 : 400,
-            position: "relative",
-            padding: "var(--space-sm) var(--space-md)",
-            transition: `color var(--duration-fast) var(--ease-out)`,
-          })}
+          end={item.end}
+          style={{ textDecoration: "none", position: "relative", flex: 1 }}
         >
           {({ isActive }) => (
-            <>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 3,
+                padding: "10px 0 6px",
+                position: "relative",
+              }}
+            >
+              {/* Active background pill */}
               {isActive && (
-                <div
+                <motion.div
+                  layoutId="nav-pill"
+                  style={{
+                    position: "absolute",
+                    inset: "4px 12px",
+                    background: "var(--color-accent-ghost)",
+                    borderRadius: 16,
+                    border: "1px solid rgba(255,255,255,0.04)",
+                  }}
+                  transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                />
+              )}
+
+              {/* Active top bar */}
+              {isActive && (
+                <motion.div
+                  layoutId="nav-bar"
                   style={{
                     position: "absolute",
                     top: -1,
-                    left: "50%",
-                    transform: "translateX(-50%)",
                     width: 24,
-                    height: 2,
+                    height: 3,
+                    borderRadius: 2,
                     background: "var(--gradient-active)",
-                    borderRadius: "var(--radius-full)",
+                    boxShadow: "0 0 8px var(--color-accent-glow)",
                   }}
+                  transition={{ type: "spring", stiffness: 400, damping: 35 }}
                 />
               )}
+
+              <motion.div
+                animate={{
+                  scale: isActive ? 1.15 : 1,
+                  y: isActive ? -1 : 0,
+                }}
+                transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                style={{ position: "relative", zIndex: 1 }}
+              >
+                <item.icon
+                  size={22}
+                  strokeWidth={isActive ? 2.2 : 1.6}
+                  color={isActive ? "var(--color-accent-bright)" : "var(--color-text-muted)"}
+                />
+              </motion.div>
               <span
                 style={{
-                  fontSize: item.icon === "+" ? "var(--text-lg)" : "var(--text-base)",
-                  fontWeight: item.icon === "+" ? 300 : 500,
-                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  fontWeight: isActive ? 600 : 400,
+                  color: isActive ? "var(--color-accent-bright)" : "var(--color-text-muted)",
+                  letterSpacing: "0.02em",
+                  position: "relative",
+                  zIndex: 1,
+                  transition: "color 0.15s ease",
                 }}
               >
-                {item.icon}
+                {item.label}
               </span>
-              <span>{item.label}</span>
-            </>
+            </div>
           )}
         </NavLink>
       ))}

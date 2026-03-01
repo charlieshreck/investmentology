@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
 import { BottomNav } from "./components/layout/BottomNav";
 import { LayerOverlay } from "./components/layout/LayerOverlay";
+import { PageTransition } from "./components/layout/PageTransition";
 import { Portfolio } from "./views/Portfolio";
 import { QuantGate } from "./views/QuantGate";
 import { Watchlist } from "./views/Watchlist";
@@ -12,12 +14,15 @@ import { SystemHealth } from "./views/SystemHealth";
 import { Agents } from "./views/Agents";
 import { Recommendations } from "./views/Recommendations";
 import { Backtest } from "./views/Backtest";
+import { SettingsView } from "./views/SettingsView";
 import { StockDeepDive } from "./views/StockDeepDive";
 import { Login } from "./views/Login";
 import { useAuth } from "./hooks/useAuth";
 import { useStore } from "./stores/useStore";
 import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
+import { CommandPalette } from "./components/shared/CommandPalette";
 import { AnalysisProvider } from "./contexts/AnalysisContext";
+import "./stores/useThemeStore"; // Initialize theme on load
 
 // Intercept all fetch calls — on 401 force reload to show login
 const originalFetch = window.fetch;
@@ -34,8 +39,6 @@ window.fetch = async (...args) => {
 };
 
 export default function App() {
-  const overlayTicker = useStore((s) => s.overlayTicker);
-  const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const { isAuthenticated, error, login, logout } = useAuth();
   const [offline, setOffline] = useState(!navigator.onLine);
 
@@ -83,49 +86,73 @@ export default function App() {
   return (
     <BrowserRouter>
       <AnalysisProvider>
-      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        {offline && (
-          <div
-            style={{
-              background: "var(--color-warning, #f59e0b)",
-              color: "#000",
-              textAlign: "center",
-              padding: "6px",
-              fontSize: "12px",
-              fontWeight: 600,
-              zIndex: 100,
-            }}
-          >
-            Offline — showing cached data
-          </div>
-        )}
-        <AnalysisStatusBar />
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          <Routes>
-            <Route path="/" element={<Portfolio />} />
-            <Route path="/screener" element={<QuantGate />} />
-            <Route path="/watchlist" element={<Watchlist />} />
-            <Route path="/log" element={<Decisions />} />
-            <Route path="/analyze" element={<Analyse />} />
-            <Route path="/learning" element={<Learning />} />
-            <Route path="/recommendations" element={<Recommendations />} />
-            <Route path="/agents" element={<Agents />} />
-            <Route path="/backtest" element={<Backtest />} />
-            <Route path="/health" element={<SystemHealth />} />
-          </Routes>
-        </div>
-        <BottomNav />
-
-        {/* Stock deep-dive overlay */}
-        <LayerOverlay
-          isOpen={overlayTicker !== null}
-          onClose={() => setOverlayTicker(null)}
-          title={overlayTicker ?? ""}
-        >
-          {overlayTicker && <StockDeepDive ticker={overlayTicker} />}
-        </LayerOverlay>
-      </div>
+        <AppShell offline={offline} />
       </AnalysisProvider>
     </BrowserRouter>
+  );
+}
+
+function AppShell({ offline }: { offline: boolean }) {
+  const location = useLocation();
+  const overlayTicker = useStore((s) => s.overlayTicker);
+  const setOverlayTicker = useStore((s) => s.setOverlayTicker);
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      {offline && (
+        <div
+          style={{
+            background: "var(--color-warning, #f59e0b)",
+            color: "#000",
+            textAlign: "center",
+            padding: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            zIndex: 100,
+          }}
+        >
+          Offline — showing cached data
+        </div>
+      )}
+      <AnalysisStatusBar />
+      <div
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          maxWidth: "520px",
+          width: "100%",
+          margin: "0 auto",
+        }}
+      >
+        <AnimatePresence mode="wait">
+          <Routes location={location} key={location.pathname}>
+            <Route path="/" element={<PageTransition><Portfolio /></PageTransition>} />
+            <Route path="/screener" element={<PageTransition><QuantGate /></PageTransition>} />
+            <Route path="/watchlist" element={<PageTransition><Watchlist /></PageTransition>} />
+            <Route path="/log" element={<PageTransition><Decisions /></PageTransition>} />
+            <Route path="/analyze" element={<PageTransition><Analyse /></PageTransition>} />
+            <Route path="/learning" element={<PageTransition><Learning /></PageTransition>} />
+            <Route path="/recommendations" element={<PageTransition><Recommendations /></PageTransition>} />
+            <Route path="/agents" element={<PageTransition><Agents /></PageTransition>} />
+            <Route path="/backtest" element={<PageTransition><Backtest /></PageTransition>} />
+            <Route path="/health" element={<PageTransition><SystemHealth /></PageTransition>} />
+            <Route path="/settings" element={<PageTransition><SettingsView /></PageTransition>} />
+          </Routes>
+        </AnimatePresence>
+      </div>
+      <BottomNav />
+
+      {/* Command palette (Cmd+K) */}
+      <CommandPalette />
+
+      {/* Stock deep-dive overlay */}
+      <LayerOverlay
+        isOpen={overlayTicker !== null}
+        onClose={() => setOverlayTicker(null)}
+        title={overlayTicker ?? ""}
+      >
+        {overlayTicker && <StockDeepDive ticker={overlayTicker} />}
+      </LayerOverlay>
+    </div>
   );
 }
