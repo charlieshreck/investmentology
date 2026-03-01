@@ -210,8 +210,6 @@ class EdgarToolsProvider:
             if not filings or len(filings) == 0:
                 return None
 
-            buys = 0
-            sells = 0
             transactions: list[dict] = []
 
             # Look at recent Form 4 filings (last 10)

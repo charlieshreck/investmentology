@@ -8,7 +8,6 @@ closed trades.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
 from investmentology.timing.sizing import KELLY_MIN_DECISIONS, KellyCalculator
 

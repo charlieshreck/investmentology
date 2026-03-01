@@ -10,7 +10,6 @@ Stores analysis snapshots as vectors in Qdrant. Enables:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -100,7 +99,7 @@ async def store_analysis_memory(
     Uses the knowledge MCP's Qdrant integration to store vectors.
     Returns True on success.
     """
-    text = _build_embedding_text(
+    _embedding_text = _build_embedding_text(
         ticker, verdict, reasoning, position_type,
         thesis_health, market_snapshot, agent_stances,
     )

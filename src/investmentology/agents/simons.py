@@ -152,7 +152,7 @@ class SimonsAgent(BaseAgent):
                             parts.append("    Consider: Is this breaking down? Support levels for stop-loss?")
                         break
             else:
-                parts.append(f"  New position — timing entry is critical")
+                parts.append("  New position — timing entry is critical")
                 parts.append(f"  Portfolio has {pc.get('position_count', 0)} positions")
 
         if request.previous_verdict:

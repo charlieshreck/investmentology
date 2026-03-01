@@ -66,9 +66,6 @@ def _fetch_fred_series(series_id: str) -> Decimal | None:
         # Try yfinance treasury data as proxy
         # FRED direct access would need fredapi library
         # For HY OAS, we use a reasonable approximation
-        import subprocess
-        import json
-
         # Try using fredapi if installed
         from fredapi import Fred
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
-from investmentology.models.signal import AgentSignalSet, SignalTag
+from investmentology.models.signal import AgentSignalSet
 from investmentology.models.stock import FundamentalsSnapshot
 
 

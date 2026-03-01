@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from investmentology.learning.registry import DecisionLogger
 from investmentology.models.decision import DecisionType
-from investmentology.models.lifecycle import WatchlistState, validate_transition
+from investmentology.models.lifecycle import WatchlistState
 from investmentology.registry.queries import Registry
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 
@@ -114,48 +113,48 @@ def _build_briefing(
 
         # Action based on verdict + position
         if rec in ("STRONG_BUY", "BUY"):
-            headline = f"Keep holding — the thesis is intact"
+            headline = "Keep holding — the thesis is intact"
             action = f"The system rates {ticker} a {rec} with {conf_pct} confidence. Consider adding to this position if you have available capital."
         elif rec == "ACCUMULATE":
-            headline = f"Gradually add on dips"
-            action = f"The fundamentals support building this position over time. Look for pullbacks to add shares at better prices."
+            headline = "Gradually add on dips"
+            action = "The fundamentals support building this position over time. Look for pullbacks to add shares at better prices."
         elif rec in ("REDUCE", "SELL"):
-            headline = f"Consider reducing your exposure"
+            headline = "Consider reducing your exposure"
             action = f"The system flags {ticker} as {rec}. Review whether your original thesis still holds and consider trimming."
         elif rec == "WATCHLIST":
-            headline = f"Hold but watch closely"
-            action = f"Mixed signals — the position is worth keeping but not adding to right now. Monitor for the risk flags to resolve."
+            headline = "Hold but watch closely"
+            action = "Mixed signals — the position is worth keeping but not adding to right now. Monitor for the risk flags to resolve."
         elif rec == "HOLD":
-            headline = f"No action needed right now"
-            action = f"The position is stable. Hold and review at the next analysis cycle."
+            headline = "No action needed right now"
+            action = "The position is stable. Hold and review at the next analysis cycle."
         elif rec == "AVOID":
-            headline = f"This position may need exiting"
+            headline = "This position may need exiting"
             action = f"The system rates {ticker} as AVOID. Review urgently — this may warrant selling."
         else:
-            headline = f"Review this position"
+            headline = "Review this position"
             action = f"Verdict: {rec} at {conf_pct} confidence."
     else:
         # Not held — should you buy?
         situation = f"{short_name} is not currently in your portfolio."
 
         if rec in ("STRONG_BUY", "BUY"):
-            headline = f"Strong candidate for purchase"
+            headline = "Strong candidate for purchase"
             action = f"The system rates {ticker} a {rec} with {conf_pct} confidence. This could be worth initiating a position."
         elif rec == "ACCUMULATE":
-            headline = f"Worth starting a small position"
-            action = f"Start accumulating gradually. Don't go all-in — build the position over time."
+            headline = "Worth starting a small position"
+            action = "Start accumulating gradually. Don't go all-in — build the position over time."
         elif rec == "WATCHLIST":
-            headline = f"Interesting but not ready yet"
-            action = f"Add to your watch list and wait for a better entry point or for risk flags to clear."
+            headline = "Interesting but not ready yet"
+            action = "Add to your watch list and wait for a better entry point or for risk flags to clear."
         elif rec in ("HOLD", "REDUCE", "SELL"):
-            headline = f"Not recommended for purchase"
+            headline = "Not recommended for purchase"
             action = f"The system does not recommend initiating a new position in {ticker} right now."
         elif rec == "AVOID":
-            headline = f"Stay away"
-            action = f"Multiple agents flag significant concerns. There are better opportunities elsewhere."
+            headline = "Stay away"
+            action = "Multiple agents flag significant concerns. There are better opportunities elsewhere."
         else:
             headline = f"{rec} — needs more analysis"
-            action = f"Run the full analysis pipeline for a clearer picture."
+            action = "Run the full analysis pipeline for a clearer picture."
 
     # Agent consensus narrative
     if bulls and bears:
@@ -186,11 +185,9 @@ def _build_briefing(
 
     # Sector context
     if all_positions and fundamentals:
-        from collections import Counter
         # Get sector of this stock
         this_sector = profile.get("sector") if profile else None
         if this_sector:
-            sector_count = sum(1 for p in all_positions if hasattr(p, 'ticker'))
             # Simple check — we don't have sector per position easily, skip if complex
             pass
 

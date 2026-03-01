@@ -10,7 +10,6 @@ Creates and maintains a graph of:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -69,7 +68,6 @@ async def record_verdict_node(
     """
     try:
         now = datetime.now().isoformat()
-        stances_json = json.dumps(agent_stances or [])
 
         # Create Stock node if not exists
         cypher_merge_stock = (

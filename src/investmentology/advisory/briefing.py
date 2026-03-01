@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from investmentology.advisory.performance import PerformanceCalculator
 from investmentology.registry.queries import Registry
-from investmentology.timing.pendulum import PendulumReader, PendulumReading
+from investmentology.timing.pendulum import PendulumReader
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +285,7 @@ class BriefingBuilder:
 
         macro_signals = []
         score = pendulum_data["score"]
-        label = pendulum_data["label"]
+        _ = pendulum_data["label"]
 
         if score >= 80:
             macro_signals.append("Extreme greed — markets may be overheated, exercise caution with new positions")

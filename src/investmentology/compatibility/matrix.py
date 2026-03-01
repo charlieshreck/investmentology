@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 
 from investmentology.compatibility.patterns import (
-    ALL_PATTERNS,
     CONVICTION_BUY,
-    HARD_REJECT,
     PatternDefinition,
     match_pattern,
     score_pattern,

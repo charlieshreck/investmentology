@@ -291,7 +291,6 @@ class AgentAttributionEngine:
                 outcome.total_overrides = len(set(r["ticker"] for r in rows)) if rows else 0
 
                 # Check settled predictions for overridden verdicts
-                bullish = {"STRONG_BUY", "BUY", "ACCUMULATE"}
                 bearish = {"SELL", "AVOID", "DISCARD", "REDUCE"}
 
                 for r in rows or []:
@@ -301,7 +300,6 @@ class AgentAttributionEngine:
                     outcome.total_settled += 1
                     verdict = r["verdict"]
                     actual = float(r["actual_value"])
-                    predicted = float(r["predicted_value"]) if r.get("predicted_value") else 0
 
                     # Override made verdict bearish (capped to WATCHLIST/AVOID)
                     # If price actually went down, override was correct

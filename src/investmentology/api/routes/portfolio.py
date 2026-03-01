@@ -1098,7 +1098,7 @@ def get_portfolio_briefing(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         pass
 
-    portfolio_total = total_value + cash
+    _ = total_value + cash  # portfolio_total reserved for future use
 
     # --- Per-position summaries ---
     pos_summaries: list[dict] = []
@@ -1302,7 +1302,6 @@ def get_portfolio_timeline(
     Only includes events for tickers that are or were in the portfolio.
     Each event has a full ISO timestamp for sorting and display.
     """
-    from datetime import datetime as dt
 
     # Get the set of portfolio tickers (open + closed)
     portfolio_tickers: set[str] = set()

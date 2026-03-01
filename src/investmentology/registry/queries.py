@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
-from investmentology.models.decision import Decision, DecisionOutcome, DecisionType
+from investmentology.models.decision import Decision, DecisionType
 from investmentology.models.lifecycle import WatchlistState, validate_transition
 from investmentology.models.position import PortfolioPosition
 from investmentology.models.prediction import Prediction

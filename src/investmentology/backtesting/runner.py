@@ -68,7 +68,6 @@ class BacktestRunner:
         initial_capital: float = 100_000.0,
     ) -> BacktestResult:
         """Run backtest for the given date range."""
-        import yfinance as yf
 
         # Get historical decisions from registry
         decisions = self._get_decisions(start_date, end_date)
@@ -322,7 +321,6 @@ class BacktestRunner:
             return []
 
         monthly: dict[str, dict] = {}
-        prev_month_end = equity_curve[0]["value"]
 
         for entry in equity_curve:
             dt = date.fromisoformat(entry["date"])

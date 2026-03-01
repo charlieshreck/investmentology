@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 
 from investmentology.config import AppConfig
@@ -236,7 +236,6 @@ class QuantGateScreener:
         # Build prior-year snapshot lookup for Piotroski YoY comparisons
         self._progress("prior", f"Fetching prior-year data for top {len(top_ranked)} stocks...", 75)
         prior_by_ticker: dict[str, FundamentalsSnapshot] = {}
-        has_prior = False
         if self._edgar is not None:
             prior_tickers = [gr.ticker for gr in top_ranked]
             prior_raws = self._edgar.get_prior_fundamentals_batch(prior_tickers)
@@ -244,7 +243,6 @@ class QuantGateScreener:
                 prior_snap = _dict_to_snapshot(raw)
                 if prior_snap is not None:
                     prior_by_ticker[prior_snap.ticker] = prior_snap
-            has_prior = len(prior_by_ticker) > 0
             logger.info("Prior-year data: %d/%d top stocks", len(prior_by_ticker), len(prior_tickers))
 
         total_ranked = len(ranked)

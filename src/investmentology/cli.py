@@ -14,8 +14,6 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
-from datetime import date
 from pathlib import Path
 
 from investmentology.config import load_config
@@ -68,7 +66,7 @@ def cmd_screen(args: argparse.Namespace) -> None:
         print(f"Universe: {result.data_quality.universe_size}")
         print(f"Passed: {len(result.top_results)}")
         if result.top_results:
-            print(f"\nTop 10 (sorted by composite score):")
+            print("\nTop 10 (sorted by composite score):")
             for i, r in enumerate(result.top_results[:10], 1):
                 z = r.get("altman_z_score")
                 z_str = f"{z:.1f}" if z else "N/A"
@@ -121,7 +119,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             await gateway.close()
 
     result = asyncio.run(_run())
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  Candidates in: {result.candidates_in}")
     print(f"  Passed competence: {result.passed_competence}")
     print(f"  Analyzed: {result.analyzed}")
@@ -161,7 +159,7 @@ def cmd_monitor(args: argparse.Namespace) -> None:
         print("Running full daily monitor...")
         result = monitor.run()
 
-    print(f"\nMonitor result:")
+    print("\nMonitor result:")
     print(f"  Alerts: {len(result.alerts)}")
     for alert in result.alerts:
         print(f"    [{alert.severity.value}] {alert.alert_type.value}: {alert.message}")
@@ -195,7 +193,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Recent decisions
     recent = decision_logger.get_recent_decisions(limit=5)
     if recent:
-        print(f"\nRecent decisions:")
+        print("\nRecent decisions:")
         for d in recent:
             print(f"  [{d.decision_type.value}] {d.ticker}: {d.reasoning[:60]}")
 

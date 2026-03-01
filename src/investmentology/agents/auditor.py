@@ -145,8 +145,8 @@ class AuditorAgent(BaseAgent):
             losers = [p for p in positions if p.get("pnl_pct", 0) < -10]
             if losers:
                 parts.append(f"  Portfolio has {len(losers)} position(s) down >10%:")
-                for l in losers[:3]:
-                    parts.append(f"    {l['ticker']}: {l['pnl_pct']:+.1f}%")
+                for pos in losers[:3]:
+                    parts.append(f"    {pos['ticker']}: {pos['pnl_pct']:+.1f}%")
 
         # Social sentiment — risk signal (extreme sentiment = risk)
         if request.social_sentiment:
