@@ -10,7 +10,6 @@ import pytest
 from investmentology.adversarial.biases import (
     COGNITIVE_BIASES,
     BiasCheck,
-    BiasResult,
     check_biases_in_reasoning,
 )
 from investmentology.adversarial.kill_company import (

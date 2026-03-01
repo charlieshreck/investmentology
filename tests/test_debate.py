@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse
 from investmentology.agents.debate import DebateOrchestrator, _format_stance, _resolve_provider

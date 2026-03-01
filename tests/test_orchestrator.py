@@ -7,11 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from investmentology.adversarial.munger import AdversarialResult, MungerVerdict
-from investmentology.agents.base import AnalysisRequest, AnalysisResponse
+from investmentology.agents.base import AnalysisResponse
 from investmentology.agents.gateway import LLMGateway, LLMResponse
-from investmentology.compatibility.matrix import CompatibilityResult
-from investmentology.compatibility.patterns import CONVICTION_BUY
 from investmentology.competence.circle import CompetenceResult
 from investmentology.competence.moat import MoatAssessment
 from investmentology.learning.registry import DecisionLogger

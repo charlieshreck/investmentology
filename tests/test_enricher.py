@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from investmentology.agents.base import AnalysisRequest
 from investmentology.data.enricher import DataEnricher, build_enricher
 from investmentology.data.finnhub_provider import FinnhubProvider
-from investmentology.data.fred_provider import FredProvider, FRED_SERIES
+from investmentology.data.fred_provider import FredProvider
 from investmentology.models.stock import FundamentalsSnapshot
 
 

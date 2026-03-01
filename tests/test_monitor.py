@@ -7,12 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from investmentology.data.alerts import (
-    Alert,
     AlertEngine,
     AlertSeverity,
     AlertType,
 )
-from investmentology.data.monitor import DailyMonitor, MonitorResult
+from investmentology.data.monitor import DailyMonitor
 from investmentology.data.yfinance_client import YFinanceClient
 from investmentology.models.position import PortfolioPosition
 from investmentology.models.prediction import Prediction

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from investmentology.adversarial.munger import AdversarialResult, MungerVerdict
 from investmentology.compatibility.matrix import CompatibilityResult

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
-import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, animate } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
@@ -7,7 +7,6 @@ import { AnimatedNumber } from "../components/shared/AnimatedNumber";
 import { FloatingBar } from "../components/shared/FloatingBar";
 import { SegmentedControl } from "../components/shared/SegmentedControl";
 import { MetricCardSkeleton, PositionRowSkeleton } from "../components/shared/SkeletonCard";
-import { BalanceBar } from "../components/shared/BalanceBar";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { CorrelationHeatmap } from "../components/charts/CorrelationHeatmap";
 import { usePortfolio } from "../hooks/usePortfolio";
@@ -20,7 +19,7 @@ import { useStore } from "../stores/useStore";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
   ChevronDown, ChevronUp, Zap, AlertTriangle, BarChart3,
-  Gauge, ShieldAlert, ArrowUpRight, ArrowDownRight, Sparkles,
+  ShieldAlert, ArrowUpRight, ArrowDownRight, Sparkles,
 } from "lucide-react";
 
 function formatCurrency(n: number): string {
@@ -210,7 +209,7 @@ function PositionSparkline({ ticker, entryDate, avgCost }: { ticker: string; ent
 function PositionCard({
   position: p,
   onClick,
-  onClose,
+  onClose: _onClose,
 }: {
   position: Position & { dayChange?: number; dayChangePct?: number };
   onClick: () => void;
@@ -997,7 +996,7 @@ export function Portfolio() {
   const [closeStatus, setCloseStatus] = useState<string | null>(null);
   const [advisorCards, setAdvisorCards] = useState<AdvisorCard[]>([]);
   const [briefing, setBriefing] = useState<BriefingSummary | null>(null);
-  const [corrOpen, setCorrOpen] = useState(false);
+  const [_corrOpen, _setCorrOpen] = useState(false);
   const [posFilter, setPosFilter] = useState("all");
   const balance = usePortfolioBalance(positions.length);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1784,19 +1783,12 @@ export function Portfolio() {
                       {(() => {
                         const cx = 50, cy = 50, r = 40;
                         let startAngle = -90;
-                        const SECTOR_COLORS: Record<string, string> = {
-                          Technology: "#3b82f6", "Basic Materials": "#f59e0b", Utilities: "#10b981",
-                          "Consumer Defensive": "#06b6d4", Healthcare: "#ec4899", "Financial Services": "#8b5cf6",
-                          "Consumer Cyclical": "#f97316", Energy: "#ef4444", Industrials: "#64748b",
-                          "Communication Services": "#14b8a6", "Real Estate": "#a855f7",
-                        };
 
                         return balance.sectors.map((s, i) => {
                           const angle = (s.pct / 100) * 360;
                           const endAngle = startAngle + angle;
                           const midAngle = startAngle + angle / 2;
                           const midRad = (midAngle * Math.PI) / 180;
-                          const color = SECTOR_COLORS[s.name] || s.color || `hsl(${i * 72}, 65%, 55%)`;
                           const zone = s.pct <= s.softMax ? "green" : s.pct <= s.warnMax ? "amber" : "red";
 
                           const explode = zone !== "green" ? 3.5 : 0.8;

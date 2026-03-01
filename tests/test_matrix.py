@@ -3,13 +3,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
 
 from investmentology.compatibility.matrix import (
     CompatibilityEngine,
-    CompatibilityResult,
-    DisagreementRecord,
-    DANGEROUS_PAIRS,
 )
 from investmentology.compatibility.patterns import (
     CONVICTION_BUY,

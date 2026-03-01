@@ -5,8 +5,8 @@ from decimal import Decimal
 
 import pytest
 
-from investmentology.timing.sizing import PositionSizer, SizingConfig, SizingResult
-from investmentology.timing.pendulum import PendulumReader, PendulumReading
+from investmentology.timing.sizing import PositionSizer, SizingConfig
+from investmentology.timing.pendulum import PendulumReader
 
 
 # ---------------------------------------------------------------------------

@@ -331,7 +331,7 @@ function RecCard({
           const bulls = stances.filter((s) => s.sentiment >= 0.15);
           const bears = stances.filter((s) => s.sentiment <= -0.15);
           const holds = stances.filter((s) => s.sentiment > -0.15 && s.sentiment < 0.15);
-          const total = stances.length;
+          void stances.length;
           const segments: { count: number; label: string; bg: string; fg: string }[] = [];
           if (bulls.length) segments.push({
             count: bulls.length, label: `${bulls.length} Bull${bulls.length > 1 ? "ish" : "ish"}`,
@@ -766,7 +766,6 @@ export function Recommendations() {
               {/* Group wrapper — border container for whole category */}
               {(() => {
                 const meta = verdictGroupMeta[v];
-                const GroupIcon = meta?.icon;
                 const groupCol: Record<string, string> = {
                   STRONG_BUY: "#22d3ee",
                   BUY: "#38bdf8",

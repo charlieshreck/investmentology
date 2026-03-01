@@ -96,7 +96,7 @@ def request_with_portfolio(basic_request: AnalysisRequest) -> AnalysisRequest:
 
 @pytest.fixture
 def mock_gateway() -> LLMGateway:
-    from investmentology.agents.gateway import CLIProviderConfig, ProviderConfig
+    from investmentology.agents.gateway import ProviderConfig
 
     gw = LLMGateway()
     # Register providers so agent constructors can resolve their provider

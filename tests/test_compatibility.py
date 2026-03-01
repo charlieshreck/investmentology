@@ -19,7 +19,6 @@ from investmentology.compatibility.patterns import (
     ALL_PATTERNS,
     CONVICTION_BUY,
     WATCHLIST_EARLY,
-    WATCHLIST_CATALYST,
     CONTRARIAN_VALUE,
     EARLY_RECOVERY,
     QUALITY_FAIR_PRICE,

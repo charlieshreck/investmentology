@@ -36,11 +36,12 @@ function formatDate(dateStr: string, period: Period): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric" });
 }
 
-function formatVol(v: number): string {
+function _formatVol(v: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
   return v.toString();
 }
+void _formatVol; // reserved for volume axis labels
 
 export function PriceChart({ ticker }: { ticker: string }) {
   const [period, setPeriod] = useState<Period>("3mo");

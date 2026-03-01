@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from investmentology.models.decision import DecisionType
 from investmentology.models.lifecycle import WatchlistState

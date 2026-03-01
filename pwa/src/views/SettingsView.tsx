@@ -6,7 +6,7 @@ import { Badge } from "../components/shared/Badge";
 import { useSystemHealth } from "../hooks/useSystemHealth";
 import { useThemeStore, themes } from "../stores/useThemeStore";
 import {
-  Palette, BookOpen, Search, Plus, ScrollText,
+  Palette, Search, Plus, ScrollText,
   GraduationCap, Bot, BarChart3, Heart, LogOut,
   ChevronRight, Check,
 } from "lucide-react";

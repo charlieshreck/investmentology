@@ -15,13 +15,11 @@ from investmentology.data.snapshots import (
     fetch_sector_performance,
 )
 from investmentology.data.universe import (
-    EXCLUDED_SECTORS,
     _is_excluded,
     _parse_market_cap,
     load_full_universe,
 )
 from investmentology.data.validation import (
-    ValidationResult,
     detect_anomalies,
     detect_staleness,
     validate_fundamentals,
@@ -239,9 +237,6 @@ class TestYFinanceClient:
 
     @patch("investmentology.data.yfinance_client.yf.download")
     def test_get_prices_batch(self, mock_download: MagicMock) -> None:
-        df = pd.DataFrame(
-            {"Close": {"AAPL": 150.0, "MSFT": 300.0}},
-        )
         # Simulate single row DataFrame
         mock_download.return_value = pd.DataFrame(
             {"Close": {"AAPL": [150.0], "MSFT": [300.0]}}

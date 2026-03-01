@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 
-import pytest
 
 from investmentology.models.position import PortfolioPosition
 from investmentology.models.stock import FundamentalsSnapshot
 from investmentology.sell.core import check_core_rules
 from investmentology.sell.engine import SellEngine
 from investmentology.sell.permanent import check_permanent_rules
-from investmentology.sell.rules import SellReason, SellSignal, SellUrgency
+from investmentology.sell.rules import SellReason, SellUrgency
 from investmentology.sell.tactical import (
     check_greenblatt_rotation,
     check_tactical_rules,

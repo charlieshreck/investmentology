@@ -6,10 +6,9 @@ existing tests). Every endpoint has at least one test.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,9 +18,6 @@ from investmentology.api.deps import app_state
 from investmentology.learning.calibration import CalibrationEngine
 from investmentology.learning.predictions import PredictionManager
 from investmentology.learning.registry import DecisionLogger
-from investmentology.models.decision import Decision, DecisionType
-from investmentology.models.position import PortfolioPosition
-from investmentology.models.stock import Stock
 from investmentology.orchestrator import AnalysisOrchestrator, CandidateAnalysis, PipelineResult
 from investmentology.registry.db import Database
 from investmentology.registry.queries import Registry
@@ -328,6 +324,8 @@ class TestStocks:
             [],
             # stocks table (name, sector, industry)
             [{"name": "Apple Inc.", "sector": "Technology", "industry": "Consumer Electronics"}],
+            # get_open_positions
+            [],
         ]
         resp = client.get("/api/invest/stock/aapl")
         assert resp.status_code == 200

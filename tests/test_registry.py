@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import json
 from datetime import date, datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from investmentology.models.decision import Decision, DecisionType
 from investmentology.models.lifecycle import WatchlistState
-from investmentology.models.position import PortfolioPosition
 from investmentology.models.prediction import Prediction
 from investmentology.models.stock import FundamentalsSnapshot, Stock
 from investmentology.registry.db import Database

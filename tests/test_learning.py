@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from investmentology.learning.lifecycle import StockLifecycleManager
 from investmentology.learning.predictions import PredictionManager
 from investmentology.learning.registry import DecisionLogger
-from investmentology.models.decision import Decision, DecisionType
+from investmentology.models.decision import Decision
 from investmentology.models.lifecycle import WatchlistState
-from investmentology.models.prediction import Prediction
 from investmentology.registry.db import Database
 from investmentology.registry.queries import Registry
 

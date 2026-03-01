@@ -10,8 +10,6 @@ from investmentology.timing.sizing import (
     KellyCalculator,
     KELLY_MIN_DECISIONS,
     PositionSizer,
-    SizingConfig,
-    SizingResult,
 )
 
 
