@@ -21,8 +21,8 @@ import {
 // ── Creative group header content ──
 const verdictGroupMeta: Record<string, { title: string; tagline: string; icon: LucideIcon }> = {
   STRONG_BUY: { title: "High Conviction", tagline: "Maximum confidence \u2014 act with urgency", icon: Rocket },
-  BUY:        { title: "Green Light", tagline: "Strong fundamentals, favourable setup", icon: ShoppingCart },
-  ACCUMULATE: { title: "Steady Builders", tagline: "Add on dips, build position over time", icon: Layers },
+  BUY:        { title: "Buy", tagline: "Strong fundamentals, favourable setup", icon: ShoppingCart },
+  ACCUMULATE: { title: "Accumulate", tagline: "Add on dips, build position over time", icon: Layers },
   HOLD:       { title: "Patience Plays", tagline: "Thesis intact \u2014 stay the course", icon: Anchor },
   WATCHLIST:  { title: "On the Radar", tagline: "Interesting but not yet actionable", icon: Eye },
   REDUCE:     { title: "Trim the Sails", tagline: "Take profits or reduce exposure", icon: Scissors },
@@ -792,52 +792,36 @@ export function Recommendations() {
                       position: "relative",
                     }}
                   >
-                    {/* Header pill — sits at the top of the container */}
+                    {/* Header — centered title, count on right */}
                     <div style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 14,
-                      padding: "14px 8px",
+                      padding: "14px 12px",
                     }}>
-                      {GroupIcon && (
-                        <motion.div
-                          animate={{ scale: [1, 1.06, 1] }}
-                          transition={{ duration: 3, repeat: Infinity, repeatDelay: 5 }}
-                          style={{
-                            width: 44, height: 44,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            flexShrink: 0,
-                            filter: `drop-shadow(0 2px 8px ${vCol}50) drop-shadow(0 0 18px ${vCol}25)`,
-                          }}
-                        >
-                          <GroupIcon size={36} color={vCol} strokeWidth={1.8} />
-                        </motion.div>
-                      )}
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                          <span style={{
-                            fontSize: 18, fontWeight: 600,
-                            color: "var(--color-text)",
-                            letterSpacing: "-0.01em",
-                            lineHeight: 1,
-                          }}>
-                            {meta?.title || verdictLabel[v] || v}
-                          </span>
-                          <span style={{
-                            fontSize: 12, fontWeight: 600, color: vCol,
-                            opacity: 0.8,
-                          }}>
-                            {recs.length}
-                          </span>
+                      <div style={{ flex: 1, textAlign: "center" }}>
+                        <div style={{
+                          fontSize: 13, fontWeight: 500,
+                          color: vCol,
+                          letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                        }}>
+                          {meta?.title || verdictLabel[v] || v}
                         </div>
                         <div style={{
-                          fontSize: 12, color: "var(--color-text-muted)",
-                          marginTop: 4, fontWeight: 400,
+                          fontSize: 11, color: "var(--color-text-muted)",
+                          marginTop: 3, fontWeight: 400,
                         }}>
                           {meta?.tagline || ""}
                         </div>
                       </div>
+                      <span style={{
+                        fontSize: 12, fontWeight: 700, color: vCol,
+                        fontFamily: "var(--font-mono)",
+                        opacity: 0.7,
+                        flexShrink: 0,
+                      }}>
+                        {recs.length}
+                      </span>
                     </div>
 
                     {/* Cards inside the container */}

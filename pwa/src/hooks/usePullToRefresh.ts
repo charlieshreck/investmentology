@@ -29,6 +29,7 @@ export function usePullToRefresh({
   const [refreshing, setRefreshing] = useState(false);
   const startY = useRef(0);
   const pulling = useRef(false);
+  const currentPull = useRef(0); // ref mirror of pullDistance for closure access
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     const el = containerRef.current;
@@ -40,28 +41,32 @@ export function usePullToRefresh({
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!pulling.current) return;
     const delta = e.touches[0].clientY - startY.current;
-    if (delta < 0) { pulling.current = false; setPullDistance(0); return; }
-    // Dampen the pull (logarithmic feel)
+    if (delta < 0) { pulling.current = false; currentPull.current = 0; setPullDistance(0); return; }
     const dampened = Math.min(delta * 0.4, maxPull);
+    currentPull.current = dampened;
     setPullDistance(dampened);
   }, [maxPull]);
 
   const handleTouchEnd = useCallback(async () => {
     if (!pulling.current) return;
     pulling.current = false;
-    if (pullDistance >= threshold) {
+    const dist = currentPull.current;
+    if (dist >= threshold) {
       setRefreshing(true);
-      setPullDistance(threshold * 0.5); // snap to a small offset while loading
+      currentPull.current = threshold * 0.5;
+      setPullDistance(threshold * 0.5);
       try {
         await onRefresh();
       } finally {
         setRefreshing(false);
+        currentPull.current = 0;
         setPullDistance(0);
       }
     } else {
+      currentPull.current = 0;
       setPullDistance(0);
     }
-  }, [pullDistance, threshold, onRefresh]);
+  }, [threshold, onRefresh]);
 
   useEffect(() => {
     const el = containerRef.current;
