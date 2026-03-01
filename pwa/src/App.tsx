@@ -145,7 +145,7 @@ function AppShell({ offline }: { offline: boolean }) {
         style={{
           flex: 1,
           overflow: "hidden",
-          maxWidth: isDesktop ? "960px" : "520px",
+          maxWidth: isDesktop ? "1200px" : "520px",
           width: "100%",
           margin: "0 auto",
         }}
