@@ -19,9 +19,7 @@ jobs:
       - run: pytest tests/ -x --tb=short
 
   build-and-push:
-    needs: test
-    if: github.ref == 'refs/heads/main' && always() && !cancelled()
-    # Build proceeds even if tests fail (pre-existing test debt)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
