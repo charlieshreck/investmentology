@@ -32,8 +32,8 @@ export function AddToPortfolioModal({
     fetch(`/api/invest/stock/${ticker}/chart?period=1w`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
-        if (cancelled || !d?.points?.length) return;
-        const lastPrice = d.points[d.points.length - 1]?.close;
+        if (cancelled || !d?.data?.length) return;
+        const lastPrice = d.data[d.data.length - 1]?.close;
         if (lastPrice > 0) setEntryPrice(lastPrice.toFixed(2));
       })
       .catch(() => {});
