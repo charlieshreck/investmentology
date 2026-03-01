@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type {
   Position,
   Alert,
@@ -82,7 +83,7 @@ interface UiSlice {
 
 type AppState = PortfolioSlice & WatchlistSlice & QuantGateSlice & UiSlice;
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>()(persist((set) => ({
   // Portfolio
   positions: [],
   totalValue: 0,
@@ -135,6 +136,9 @@ export const useStore = create<AppState>((set) => ({
       recentAnalyses: [
         analysis,
         ...state.recentAnalyses.filter((a) => a.ticker !== analysis.ticker),
-      ].slice(0, 5),
+      ].slice(0, 20),
     })),
+}), {
+  name: "investmentology-store",
+  partialize: (state) => ({ recentAnalyses: state.recentAnalyses }),
 }));
