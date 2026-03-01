@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useStore } from "../../stores/useStore";
 
 const VERDICT_COLORS: Record<string, string> = {
@@ -41,6 +42,7 @@ export function AnalysisStatusBar() {
   const setScreener = useStore((s) => s.setScreenerProgress);
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigate = useNavigate();
 
   const isDone = progress?.steps.every(
     (s) => s.status === "done" || s.status === "error",
@@ -65,7 +67,13 @@ export function AnalysisStatusBar() {
     const isComplete = screener.stage === "complete";
     const isError = screener.stage === "error";
     return (
-      <div style={BAR_STYLE}>
+      <div
+        style={{ ...BAR_STYLE, cursor: "pointer" }}
+        onClick={() => navigate("/analyze")}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter") navigate("/analyze"); }}
+      >
         <span
           style={{
             fontFamily: "var(--font-mono)",
@@ -120,7 +128,7 @@ export function AnalysisStatusBar() {
         >
           {screener.pct}%
         </span>
-        <button onClick={() => setScreener(null)} style={DISMISS_STYLE} aria-label="Dismiss">
+        <button onClick={(e) => { e.stopPropagation(); setScreener(null); }} style={DISMISS_STYLE} aria-label="Dismiss">
           ×
         </button>
       </div>
@@ -140,7 +148,13 @@ export function AnalysisStatusBar() {
       : progress.ticker;
 
   return (
-    <div style={BAR_STYLE}>
+    <div
+      style={{ ...BAR_STYLE, cursor: "pointer" }}
+      onClick={() => navigate("/analyze")}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") navigate("/analyze"); }}
+    >
       {/* Left: ticker + stage */}
       <div
         style={{
@@ -167,12 +181,6 @@ export function AnalysisStatusBar() {
               style={{
                 fontWeight: 600,
                 color: VERDICT_COLORS[verdict] ?? "var(--color-text)",
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                if (progress.result?.ticker) {
-                  setOverlayTicker(progress.result.ticker);
-                }
               }}
             >
               {verdict}
@@ -260,7 +268,7 @@ export function AnalysisStatusBar() {
           </div>
         )}
         <button
-          onClick={() => setProgress(null)}
+          onClick={(e) => { e.stopPropagation(); setProgress(null); }}
           style={DISMISS_STYLE}
           aria-label="Dismiss"
         >
