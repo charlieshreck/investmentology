@@ -619,28 +619,71 @@ class BriefingBuilder:
         items: list[ActionItem] = []
         priority = 1
 
+        # Fetch latest verdicts for held positions so we can cross-reference
+        # mechanical alerts with analysis conclusions
+        held_tickers = [p.ticker for p in portfolio.positions]
+        latest_verdicts: dict[str, dict] = {}
+        if held_tickers:
+            try:
+                placeholders = ",".join(["%s"] * len(held_tickers))
+                rows = self._registry._db.execute(
+                    f"SELECT DISTINCT ON (ticker) ticker, verdict, confidence, created_at "
+                    f"FROM invest.verdicts WHERE ticker IN ({placeholders}) "
+                    f"ORDER BY ticker, created_at DESC",
+                    tuple(held_tickers),
+                )
+                for r in (rows or []):
+                    latest_verdicts[r["ticker"]] = {
+                        "verdict": r["verdict"],
+                        "confidence": float(r["confidence"]) if r.get("confidence") else None,
+                        "date": str(r["created_at"])[:10] if r.get("created_at") else None,
+                    }
+            except Exception:
+                logger.debug("Could not fetch latest verdicts for action items")
+
+        positive_verdicts = {"STRONG_BUY", "BUY", "ACCUMULATE", "HOLD"}
+
         # Critical alerts first
         for a in alerts:
             if a.severity == "critical":
+                v = latest_verdicts.get(a.ticker)
+                reasoning = "Stop-loss breached — execute exit plan"
+                if v and v["verdict"] in positive_verdicts:
+                    reasoning = (
+                        f"Stop-loss breached, but latest analysis ({v['date']}) is "
+                        f"{v['verdict']}. Review whether stop-loss is too tight."
+                    )
                 items.append(ActionItem(
                     priority=priority,
-                    category="sell",
+                    category="sell" if not (v and v["verdict"] in positive_verdicts) else "review",
                     ticker=a.ticker,
                     action=f"URGENT: {a.message}",
-                    reasoning="Stop-loss breached — execute exit plan",
+                    reasoning=reasoning,
                 ))
                 priority += 1
 
-        # High severity alerts
+        # High severity alerts — skip if latest verdict is positive
         for a in alerts:
             if a.severity == "high":
-                items.append(ActionItem(
-                    priority=priority,
-                    category="review",
-                    ticker=a.ticker,
-                    action=f"Review thesis for {a.ticker}",
-                    reasoning=a.message,
-                ))
+                v = latest_verdicts.get(a.ticker)
+                if v and v["verdict"] in positive_verdicts:
+                    # Downgrade to informational — analysis says hold/buy
+                    items.append(ActionItem(
+                        priority=priority,
+                        category="watch",
+                        ticker=a.ticker,
+                        action=f"{a.ticker} drawdown noted — latest analysis: {v['verdict']}",
+                        reasoning=f"{a.message}. Analysis on {v['date']} concluded "
+                        f"{v['verdict']} — thesis intact, monitoring.",
+                    ))
+                else:
+                    items.append(ActionItem(
+                        priority=priority,
+                        category="review",
+                        ticker=a.ticker,
+                        action=f"Review thesis for {a.ticker}",
+                        reasoning=a.message,
+                    ))
                 priority += 1
 
         # Fair value overshoot — profit-taking
