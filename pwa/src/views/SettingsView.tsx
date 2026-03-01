@@ -23,7 +23,7 @@ export function SettingsView() {
 
   return (
     <div style={{ height: "100%", overflowY: "auto", paddingBottom: "calc(var(--nav-height) + var(--safe-bottom) + var(--space-xl))" }}>
-      <ViewHeader title="Settings" />
+      <ViewHeader />
       <div style={{ padding: "var(--space-xl)", display: "flex", flexDirection: "column", gap: "var(--space-xl)" }}>
 
         {error && (

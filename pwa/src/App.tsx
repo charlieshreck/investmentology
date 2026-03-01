@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { BottomNav } from "./components/layout/BottomNav";
 import { LayerOverlay } from "./components/layout/LayerOverlay";
 import { PageTransition } from "./components/layout/PageTransition";
@@ -99,21 +99,40 @@ function AppShell({ offline }: { offline: boolean }) {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {offline && (
-        <div
-          style={{
-            background: "var(--color-warning, #f59e0b)",
-            color: "#000",
-            textAlign: "center",
-            padding: "6px",
-            fontSize: "12px",
-            fontWeight: 600,
-            zIndex: 100,
-          }}
-        >
-          Offline — showing cached data
-        </div>
-      )}
+      <AnimatePresence>
+        {offline && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ overflow: "hidden", zIndex: 100, flexShrink: 0 }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                padding: "5px 12px",
+                background: "rgba(251, 191, 36, 0.12)",
+                borderBottom: "1px solid rgba(251, 191, 36, 0.2)",
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--color-warning)",
+                letterSpacing: "0.02em",
+              }}
+            >
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: "var(--color-warning)",
+                animation: "pulse-glow 2s ease-in-out infinite",
+              }} />
+              Offline — showing cached data
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnalysisStatusBar />
       <div
         style={{

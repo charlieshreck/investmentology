@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
@@ -7,12 +7,14 @@ import { RecommendationCardSkeleton } from "../components/shared/SkeletonCard";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { useRecommendations } from "../hooks/useRecommendations";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
 import type { Recommendation, AgentStance } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
   ChevronDown, Plus, TrendingUp, TrendingDown,
   Rocket, ShoppingCart, Layers, Anchor, Eye, Scissors, DoorOpen, ShieldAlert, Trash2,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 
@@ -629,10 +631,18 @@ export function Recommendations() {
   const [portfolioTarget, setPortfolioTarget] = useState<Recommendation | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
 
+  const handleRefresh = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
+
+  const { containerRef, pullDistance, refreshing } = usePullToRefresh({
+    onRefresh: handleRefresh,
+  });
+
   if (loading) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Recommend" />
+        <ViewHeader />
         <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
           <RecommendationCardSkeleton />
           <RecommendationCardSkeleton />
@@ -646,7 +656,7 @@ export function Recommendations() {
   if (error) {
     return (
       <div style={{ padding: "var(--space-xl)", paddingTop: "calc(var(--header-height) + var(--space-xl))" }}>
-        <ViewHeader title="Recommend" />
+        <ViewHeader />
         <BentoCard>
           <p style={{ color: "var(--color-error)" }}>Failed to load: {error}</p>
         </BentoCard>
@@ -657,9 +667,26 @@ export function Recommendations() {
   const verdictOrder = Object.keys(groupedByVerdict);
 
   return (
-    <div style={{ height: "100%", overflowY: "auto" }}>
+    <div ref={containerRef} style={{ height: "100%", overflowY: "auto" }}>
+      {/* Pull-to-refresh indicator */}
+      {(pullDistance > 0 || refreshing) && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          height: pullDistance, overflow: "hidden",
+          transition: refreshing ? "height 0.2s ease" : "none",
+        }}>
+          <RefreshCw
+            size={18}
+            style={{
+              color: "var(--color-text-muted)",
+              opacity: Math.min(pullDistance / 60, 1),
+              transform: `rotate(${pullDistance * 3}deg)`,
+              animation: refreshing ? "spin 0.8s linear infinite" : "none",
+            }}
+          />
+        </div>
+      )}
       <ViewHeader
-        title="Recommend"
         subtitle={`${totalCount} stock${totalCount !== 1 ? "s" : ""} ready for portfolio action`}
         right={<MarketStatus />}
       />
@@ -708,11 +735,27 @@ export function Recommendations() {
 
         {/* Empty state */}
         {totalCount === 0 && (
-          <BentoCard>
-            <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>
-              No recommendations yet. Stocks need Strong Buy, Buy, or Accumulate verdicts to appear here.
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center",
+            gap: "var(--space-lg)", padding: "var(--space-2xl) var(--space-xl)",
+            textAlign: "center",
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: "50%",
+              background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Rocket size={28} color="var(--color-text-muted)" strokeWidth={1.5} />
             </div>
-          </BentoCard>
+            <div>
+              <p style={{ margin: 0, fontSize: "var(--text-base)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                No recommendations yet
+              </p>
+              <p style={{ margin: "var(--space-sm) 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+                Run analysis on stocks from the Screener — those with actionable verdicts will appear here.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* Verdict groups */}

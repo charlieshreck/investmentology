@@ -269,7 +269,7 @@ export function Watchlist() {
   if (loading) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Watch" />
+        <ViewHeader />
         <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: 0 }}>
           <PositionRowSkeleton />
           <PositionRowSkeleton />
@@ -285,7 +285,7 @@ export function Watchlist() {
   if (error) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Watch" />
+        <ViewHeader />
         <div style={{ padding: "var(--space-xl)" }}>
           <BentoCard>
             <p style={{ color: "var(--color-error)" }}>Failed to load: {error}</p>
@@ -302,7 +302,6 @@ export function Watchlist() {
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
       <ViewHeader
-        title="Watch"
         subtitle={`${totalItems} stock${totalItems !== 1 ? "s" : ""} tagged by agents`}
         right={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
@@ -344,11 +343,30 @@ export function Watchlist() {
 
         {/* Empty state */}
         {totalItems === 0 && (
-          <BentoCard>
-            <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--color-text-muted)" }}>
-              No stocks on watch yet. Run analysis on Screen stocks — those tagged WATCHLIST by agents appear here.
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center",
+            gap: "var(--space-lg)", padding: "var(--space-2xl) var(--space-xl)",
+            textAlign: "center",
+          }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: "50%",
+              background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </div>
-          </BentoCard>
+            <div>
+              <p style={{ margin: 0, fontSize: "var(--text-base)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                Nothing on watch yet
+              </p>
+              <p style={{ margin: "var(--space-sm) 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+                Stocks tagged WATCHLIST by the agents during analysis will appear here for tracking.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* Grouped by sector */}

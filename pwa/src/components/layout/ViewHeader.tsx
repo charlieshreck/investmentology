@@ -7,7 +7,7 @@ interface Tab {
 }
 
 interface ViewHeaderProps {
-  title: string;
+  title?: string;
   subtitle?: string;
   right?: ReactNode;
   tabs?: Tab[];
@@ -15,7 +15,14 @@ interface ViewHeaderProps {
   onTabChange?: (key: string) => void;
 }
 
+/**
+ * Slim contextual header. Title is optional — bottom nav already shows
+ * which page we're on, so most views just use subtitle + right slot.
+ */
 export function ViewHeader({ title, subtitle, right, tabs, activeTab, onTabChange }: ViewHeaderProps) {
+  const hasContent = title || subtitle || right || (tabs && tabs.length > 0);
+  if (!hasContent) return null;
+
   return (
     <header
       style={{
@@ -31,7 +38,7 @@ export function ViewHeader({ title, subtitle, right, tabs, activeTab, onTabChang
     >
       <div
         style={{
-          height: "var(--header-height)",
+          minHeight: title ? "var(--header-height)" : 36,
           paddingLeft: "var(--space-xl)",
           paddingRight: "var(--space-xl)",
           display: "flex",
@@ -39,18 +46,20 @@ export function ViewHeader({ title, subtitle, right, tabs, activeTab, onTabChang
           justifyContent: "space-between",
         }}
       >
-        <div>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "var(--text-xl)",
-              fontWeight: 700,
-              lineHeight: 1.2,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            {title}
-          </h1>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {title && (
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "var(--text-xl)",
+                fontWeight: 700,
+                lineHeight: 1.2,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              {title}
+            </h1>
+          )}
           {subtitle && (
             <p
               style={{
@@ -58,14 +67,14 @@ export function ViewHeader({ title, subtitle, right, tabs, activeTab, onTabChang
                 fontSize: "var(--text-xs)",
                 color: "var(--color-text-muted)",
                 lineHeight: 1.2,
-                marginTop: 2,
+                marginTop: title ? 2 : 0,
               }}
             >
               {subtitle}
             </p>
           )}
         </div>
-        {right && <div>{right}</div>}
+        {right && <div style={{ flexShrink: 0 }}>{right}</div>}
       </div>
 
       {tabs && tabs.length > 0 && (

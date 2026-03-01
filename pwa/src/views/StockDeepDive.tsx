@@ -445,14 +445,56 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
   };
 
   if (loading) return (
-    <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
-      <div className="skeleton" style={{ height: 24, width: "40%" }} />
-      <div className="skeleton" style={{ height: 200 }} />
-      <div className="skeleton" style={{ height: 16, width: "80%" }} />
-      <div className="skeleton" style={{ height: 16, width: "60%" }} />
+    <div style={{ padding: "var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
+      {/* Header skeleton */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="skeleton" style={{ height: 22, width: 100, borderRadius: "var(--radius-sm)" }} />
+          <div className="skeleton" style={{ height: 14, width: 180, borderRadius: "var(--radius-sm)" }} />
+          <div className="skeleton" style={{ height: 12, width: 140, borderRadius: "var(--radius-sm)" }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <div className="skeleton" style={{ height: 28, width: 80, borderRadius: "var(--radius-sm)" }} />
+          <div className="skeleton" style={{ height: 12, width: 60, borderRadius: "var(--radius-sm)" }} />
+        </div>
+      </div>
+      {/* Chart skeleton */}
+      <div className="skeleton" style={{ height: 180, borderRadius: "var(--radius-lg)" }} />
+      {/* Verdict skeleton */}
+      <div className="skeleton" style={{ height: 100, borderRadius: "var(--radius-lg)" }} />
+      {/* Content skeletons */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
+        <div className="skeleton" style={{ height: 80, borderRadius: "var(--radius-md)" }} />
+        <div className="skeleton" style={{ height: 80, borderRadius: "var(--radius-md)" }} />
+      </div>
+      <div className="skeleton" style={{ height: 60, borderRadius: "var(--radius-md)" }} />
     </div>
   );
-  if (error || !data) return <BentoCard><p style={{ color: "var(--color-error)" }}>Failed to load {ticker}: {error ?? "No data"}</p></BentoCard>;
+  if (error || !data) return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      gap: "var(--space-lg)", padding: "var(--space-2xl) var(--space-xl)",
+      textAlign: "center",
+    }}>
+      <div style={{
+        width: 56, height: 56, borderRadius: "50%",
+        background: "rgba(248, 113, 113, 0.1)", border: "1px solid rgba(248, 113, 113, 0.2)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
+      </div>
+      <div>
+        <p style={{ margin: 0, fontSize: "var(--text-base)", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+          Couldn't load {ticker}
+        </p>
+        <p style={{ margin: "var(--space-sm) 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+          {error ?? "No data available"}
+        </p>
+      </div>
+    </div>
+  );
 
   const f = data.fundamentals;
   const q = data.quantGate;

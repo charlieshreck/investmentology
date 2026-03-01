@@ -116,7 +116,10 @@ export function LayerOverlay({
               {/* Header */}
               <div
                 style={{
-                  padding: "0 var(--space-xl) var(--space-lg)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0 var(--space-xl) var(--space-md)",
                   borderBottom: "1px solid var(--glass-border)",
                 }}
               >
@@ -124,11 +127,33 @@ export function LayerOverlay({
                   style={{
                     margin: 0,
                     fontSize: "var(--text-lg)",
-                    fontWeight: 600,
+                    fontWeight: 800,
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.04em",
                   }}
                 >
                   {title}
                 </h2>
+                <button
+                  onClick={onClose}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    background: "var(--color-surface-2)",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--color-text-muted)",
+                    fontSize: 14,
+                    flexShrink: 0,
+                  }}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
               </div>
             </div>
 

@@ -1068,7 +1068,7 @@ export function Portfolio() {
   if (loading) {
     return (
       <div style={{ height: "100%", overflowY: "auto" }}>
-        <ViewHeader title="Portfolio" />
+        <ViewHeader />
         <div style={{ padding: "var(--space-xl)", display: "flex", flexDirection: "column", gap: "var(--space-xl)" }}>
           <div className="skeleton" style={{ height: 140, borderRadius: "var(--radius-xl)" }} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
@@ -1089,7 +1089,7 @@ export function Portfolio() {
   if (error) {
     return (
       <div style={{ padding: "var(--space-xl)", paddingTop: "calc(var(--header-height) + var(--space-xl))" }}>
-        <ViewHeader title="Portfolio" />
+        <ViewHeader />
         <BentoCard>
           <p style={{ color: "var(--color-error)" }}>Failed to load portfolio: {error}</p>
         </BentoCard>
@@ -1150,7 +1150,6 @@ export function Portfolio() {
       />
 
       <ViewHeader
-        title="Portfolio"
         subtitle={`${positions.length} positions`}
         right={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
