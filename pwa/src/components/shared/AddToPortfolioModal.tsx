@@ -40,12 +40,14 @@ export function AddToPortfolioModal({
     return () => { cancelled = true; };
   }, [ticker, currentPrice]);
   const [posType, setPosType] = useState("core");
+  const [stopPct, setStopPct] = useState("15");
   const [thesis, setThesis] = useState(defaultThesis.slice(0, 200));
   const [submitting, setSubmitting] = useState(false);
 
   const price = parseFloat(entryPrice) || 0;
   const qty = parseFloat(shares) || 0;
   const totalCost = price * qty;
+  const stopLoss = price > 0 ? price * (1 - (parseFloat(stopPct) || 15) / 100) : 0;
 
   const handleSubmit = async () => {
     if (price <= 0 || qty <= 0) return;
@@ -59,10 +61,14 @@ export function AddToPortfolioModal({
           entry_price: price,
           shares: qty,
           position_type: posType,
+          stop_loss: Math.round(stopLoss * 100) / 100,
           thesis,
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.detail || `HTTP ${res.status}`);
+      }
       onSuccess?.(`Added ${ticker} (${qty} shares @ ${formatPrice(price)})`);
       onClose();
     } catch (err) {
@@ -146,22 +152,48 @@ export function AddToPortfolioModal({
           </div>
         )}
 
-        <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
-          Position Type
-          <select
-            value={posType}
-            onChange={(e) => setPosType(e.target.value)}
-            style={{
-              width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
-              background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
-              borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
-            }}
-          >
-            <option value="core">Core</option>
-            <option value="tactical">Tactical</option>
-            <option value="permanent">Permanent</option>
-          </select>
-        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
+          <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
+            Position Type
+            <select
+              value={posType}
+              onChange={(e) => {
+                const t = e.target.value;
+                setPosType(t);
+                setStopPct(t === "permanent" ? "25" : t === "tactical" ? "10" : "15");
+              }}
+              style={{
+                width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
+                background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
+                borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+              }}
+            >
+              <option value="core">Core</option>
+              <option value="tactical">Tactical</option>
+              <option value="permanent">Permanent</option>
+            </select>
+          </label>
+          <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
+            Stop Loss %
+            <input
+              type="number"
+              step="1"
+              value={stopPct}
+              onChange={(e) => setStopPct(e.target.value)}
+              style={{
+                width: "100%", marginTop: 4, padding: "var(--space-sm) var(--space-md)",
+                background: "var(--color-surface-0)", border: "1px solid var(--glass-border)",
+                borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+            {price > 0 && stopLoss > 0 && (
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: 2, display: "block" }}>
+                Trigger: {formatPrice(stopLoss)}
+              </span>
+            )}
+          </label>
+        </div>
 
         <label style={{ fontSize: "var(--text-sm)", fontWeight: 500 }}>
           Thesis
