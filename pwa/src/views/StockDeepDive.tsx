@@ -557,24 +557,22 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
             >
               {isAnalyzing ? "Analyzing..." : "Analyze"}
             </button>
-            {f && (
-              <button
-                onClick={() => setShowPortfolioModal(true)}
-                style={{
-                  padding: "var(--space-xs) var(--space-md)",
-                  borderRadius: "var(--radius-sm)",
-                  background: "var(--gradient-active)",
-                  border: "none",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: "var(--text-xs)",
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                + Portfolio
-              </button>
-            )}
+            <button
+              onClick={() => setShowPortfolioModal(true)}
+              style={{
+                padding: "var(--space-xs) var(--space-md)",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--gradient-active)",
+                border: "none",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+            >
+              + Portfolio
+            </button>
           </div>
         </div>
       </div>
@@ -962,10 +960,10 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       )}
 
       {/* Add to Portfolio Modal */}
-      {showPortfolioModal && f && (
+      {showPortfolioModal && (
         <AddToPortfolioModal
           ticker={data.ticker}
-          currentPrice={f.price}
+          currentPrice={f?.price ?? 0}
           defaultThesis={data.verdict?.reasoning || ""}
           onClose={() => setShowPortfolioModal(false)}
           onSuccess={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}

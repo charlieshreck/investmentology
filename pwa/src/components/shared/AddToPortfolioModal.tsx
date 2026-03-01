@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface AddToPortfolioModalProps {
@@ -22,8 +22,23 @@ export function AddToPortfolioModal({
   onSuccess,
   onError,
 }: AddToPortfolioModalProps) {
-  const [entryPrice, setEntryPrice] = useState(currentPrice.toString());
+  const [entryPrice, setEntryPrice] = useState(currentPrice > 0 ? currentPrice.toString() : "");
   const [shares, setShares] = useState("100");
+
+  // Fetch live price if currentPrice is missing/zero
+  useEffect(() => {
+    if (currentPrice > 0) return;
+    let cancelled = false;
+    fetch(`/api/invest/stock/${ticker}/chart?period=1w`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (cancelled || !d?.points?.length) return;
+        const lastPrice = d.points[d.points.length - 1]?.close;
+        if (lastPrice > 0) setEntryPrice(lastPrice.toFixed(2));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [ticker, currentPrice]);
   const [posType, setPosType] = useState("core");
   const [thesis, setThesis] = useState(defaultThesis.slice(0, 200));
   const [submitting, setSubmitting] = useState(false);
