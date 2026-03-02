@@ -122,7 +122,6 @@ def detect_anomalies(data: dict) -> list[str]:
     total_debt = _to_float(data.get("total_debt"))
     total_assets = _to_float(data.get("total_assets"))
     price = _to_float(data.get("price"))
-    pe_ratio = _to_float(data.get("pe_ratio"))
     eps = _to_float(data.get("eps"))
     net_income = _to_float(data.get("net_income"))
     revenue_growth = _to_float(data.get("revenue_growth"))
