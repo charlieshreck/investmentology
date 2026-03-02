@@ -123,6 +123,7 @@ class DataEnricher:
             request.news_context = self._finnhub.get_news(request.ticker)
         except Exception:
             logger.warning("News enrichment failed for %s", request.ticker)
+            request.news_context = []
 
     def _enrich_earnings(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.earnings_context is not None:
@@ -139,6 +140,7 @@ class DataEnricher:
             request.insider_context = self._finnhub.get_insider_transactions(request.ticker)
         except Exception:
             logger.warning("Insider enrichment failed for %s", request.ticker)
+            request.insider_context = []
 
     def _enrich_social(self, request: AnalysisRequest) -> None:
         if not self._finnhub or request.social_sentiment is not None:
@@ -163,6 +165,7 @@ class DataEnricher:
             request.institutional_context = self._edgar.get_institutional_holders(request.ticker)
         except Exception:
             logger.warning("Institutional holders enrichment failed for %s", request.ticker)
+            request.institutional_context = []
 
     def _enrich_technical(self, request: AnalysisRequest) -> None:
         """Compute technical indicators for Simons agent."""

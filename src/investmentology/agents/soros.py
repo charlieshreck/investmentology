@@ -111,7 +111,7 @@ class SorosAgent(BaseAgent):
         if request.news_context:
             parts.append("")
             parts.append("Recent News:")
-            for item in request.news_context[:5]:
+            for item in (request.news_context or [])[:5]:
                 headline = item.get("headline", "")[:100]
                 dt = item.get("datetime", "")[:10]
                 parts.append(f"  [{dt}] {headline}")

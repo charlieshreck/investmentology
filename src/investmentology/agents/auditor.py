@@ -167,7 +167,7 @@ class AuditorAgent(BaseAgent):
         if request.insider_context:
             parts.append("")
             parts.append("Insider Transactions (recent):")
-            for t in request.insider_context[:5]:
+            for t in (request.insider_context or [])[:5]:
                 name = t.get("name", "Unknown")[:30]
                 tx_type = t.get("transaction_type", "other")
                 change = t.get("change", 0)
@@ -193,7 +193,7 @@ class AuditorAgent(BaseAgent):
         if request.news_context:
             parts.append("")
             parts.append("Recent News (check for risk signals):")
-            for item in request.news_context[:3]:
+            for item in (request.news_context or [])[:3]:
                 headline = item.get("headline", "")[:100]
                 parts.append(f"  - {headline}")
 
@@ -207,7 +207,7 @@ class AuditorAgent(BaseAgent):
         if request.institutional_context:
             parts.append("")
             parts.append("Institutional Ownership (13F):")
-            for h in request.institutional_context[:5]:
+            for h in (request.institutional_context or [])[:5]:
                 name = h.get("name", "Unknown")[:40]
                 shares = h.get("shares", 0)
                 parts.append(f"  {name}: {shares:,} shares")
