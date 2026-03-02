@@ -157,3 +157,57 @@ class PendulumReader:
         if ratio < Decimal("1.0"):
             return 40
         return 20
+
+
+# -- Regime-aware weight adjustments --
+
+_BASE_WEIGHTS: dict[str, Decimal] = {
+    "warren": Decimal("0.20"),
+    "soros": Decimal("0.15"),
+    "simons": Decimal("0.10"),
+    "auditor": Decimal("0.20"),
+    "marks": Decimal("0.15"),
+    "forensic": Decimal("0.10"),
+    "bogle": Decimal("0.10"),
+}
+
+_REGIME_BOOSTS: dict[str, dict[str, Decimal]] = {
+    "extreme_fear": {"auditor": Decimal("0.05"), "marks": Decimal("0.05"), "soros": Decimal("0.05")},
+    "fear": {"auditor": Decimal("0.03"), "marks": Decimal("0.03")},
+    "neutral": {},
+    "greed": {"simons": Decimal("0.03"), "warren": Decimal("0.03")},
+    "extreme_greed": {"forensic": Decimal("0.05"), "bogle": Decimal("0.05")},
+}
+
+
+def regime_weights(regime: str, agents: list[str] | None = None) -> dict[str, Decimal]:
+    """Return regime-aware agent weights, renormalized to sum to 1.0.
+
+    Args:
+        regime: One of extreme_fear, fear, neutral, greed, extreme_greed.
+        agents: If provided, only include these agents and renormalize.
+                This supports backward compat when only 4 agents are present.
+
+    Returns:
+        Dict mapping agent name to Decimal weight, summing to 1.0.
+    """
+    boosts = _REGIME_BOOSTS.get(regime, {})
+    raw: dict[str, Decimal] = {}
+    for name, base in _BASE_WEIGHTS.items():
+        raw[name] = base + boosts.get(name, Decimal("0"))
+
+    # Filter to only requested agents
+    if agents:
+        raw = {k: v for k, v in raw.items() if k in agents}
+
+    # Renormalize to sum to 1.0
+    total = sum(raw.values())
+    if total > 0 and total != Decimal("1"):
+        raw = {k: (v / total).quantize(Decimal("0.0001")) for k, v in raw.items()}
+        # Fix rounding residual on largest weight
+        diff = Decimal("1") - sum(raw.values())
+        if diff != 0 and raw:
+            largest = max(raw, key=lambda k: raw[k])
+            raw[largest] += diff
+
+    return raw

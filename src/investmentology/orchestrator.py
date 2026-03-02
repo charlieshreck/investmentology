@@ -112,17 +112,9 @@ class AnalysisOrchestrator:
         self._prediction_mgr = PredictionManager(registry)
         # Dynamic agent weights from attribution (P0.4)
         self._dynamic_weights = None
-        try:
-            from investmentology.learning.attribution import AgentAttributionEngine
-            attr_engine = AgentAttributionEngine(registry)
-            report = attr_engine.compute_attribution()
-            if report is not None:
-                self._dynamic_weights = {
-                    k: Decimal(str(v)) for k, v in report.recommended_weights.items()
-                }
-                logger.info("Using dynamic agent weights: %s", self._dynamic_weights)
-        except Exception:
-            logger.debug("Attribution-based weights not available, using defaults")
+        self._analyses_since_attribution = 0
+        self._ATTRIBUTION_REFRESH_INTERVAL = 10  # recompute every N analyses
+        self._refresh_attribution_weights()
 
         # Kelly criterion from closed position history (P0.3)
         kelly = compute_kelly_params(registry)
@@ -422,6 +414,23 @@ class AnalysisOrchestrator:
             except Exception:
                 logger.warning("Data enrichment failed for %s, continuing without", ticker)
 
+        # Fallback: if no enricher and macro_context is still empty, use market_snapshot
+        if not request.macro_context and market_snapshot:
+            fallback: dict = {}
+            if market_snapshot.get("vix") is not None:
+                fallback["vix"] = float(market_snapshot["vix"])
+            if market_snapshot.get("ten_year_yield") is not None:
+                fallback["treasury_10y"] = float(market_snapshot["ten_year_yield"])
+            if market_snapshot.get("three_month_yield") is not None:
+                fallback["treasury_3m"] = float(market_snapshot["three_month_yield"])
+            if market_snapshot.get("yield_spread") is not None:
+                fallback["yield_curve_spread"] = float(market_snapshot["yield_spread"])
+                fallback["yield_curve_inverted"] = float(market_snapshot["yield_spread"]) < 0
+            if fallback:
+                fallback["_source"] = "market_snapshot_fallback"
+                request.macro_context = fallback
+                logger.info("Macro context populated from market snapshot fallback for %s", ticker)
+
         # Run all configured agents concurrently
         await _emit("Agents", 3)
         agent_tasks = [self._run_agent(agent, request) for agent in self._agents]
@@ -515,13 +524,25 @@ class AnalysisOrchestrator:
 
         # --- Synthesize verdict ---
         await _emit("Verdict", 6)
+
+        # Determine weights: attribution > regime-aware > default
+        verdict_weights = self._dynamic_weights
+        regime_label: str | None = None
+        if not verdict_weights and request.macro_context:
+            regime_label = request.macro_context.get("pendulum_label")
+            if regime_label:
+                from investmentology.timing.pendulum import regime_weights as _regime_weights
+                active_agents = [ss.agent_name for ss in analysis.agent_signal_sets]
+                verdict_weights = _regime_weights(regime_label, active_agents)
+                logger.debug("Using regime-aware weights (%s): %s", regime_label, verdict_weights)
+
         # First pass with weighted vote to determine direction
         initial_verdict = synthesize_verdict(
             agent_signals=analysis.agent_signal_sets,
             compatibility=analysis.compatibility,
             adversarial=analysis.adversarial,
             method=VotingMethod.WEIGHTED_VOTE,
-            weights=self._dynamic_weights,
+            weights=verdict_weights,
         )
 
         # Use supermajority for BUY/STRONG_BUY (higher bar for strong actions)
@@ -531,10 +552,14 @@ class AnalysisOrchestrator:
                 compatibility=analysis.compatibility,
                 adversarial=analysis.adversarial,
                 method=VotingMethod.SUPERMAJORITY,
-                weights=self._dynamic_weights,
+                weights=verdict_weights,
             )
         else:
             analysis.verdict = initial_verdict
+
+        # Attach regime label to verdict result
+        if analysis.verdict:
+            analysis.verdict.regime_label = regime_label
 
         # Add competence warning as risk flag if outside circle
         if not analysis.passed_competence and analysis.competence:
@@ -685,6 +710,12 @@ class AnalysisOrchestrator:
         # Phase 4+5: Store in semantic + graph memory (fire-and-forget)
         self._store_memory_async(ticker, analysis, thesis_context)
 
+        # Periodically refresh attribution weights after analyses
+        self._analyses_since_attribution += 1
+        if self._analyses_since_attribution >= self._ATTRIBUTION_REFRESH_INTERVAL:
+            self._analyses_since_attribution = 0
+            self._refresh_attribution_weights()
+
         await _emit("Complete", 9)
         return analysis
 
@@ -788,6 +819,20 @@ class AnalysisOrchestrator:
         except Exception:
             logger.warning("Could not fetch QG data for %s", ticker)
         return {}
+
+    def _refresh_attribution_weights(self) -> None:
+        """Recompute dynamic weights from attribution engine."""
+        try:
+            from investmentology.learning.attribution import AgentAttributionEngine
+            engine = AgentAttributionEngine(self._registry)
+            report = engine.compute_attribution()
+            if report is not None:
+                self._dynamic_weights = {
+                    k: Decimal(str(v)) for k, v in report.recommended_weights.items()
+                }
+                logger.info("Attribution weights refreshed: %s", self._dynamic_weights)
+        except Exception:
+            logger.debug("Attribution-based weights not available, using defaults")
 
     def _save_verdict(self, ticker: str, verdict: VerdictResult) -> bool:
         """Persist a verdict to the database. Returns True on success."""

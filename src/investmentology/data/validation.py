@@ -121,6 +121,11 @@ def detect_anomalies(data: dict) -> list[str]:
     shares_outstanding = _to_float(data.get("shares_outstanding"))
     total_debt = _to_float(data.get("total_debt"))
     total_assets = _to_float(data.get("total_assets"))
+    price = _to_float(data.get("price"))
+    pe_ratio = _to_float(data.get("pe_ratio"))
+    eps = _to_float(data.get("eps"))
+    net_income = _to_float(data.get("net_income"))
+    revenue_growth = _to_float(data.get("revenue_growth"))
 
     # Operating income exceeds revenue
     if (
@@ -154,6 +159,51 @@ def detect_anomalies(data: dict) -> list[str]:
             f"total_debt ({total_debt}) > 10x total_assets ({total_assets})"
         )
 
+    # EPS sign vs net_income sign inconsistency
+    # If net_income is positive, EPS should also be positive (and vice versa)
+    if eps is not None and net_income is not None and shares_outstanding is not None:
+        if shares_outstanding > 0:
+            if net_income > 0 and eps < 0:
+                anomalies.append(
+                    f"EPS ({eps}) is negative but net_income ({net_income}) is positive"
+                )
+            elif net_income < 0 and eps > 0:
+                anomalies.append(
+                    f"EPS ({eps}) is positive but net_income ({net_income}) is negative"
+                )
+
+    # Market cap vs shares_outstanding * price consistency
+    if (
+        market_cap is not None
+        and shares_outstanding is not None
+        and price is not None
+        and shares_outstanding > 0
+        and price > 0
+    ):
+        implied_market_cap = shares_outstanding * price
+        if implied_market_cap > 0:
+            ratio = market_cap / implied_market_cap
+            # Allow 20% tolerance for timing differences between fields
+            if ratio < 0.5 or ratio > 2.0:
+                anomalies.append(
+                    f"market_cap ({market_cap:.0f}) inconsistent with "
+                    f"shares_outstanding * price ({implied_market_cap:.0f}), "
+                    f"ratio={ratio:.2f}"
+                )
+
+    # Revenue growth rate sanity for large caps
+    # yfinance returns revenueGrowth as a decimal (e.g., 0.15 = 15%)
+    if (
+        revenue_growth is not None
+        and market_cap is not None
+        and market_cap > 1e10  # >$10B = large cap
+        and revenue_growth > 10.0  # >1000% YoY
+    ):
+        anomalies.append(
+            f"Implausible revenue_growth ({revenue_growth*100:.0f}%) "
+            f"for ${market_cap/1e9:.0f}B market cap company — likely data error"
+        )
+
     return anomalies
 
 
@@ -172,6 +222,22 @@ def detect_critical_anomalies(data: dict) -> list[str]:
     net_income = _to_float(data.get("net_income"))
     market_cap = _to_float(data.get("market_cap"))
     price = _to_float(data.get("price"))
+    pe_ratio = _to_float(data.get("pe_ratio"))
+
+    # P/E ratio sanity: negative P/E for a clearly profitable company = data error
+    # A company with positive net_income and positive price should have a positive P/E
+    if (
+        pe_ratio is not None
+        and pe_ratio < 0
+        and net_income is not None
+        and net_income > 0
+        and price is not None
+        and price > 0
+    ):
+        errors.append(
+            f"Negative P/E ratio ({pe_ratio}) for profitable company "
+            f"(net_income={net_income}) — corrupted data"
+        )
 
     # Established company with zeroed financials = corrupted data
     # Any company with market_cap > $100M should have revenue
@@ -206,6 +272,20 @@ def detect_critical_anomalies(data: dict) -> list[str]:
         and (net_income is None or net_income == 0)
     ):
         errors.append("All financial fields zeroed — data source returned empty data")
+
+    # Extreme revenue growth for mega-caps is almost certainly data corruption
+    # e.g. yfinance returning revenueGrowth=50.0 (5000%) for Apple
+    revenue_growth = _to_float(data.get("revenue_growth"))
+    if (
+        revenue_growth is not None
+        and market_cap is not None
+        and market_cap > 1e11  # >$100B mega cap
+        and abs(revenue_growth) > 50.0  # >5000% YoY
+    ):
+        errors.append(
+            f"Impossible revenue_growth ({revenue_growth*100:.0f}%) "
+            f"for ${market_cap/1e9:.0f}B mega-cap — corrupted data"
+        )
 
     return errors
 

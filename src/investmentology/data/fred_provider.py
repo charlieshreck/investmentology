@@ -22,6 +22,9 @@ FRED_SERIES = {
     "BAMLH0A0HYM2": "high_yield_spread",
     "DTWEXBGS": "usd_index",
     "T10Y2Y": "yield_curve_spread",
+    "T5YIE": "breakeven_inflation_5y",
+    "DCOILWTICO": "wti_crude_oil",
+    "VIXCLS": "vix",
 }
 
 
@@ -66,6 +69,11 @@ class FredProvider:
             spread = context["treasury_10y"] - context["treasury_2y"]
             context["yield_curve_spread_derived"] = round(spread, 4)
             context["yield_curve_inverted"] = spread < 0
+
+        if "treasury_10y" in context and "breakeven_inflation_5y" in context:
+            context["real_yield_10y"] = round(
+                context["treasury_10y"] - context["breakeven_inflation_5y"], 4
+            )
 
         if "high_yield_spread" in context:
             hys = context["high_yield_spread"]

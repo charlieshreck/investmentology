@@ -136,8 +136,12 @@ class TestAgentWeights:
         total = sum(AGENT_WEIGHTS.values())
         assert total == Decimal("1.0")
 
+    def test_all_seven_agents_present(self) -> None:
+        expected = {"warren", "soros", "simons", "auditor", "marks", "forensic", "bogle"}
+        assert set(AGENT_WEIGHTS.keys()) == expected
+
     def test_auditor_has_significant_weight(self) -> None:
-        assert AGENT_WEIGHTS["auditor"] >= Decimal("0.25")
+        assert AGENT_WEIGHTS["auditor"] >= Decimal("0.15")
 
 
 # ---------------------------------------------------------------------------

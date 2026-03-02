@@ -19,7 +19,7 @@ import { useStore } from "../stores/useStore";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
   ChevronDown, ChevronUp, Zap, AlertTriangle, BarChart3,
-  ShieldAlert, ArrowUpRight, ArrowDownRight, Sparkles,
+  ShieldAlert, ArrowUpRight, ArrowDownRight, Sparkles, PieChart,
 } from "lucide-react";
 
 function formatCurrency(n: number): string {
@@ -983,6 +983,48 @@ interface BriefingSummary {
   topActions: Array<{ category: string; ticker: string; action: string }>;
 }
 
+/* ── Allocation Donut (pure SVG) ── */
+function AllocationDonut({ data, size = 180 }: {
+  data: { label: string; value: number; color: string }[];
+  size?: number;
+}) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (total <= 0) return null;
+
+  const radius = 70;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <svg viewBox="0 0 200 200" width={size} height={size}>
+      {data.map((d, i) => {
+        const pct = d.value / total;
+        const dash = pct * circumference;
+        const currentOffset = offset;
+        offset += dash;
+        return (
+          <circle
+            key={i}
+            cx="100" cy="100" r={radius}
+            fill="none"
+            stroke={d.color}
+            strokeWidth="28"
+            strokeDasharray={`${dash} ${circumference - dash}`}
+            strokeDashoffset={-currentOffset}
+            transform="rotate(-90 100 100)"
+          />
+        );
+      })}
+      <text x="100" y="95" textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--color-text)">
+        {data.length > 0 ? `${((data[0].value / total) * 100).toFixed(0)}%` : ""}
+      </text>
+      <text x="100" y="112" textAnchor="middle" fontSize="10" fill="var(--color-text-muted)">
+        {data.length > 0 ? data[0].label : ""}
+      </text>
+    </svg>
+  );
+}
+
 export function Portfolio() {
   const {
     positions, totalValue, dayPnl, dayPnlPct, cash, alerts,
@@ -1324,6 +1366,66 @@ export function Portfolio() {
             </div>
           </BentoCard>
         </div>
+
+        {/* ═══════ Allocation ═══════ */}
+        {enrichedPositions.length > 0 && (() => {
+          const equitiesValue = enrichedPositions.reduce((s, p) => s + p.marketValue, 0);
+          const allocationData = [
+            { label: "Equities", value: equitiesValue, color: "var(--color-accent)" },
+            ...(cash > 0 ? [{ label: "Cash", value: cash, color: "var(--color-text-muted)" }] : []),
+          ];
+          const targetAllocation = [
+            { label: "Equities", value: 70, color: "var(--color-accent)" },
+            { label: "Bonds", value: 15, color: "#60a5fa" },
+            { label: "Gold", value: 10, color: "#fbbf24" },
+            { label: "Cash", value: 5, color: "var(--color-text-muted)" },
+          ];
+          return (
+            <Section title="Allocation" icon={PieChart} defaultOpen={false}>
+              <div style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr",
+                gap: "var(--space-lg)", alignItems: "start",
+              }}>
+                {/* Current */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-sm)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Current
+                  </div>
+                  <AllocationDonut data={allocationData} size={140} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+                    {allocationData.map((d) => (
+                      <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", fontSize: "var(--text-xs)" }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color, flexShrink: 0 }} />
+                        <span style={{ color: "var(--color-text-secondary)", flex: 1 }}>{d.label}</span>
+                        <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text)", fontWeight: 600 }}>
+                          {((d.value / (equitiesValue + cash)) * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Target */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-sm)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Target
+                  </div>
+                  <AllocationDonut data={targetAllocation} size={140} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+                    {targetAllocation.map((d) => (
+                      <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", fontSize: "var(--text-xs)" }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color, flexShrink: 0 }} />
+                        <span style={{ color: "var(--color-text-secondary)", flex: 1 }}>{d.label}</span>
+                        <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text)", fontWeight: 600 }}>
+                          {d.value}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Section>
+          );
+        })()}
 
         {/* ═══════ Performance ═══════ */}
         {performance && (

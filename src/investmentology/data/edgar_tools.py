@@ -2,7 +2,7 @@
 
 Uses the edgartools library (pip install edgartools) to fetch:
 - 10-K/10-Q risk factors and MD&A sections
-- 13F institutional holders (top funds)
+- 13F institutional holders (reverse lookup via EDGAR full-text search)
 - Form 4 insider transaction summaries
 
 All methods are best-effort with caching and graceful failure.
@@ -13,9 +13,13 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import httpx
 
 logger = logging.getLogger(__name__)
+
+SEC_USER_AGENT = "investmentology/1.0 (admin@investmentology.io)"
 
 # Cache TTL: filing text rarely changes
 _CACHE_TTL = timedelta(hours=24)
@@ -71,12 +75,12 @@ class EdgarToolsProvider:
     def _get_cached(self, key: str) -> object | None:
         if key in self._cache:
             ts, val = self._cache[key]
-            if datetime.now() - ts < _CACHE_TTL:
+            if datetime.now(timezone.utc) - ts < _CACHE_TTL:
                 return val
         return None
 
     def _set_cached(self, key: str, val: object) -> None:
-        self._cache[key] = (datetime.now(), val)
+        self._cache[key] = (datetime.now(timezone.utc), val)
 
     def get_filing_text(
         self, ticker: str, filing_type: str = "10-K"
@@ -140,11 +144,15 @@ class EdgarToolsProvider:
             logger.debug("EdgarTools filing fetch failed for %s", ticker, exc_info=True)
             return None
 
-    def get_institutional_holders(self, ticker: str) -> list[dict] | None:
-        """Get top institutional holders from 13F filings.
+    def get_institutional_holders(self, ticker: str) -> dict | None:
+        """Get institutional holders via SEC EDGAR full-text search of 13F filings.
 
-        Returns list of dicts: {name, shares, value, report_date}.
-        Limited to top 20 holders.
+        This performs a REVERSE lookup: searches 13F-HR filings that mention
+        the ticker to find which institutional investors hold this stock.
+
+        Returns dict with:
+            holders: list of {name, shares, value_usd, report_date}
+            total_institutional_shares: int
         """
         cache_key = f"holders:{ticker}"
         cached = self._get_cached(cache_key)
@@ -152,43 +160,68 @@ class EdgarToolsProvider:
             return cached  # type: ignore[return-value]
 
         try:
-            self._ensure_identity()
-            import edgar
+            now = datetime.now(timezone.utc)
+            six_months_ago = now - timedelta(days=180)
 
-            company = edgar.Company(ticker)
-            filings = company.get_filings(form="13F-HR")
-            if not filings or len(filings) == 0:
+            # Search EDGAR full-text search for 13F filings mentioning this ticker
+            search_url = "https://efts.sec.gov/LATEST/search-index"
+            params = {
+                "q": f'"{ticker}"',
+                "dateRange": "custom",
+                "startdt": six_months_ago.strftime("%Y-%m-%d"),
+                "enddt": now.strftime("%Y-%m-%d"),
+                "forms": "13F-HR",
+            }
+
+            resp = httpx.get(
+                search_url,
+                params=params,
+                headers={"User-Agent": SEC_USER_AGENT},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                logger.debug("EDGAR search returned %s for %s", resp.status_code, ticker)
                 return None
 
-            latest = filings[0]
-            thirteenf = latest.obj()
-            if not isinstance(thirteenf, edgar.ThirteenF):
+            data = resp.json()
+            hits = data.get("hits", {}).get("hits", [])
+            if not hits:
                 return None
 
-            holdings = thirteenf.holdings
-            if not holdings:
-                return None
+            holders: list[dict] = []
+            seen_filers: set[str] = set()
 
-            # Filter to this ticker and collect holder info
-            holders = []
-            for h in holdings:
-                holder_name = getattr(h, "name", "") or getattr(h, "nameOfIssuer", "")
-                shares = getattr(h, "shares", 0) or getattr(h, "value", 0)
-                value = getattr(h, "value", 0)
+            for hit in hits[:30]:  # Check top 30 results
+                source = hit.get("_source", {})
+                filer_name = source.get("display_names", [""])[0] if source.get("display_names") else ""
+                if not filer_name:
+                    filer_name = source.get("entity_name", "")
+                if not filer_name or filer_name.lower() in seen_filers:
+                    continue
+                seen_filers.add(filer_name.lower())
+
+                report_date = source.get("period_of_report", source.get("file_date", ""))
+
                 holders.append({
-                    "name": str(holder_name)[:60],
-                    "shares": int(shares) if shares else 0,
-                    "value": int(value) if value else 0,
+                    "name": filer_name[:60],
+                    "shares": 0,  # EDGAR search doesn't include share counts
+                    "value_usd": 0,
+                    "report_date": report_date,
                 })
+                time.sleep(0.12)  # SEC rate limit
 
-            holders.sort(key=lambda x: x["value"], reverse=True)
-            result = holders[:20]
+            if not holders:
+                return None
+
+            result = {
+                "holders": holders[:20],
+                "total_institutional_shares": 0,  # Not available from search
+            }
             self._set_cached(cache_key, result)
-            time.sleep(0.12)
             return result
 
         except Exception:
-            logger.debug("EdgarTools 13F fetch failed for %s", ticker, exc_info=True)
+            logger.debug("EDGAR 13F reverse lookup failed for %s", ticker, exc_info=True)
             return None
 
     def get_insider_summary(self, ticker: str) -> dict | None:

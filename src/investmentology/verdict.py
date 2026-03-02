@@ -38,11 +38,15 @@ class VotingMethod(StrEnum):
 
 
 # Agent weights for consensus (must sum to 1.0)
+# 7-agent baseline — renormalized at runtime when fewer agents are present
 AGENT_WEIGHTS = {
-    "warren": Decimal("0.30"),  # Fundamentals carry most weight
-    "soros": Decimal("0.20"),  # Macro context
-    "simons": Decimal("0.20"),  # Technical timing
-    "auditor": Decimal("0.30"),  # Risk assessment — equal to Warren
+    "warren": Decimal("0.20"),   # Fundamentals / intrinsic value
+    "soros": Decimal("0.15"),    # Macro context / cycles
+    "simons": Decimal("0.10"),   # Technical timing / momentum
+    "auditor": Decimal("0.20"),  # Risk assessment / portfolio fit
+    "marks": Decimal("0.15"),    # Credit cycle / distressed value
+    "forensic": Decimal("0.10"), # Accounting forensics / fraud detection
+    "bogle": Decimal("0.10"),    # Index comparison / cost-benefit sanity check
 }
 
 # Signal tags that indicate bullish stance per agent category
@@ -118,6 +122,7 @@ class VerdictResult:
     auditor_override: bool = False  # True if auditor vetoed/capped
     munger_override: bool = False  # True if adversarial changed outcome
     consensus_breakdown: ConsensusBreakdown | None = None
+    regime_label: str | None = None  # Pendulum regime at analysis time
 
 
 def _compute_sentiment(signal_set: AgentSignalSet) -> float:
@@ -440,6 +445,9 @@ _SENTIMENT_WORD = {
     "soros": ("macro tailwinds", "macro headwinds"),
     "simons": ("technical strength", "technical weakness"),
     "auditor": ("risk clarity", "risk concerns"),
+    "marks": ("credit opportunity", "credit stress"),
+    "forensic": ("clean books", "accounting concerns"),
+    "bogle": ("alpha potential", "index drag"),
 }
 
 

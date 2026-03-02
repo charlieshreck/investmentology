@@ -198,6 +198,10 @@ class YFinanceClient:
                 "industry": info.get("industry"),
                 "name": info.get("shortName"),
                 "enterprise_value": _to_decimal(info.get("enterpriseValue")),
+                "pe_ratio": _to_decimal(info.get("trailingPE")),
+                "forward_pe": _to_decimal(info.get("forwardPE")),
+                "eps": _to_decimal(info.get("trailingEps")),
+                "revenue_growth": _to_decimal(info.get("revenueGrowth")),
             }
             return result
 

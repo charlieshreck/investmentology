@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 EXTERNAL_MCP_URL = os.environ.get(
     "EXTERNAL_MCP_URL", "https://external-mcp.agentic.kernow.io/mcp"
 )
+SEARXNG_URL = os.environ.get(
+    "SEARXNG_URL", "https://searxng.agentic.kernow.io"
+)
 
 # Simple keyword-based headline sentiment
 _POSITIVE_WORDS = frozenset({
@@ -63,7 +66,12 @@ def _buzz_label(score: float) -> str:
 
 
 def _call_mcp_tool(tool_name: str, arguments: dict, timeout: float = 15.0) -> list[dict]:
-    """Call an external MCP tool via JSON-RPC over SSE."""
+    """Call an external MCP tool via JSON-RPC over streamable-http transport.
+
+    FastMCP streamable-http accepts JSON-RPC POST and returns either:
+    - Direct JSON response (application/json)
+    - SSE stream with JSON-RPC messages (text/event-stream)
+    """
     try:
         response = httpx.post(
             EXTERNAL_MCP_URL,
@@ -73,55 +81,114 @@ def _call_mcp_tool(tool_name: str, arguments: dict, timeout: float = 15.0) -> li
                 "id": 1,
                 "params": {"name": tool_name, "arguments": arguments},
             },
-            headers={"Accept": "application/json, text/event-stream"},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
             timeout=timeout,
         )
         if response.status_code != 200:
+            logger.debug("MCP tool call returned %s for %s", response.status_code, tool_name)
             return []
 
-        # Parse SSE response — find the data line with result
+        content_type = response.headers.get("content-type", "")
+
+        # Direct JSON response
+        if "application/json" in content_type:
+            data = response.json()
+            result = data.get("result", {})
+            content = result.get("content", [])
+            for item in content:
+                if item.get("type") == "text":
+                    return json.loads(item["text"])
+            return []
+
+        # SSE response — parse event stream
         for line in response.text.split("\n"):
+            line = line.strip()
             if line.startswith("data: "):
-                data = json.loads(line[6:])
-                result = data.get("result", {})
-                content = result.get("content", [])
-                for item in content:
-                    if item.get("type") == "text":
-                        return json.loads(item["text"])
+                try:
+                    data = json.loads(line[6:])
+                    result = data.get("result", {})
+                    content = result.get("content", [])
+                    for item in content:
+                        if item.get("type") == "text":
+                            return json.loads(item["text"])
+                except json.JSONDecodeError:
+                    continue
         return []
     except Exception:
-        logger.debug("MCP tool call failed: %s", tool_name)
+        logger.debug("MCP tool call failed for %s", tool_name, exc_info=True)
+        return []
+
+
+def _searxng_direct_search(
+    query: str, categories: str = "general", time_range: str = "", num_results: int = 10,
+) -> list[dict]:
+    """Direct SearXNG REST API fallback when MCP is unavailable."""
+    try:
+        params: dict = {
+            "q": query,
+            "format": "json",
+            "categories": categories,
+        }
+        if time_range:
+            params["time_range"] = time_range
+
+        resp = httpx.get(f"{SEARXNG_URL}/search", params=params, timeout=15)
+        if resp.status_code != 200:
+            logger.debug("Direct SearXNG returned %s", resp.status_code)
+            return []
+
+        data = resp.json()
+        return data.get("results", [])[:num_results]
+    except Exception:
+        logger.debug("Direct SearXNG search failed", exc_info=True)
         return []
 
 
 def _searxng_news_search(ticker: str, num_results: int = 10) -> list[dict]:
-    """Search for recent news via SearXNG through external MCP."""
+    """Search for recent news via SearXNG through external MCP, with direct fallback."""
     results = _call_mcp_tool(
         "websearch_search_news",
         {"query": f"{ticker} stock", "num_results": num_results, "time_range": "week"},
     )
+
+    # Fallback to direct SearXNG if MCP returned nothing
+    if not results:
+        results = _searxng_direct_search(
+            f"{ticker} stock", categories="news", time_range="week", num_results=num_results,
+        )
+
     return [
         {
             "headline": r.get("title", ""),
-            "snippet": r.get("snippet", ""),
-            "source": r.get("source", ""),
+            "snippet": r.get("snippet", r.get("content", "")),
+            "source": r.get("source", r.get("engine", "")),
             "url": r.get("url", ""),
-            "published_date": r.get("published_date"),
+            "published_date": r.get("published_date", r.get("publishedDate")),
         }
         for r in results
     ]
 
 
 def _searxng_general_search(ticker: str, num_results: int = 10) -> list[dict]:
-    """Search for general web mentions via SearXNG."""
+    """Search for general web mentions via SearXNG, with direct fallback."""
     results = _call_mcp_tool(
         "websearch_search",
         {"query": f'"{ticker}" stock analysis OR investment', "num_results": num_results},
     )
+
+    # Fallback to direct SearXNG if MCP returned nothing
+    if not results:
+        results = _searxng_direct_search(
+            f'"{ticker}" stock analysis OR investment', num_results=num_results,
+        )
+
     return [
         {
             "headline": r.get("title", ""),
-            "snippet": r.get("snippet", ""),
+            "snippet": r.get("snippet", r.get("content", "")),
             "url": r.get("url", ""),
         }
         for r in results

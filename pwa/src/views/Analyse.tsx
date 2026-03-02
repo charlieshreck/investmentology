@@ -202,32 +202,58 @@ export function Analyse() {
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-sm)" }}>
                       Agent Consensus
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
-                      {displayProgress.agentStances.map((s) => (
-                        <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-xs) var(--space-sm)", background: "var(--color-surface-1)", borderRadius: "var(--radius-sm)" }}>
-                          <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>
-                            {s.name.charAt(0).toUpperCase() + s.name.slice(1)}
-                          </span>
-                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-                            <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--color-surface-2)", overflow: "hidden" }}>
-                              <div style={{
-                                width: `${Math.round((s.sentiment + 1) * 50)}%`,
-                                height: "100%",
-                                borderRadius: 2,
-                                background: s.sentiment > 0.1 ? "var(--color-success)" : s.sentiment < -0.1 ? "var(--color-error)" : "var(--color-warning)",
-                              }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+                      {displayProgress.agentStances.map((s) => {
+                        const sentColor = s.sentiment > 0.1 ? "var(--color-success)" : s.sentiment < -0.1 ? "var(--color-error)" : "var(--color-warning)";
+                        return (
+                          <div key={s.name} style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--color-surface-1)", borderRadius: "var(--radius-sm)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+                              <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>
+                                {s.name.charAt(0).toUpperCase() + s.name.slice(1)}
+                              </span>
+                              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                                <div style={{ flex: 1, height: 4, borderRadius: 2, background: "var(--color-surface-2)", overflow: "hidden" }}>
+                                  <div style={{
+                                    width: `${Math.round((s.sentiment + 1) * 50)}%`,
+                                    height: "100%",
+                                    borderRadius: 2,
+                                    background: sentColor,
+                                  }} />
+                                </div>
+                                <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: sentColor }}>
+                                  {s.sentiment > 0 ? "+" : ""}{s.sentiment.toFixed(2)}
+                                </span>
+                              </div>
+                              <Badge
+                                variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}
+                              >
+                                {(s.confidence * 100).toFixed(0)}%
+                              </Badge>
                             </div>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: s.sentiment > 0.1 ? "var(--color-success)" : s.sentiment < -0.1 ? "var(--color-error)" : "var(--color-warning)" }}>
-                              {s.sentiment > 0 ? "+" : ""}{s.sentiment.toFixed(2)}
-                            </span>
+                            {s.summary && s.summary !== "Failed to parse LLM response" && (
+                              <p style={{
+                                fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+                                lineHeight: 1.5, margin: "var(--space-xs) 0 0 0",
+                              }}>
+                                {s.summary.length > 200 ? s.summary.slice(0, 200) + "..." : s.summary}
+                              </p>
+                            )}
+                            {s.key_signals && s.key_signals.length > 0 && (
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: "var(--space-xs)" }}>
+                                {s.key_signals.map((sig, i) => (
+                                  <span key={i} style={{
+                                    fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                                    background: "var(--color-surface-2)", color: "var(--color-text-muted)",
+                                    fontWeight: 600,
+                                  }}>
+                                    {sig}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          <Badge
-                            variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}
-                          >
-                            {(s.confidence * 100).toFixed(0)}%
-                          </Badge>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

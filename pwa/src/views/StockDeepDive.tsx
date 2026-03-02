@@ -255,10 +255,33 @@ function VerdictCard({ verdict }: { verdict: VerdictData }) {
         <div style={{ padding: "0 var(--space-lg) var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Agent Consensus</div>
           {verdict.agentStances.map((s) => (
-            <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-sm) var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
-              <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>{s.name.charAt(0).toUpperCase() + s.name.slice(1)}</span>
-              {sentimentBar(s.sentiment)}
-              <Badge variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}>{(s.confidence * 100).toFixed(0)}%</Badge>
+            <div key={s.name} style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+                <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", minWidth: 64 }}>{s.name.charAt(0).toUpperCase() + s.name.slice(1)}</span>
+                {sentimentBar(s.sentiment)}
+                <Badge variant={s.confidence >= 0.7 ? "success" : s.confidence >= 0.4 ? "warning" : "error"}>{(s.confidence * 100).toFixed(0)}%</Badge>
+              </div>
+              {s.summary && s.summary !== "Failed to parse LLM response" && (
+                <p style={{
+                  fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+                  lineHeight: 1.5, margin: "var(--space-xs) 0 0 0",
+                }}>
+                  {s.summary.length > 200 ? s.summary.slice(0, 200) + "..." : s.summary}
+                </p>
+              )}
+              {s.key_signals && s.key_signals.length > 0 && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: "var(--space-xs)" }}>
+                  {s.key_signals.map((sig, i) => (
+                    <span key={i} style={{
+                      fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                      background: "var(--color-surface-2)", color: "var(--color-text-muted)",
+                      fontWeight: 600,
+                    }}>
+                      {sig}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

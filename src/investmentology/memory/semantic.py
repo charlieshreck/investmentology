@@ -18,6 +18,50 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Embedding model (lazy-loaded)
+_EMBED_MODEL = None
+_EMBED_AVAILABLE = True
+EMBED_MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
+EMBED_DIM = 768
+
+
+def _get_embed_model():
+    """Lazy-load the sentence-transformers embedding model."""
+    global _EMBED_MODEL, _EMBED_AVAILABLE
+    if not _EMBED_AVAILABLE:
+        return None
+    if _EMBED_MODEL is not None:
+        return _EMBED_MODEL
+    try:
+        from sentence_transformers import SentenceTransformer
+        _EMBED_MODEL = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
+        logger.info("Loaded embedding model %s", EMBED_MODEL_NAME)
+        return _EMBED_MODEL
+    except ImportError:
+        logger.warning(
+            "sentence-transformers not installed — Qdrant semantic memory disabled. "
+            "Install with: pip install sentence-transformers"
+        )
+        _EMBED_AVAILABLE = False
+        return None
+    except Exception:
+        logger.warning("Failed to load embedding model %s", EMBED_MODEL_NAME, exc_info=True)
+        _EMBED_AVAILABLE = False
+        return None
+
+
+def _compute_embedding(text: str) -> list[float] | None:
+    """Compute a 768-dim embedding vector for the given text.
+
+    Returns None if sentence-transformers is unavailable.
+    """
+    model = _get_embed_model()
+    if model is None:
+        return None
+    # nomic-embed-text expects a search_document: prefix for storage
+    embedding = model.encode(f"search_document: {text}", normalize_embeddings=True)
+    return embedding.tolist()
+
 # Qdrant collection for thesis memory
 COLLECTION_NAME = "investmentology_thesis"
 QDRANT_URL = "http://knowledge-mcp.agentic.kernow.io"
@@ -99,10 +143,15 @@ async def store_analysis_memory(
     Uses the knowledge MCP's Qdrant integration to store vectors.
     Returns True on success.
     """
-    _embedding_text = _build_embedding_text(
+    embedding_text = _build_embedding_text(
         ticker, verdict, reasoning, position_type,
         thesis_health, market_snapshot, agent_stances,
     )
+
+    vector = _compute_embedding(embedding_text)
+    if vector is None:
+        logger.warning("Skipping Qdrant store for %s — no embedding model available", ticker)
+        return False
 
     payload = {
         "ticker": ticker,
@@ -123,14 +172,13 @@ async def store_analysis_memory(
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            # Use knowledge MCP's vector_add_document endpoint
             resp = await client.post(
                 f"{QDRANT_DIRECT_URL}/collections/{COLLECTION_NAME}/points",
                 json={
                     "points": [{
                         "id": int(datetime.now().timestamp() * 1000),
                         "payload": payload,
-                        "vector": None,  # Will be computed by Qdrant if configured
+                        "vector": vector,
                     }]
                 },
             )
@@ -163,12 +211,19 @@ async def find_similar_situations(
         thesis_health, market_snapshot, None,
     )
 
+    # nomic-embed-text uses search_query: prefix for queries (vs search_document: for storage)
+    model = _get_embed_model()
+    if model is None:
+        logger.warning("Skipping Qdrant search for %s — no embedding model available", ticker)
+        return []
+    query_vector = model.encode(f"search_query: {text}", normalize_embeddings=True).tolist()
+
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{QDRANT_DIRECT_URL}/collections/{COLLECTION_NAME}/points/search",
                 json={
-                    "query": text,
+                    "vector": query_vector,
                     "limit": limit,
                     "with_payload": True,
                 },

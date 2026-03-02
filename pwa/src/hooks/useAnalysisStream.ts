@@ -2,26 +2,41 @@ import { useCallback, useRef } from "react";
 import { useStore } from "../stores/useStore";
 import type { PipelineStep } from "../types/models";
 
-/** Real pipeline stages emitted by the backend SSE endpoint. */
-const STAGE_LABELS = [
-  "Fundamentals",
-  "Competence",
-  "Agents",
-  "Debate",
-  "Adversarial",
-  "Verdict",
-  "Gating",
-  "Persisting",
-  "Complete",
-] as const;
+/**
+ * Base pipeline stages (non-agent). Agent stages are inserted dynamically
+ * between "Competence" and "Verdict" as agent_start/agent_complete events arrive.
+ */
+const PRE_AGENT_STAGES = ["Fundamentals", "Competence"] as const;
+const POST_AGENT_STAGES = ["Debate", "Adversarial", "Verdict", "Gating", "Persisting", "Complete"] as const;
 
-function makeSteps(activeIdx: number, error?: boolean): PipelineStep[] {
-  return STAGE_LABELS.map((label, i) => ({
+/** Check if a stage name is a known non-agent pipeline stage */
+function isKnownStage(stage: string): boolean {
+  return (
+    (PRE_AGENT_STAGES as readonly string[]).includes(stage) ||
+    (POST_AGENT_STAGES as readonly string[]).includes(stage)
+  );
+}
+
+function buildSteps(
+  agents: string[],
+  activeStage: string,
+  error?: boolean,
+): PipelineStep[] {
+  const allStages = [
+    ...PRE_AGENT_STAGES,
+    ...agents,
+    ...POST_AGENT_STAGES,
+  ];
+
+  const activeIdx = allStages.indexOf(activeStage);
+  const resolvedIdx = activeIdx >= 0 ? activeIdx : 0;
+
+  return allStages.map((label, i) => ({
     label,
     status:
-      i < activeIdx
+      i < resolvedIdx
         ? "done"
-        : i === activeIdx
+        : i === resolvedIdx
           ? error
             ? "error"
             : "active"
@@ -29,15 +44,21 @@ function makeSteps(activeIdx: number, error?: boolean): PipelineStep[] {
   }));
 }
 
-function stageIndex(stage: string): number {
-  const idx = STAGE_LABELS.indexOf(stage as (typeof STAGE_LABELS)[number]);
-  return idx >= 0 ? idx : 0;
+function buildDoneSteps(agents: string[]): PipelineStep[] {
+  const allStages = [
+    ...PRE_AGENT_STAGES,
+    ...agents,
+    ...POST_AGENT_STAGES,
+  ];
+  return allStages.map((label) => ({ label, status: "done" as const }));
 }
 
 export function useAnalysisStream() {
   const setAnalysisProgress = useStore((s) => s.setAnalysisProgress);
   const analysisProgress = useStore((s) => s.analysisProgress);
   const abortRef = useRef<AbortController | null>(null);
+  /** Track discovered agent names (order-preserving) */
+  const agentsRef = useRef<string[]>([]);
 
   const startAnalysis = useCallback(
     async (tickers: string[]) => {
@@ -49,10 +70,13 @@ export function useAnalysisStream() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Reset agent tracking
+      agentsRef.current = [];
+
       // Show initial progress
       setAnalysisProgress({
         ticker: primaryTicker,
-        steps: makeSteps(0),
+        steps: buildSteps([], PRE_AGENT_STAGES[0]),
         currentStep: 0,
         tickerTotal: tickers.length > 1 ? tickers.length : undefined,
         tickerIndex: tickers.length > 1 ? 1 : undefined,
@@ -92,19 +116,69 @@ export function useAnalysisStream() {
               const event = JSON.parse(json);
 
               if (event.type === "progress") {
-                const idx = stageIndex(event.stage);
+                const stage: string = event.stage ?? "";
+
+                // If stage is not a known pipeline stage, treat it as an agent name
+                if (stage && !isKnownStage(stage) && !agentsRef.current.includes(stage)) {
+                  agentsRef.current = [...agentsRef.current, stage];
+                }
+
+                const agents = agentsRef.current;
+                const steps = buildSteps(agents, stage);
+                const idx = steps.findIndex((s) => s.status === "active");
+
                 setAnalysisProgress((prev) =>
                   prev
                     ? {
                         ...prev,
                         ticker: event.ticker ?? prev.ticker,
-                        steps: makeSteps(idx),
-                        currentStep: idx,
+                        steps,
+                        currentStep: idx >= 0 ? idx : 0,
                         tickerIndex: event.tickerIndex,
                         tickerTotal: event.tickerTotal,
                       }
                     : null,
                 );
+              } else if (event.type === "agent_start") {
+                // Dynamic agent discovery from agent_start events
+                const agentName: string = event.agent ?? "";
+                if (agentName && !agentsRef.current.includes(agentName)) {
+                  agentsRef.current = [...agentsRef.current, agentName];
+                }
+
+                const agents = agentsRef.current;
+                const steps = buildSteps(agents, agentName);
+                const idx = steps.findIndex((s) => s.status === "active");
+
+                setAnalysisProgress((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        steps,
+                        currentStep: idx >= 0 ? idx : prev.currentStep,
+                      }
+                    : null,
+                );
+              } else if (event.type === "agent_complete") {
+                // Mark agent as done by advancing past it
+                const agentName: string = event.agent ?? "";
+                const agents = agentsRef.current;
+                const allStages = [...PRE_AGENT_STAGES, ...agents, ...POST_AGENT_STAGES];
+                const agentIdx = allStages.indexOf(agentName);
+                // Build steps with this agent done (active = next stage)
+                if (agentIdx >= 0 && agentIdx + 1 < allStages.length) {
+                  const nextStage = allStages[agentIdx + 1];
+                  const steps = buildSteps(agents, nextStage);
+                  setAnalysisProgress((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          steps,
+                          currentStep: agentIdx + 1,
+                        }
+                      : null,
+                  );
+                }
               } else if (event.type === "result") {
                 const result = event.results?.[0];
                 const verdict = result?.verdict;
@@ -115,19 +189,20 @@ export function useAnalysisStream() {
                     prev
                       ? {
                           ...prev,
-                          steps: makeSteps(0, true),
+                          steps: buildSteps(agentsRef.current, PRE_AGENT_STAGES[0], true),
                           currentStep: 0,
                           errorMessage: result.data_quality_error,
                         }
                       : null,
                   );
                 } else {
+                  const agents = agentsRef.current;
                   setAnalysisProgress((prev) =>
                     prev
                       ? {
                           ...prev,
-                          steps: makeSteps(STAGE_LABELS.length),
-                          currentStep: STAGE_LABELS.length - 1,
+                          steps: buildDoneSteps(agents),
+                          currentStep: PRE_AGENT_STAGES.length + agents.length + POST_AGENT_STAGES.length - 1,
                           result: verdict
                             ? {
                                 id: event.analysis_id,
@@ -161,7 +236,11 @@ export function useAnalysisStream() {
                   prev
                     ? {
                         ...prev,
-                        steps: makeSteps(prev.currentStep, true),
+                        steps: buildSteps(
+                          agentsRef.current,
+                          prev.steps[prev.currentStep]?.label ?? PRE_AGENT_STAGES[0],
+                          true,
+                        ),
                         errorMessage: event.message,
                       }
                     : null,
@@ -178,7 +257,11 @@ export function useAnalysisStream() {
           prev
             ? {
                 ...prev,
-                steps: makeSteps(prev.currentStep, true),
+                steps: buildSteps(
+                  agentsRef.current,
+                  prev.steps[prev.currentStep]?.label ?? PRE_AGENT_STAGES[0],
+                  true,
+                ),
                 errorMessage: (err as Error).message,
               }
             : null,
@@ -191,6 +274,7 @@ export function useAnalysisStream() {
   const cancelAnalysis = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    agentsRef.current = [];
     setAnalysisProgress(null);
   }, [setAnalysisProgress]);
 

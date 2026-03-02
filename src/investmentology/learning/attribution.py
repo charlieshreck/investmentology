@@ -11,12 +11,15 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Default agent weights (from orchestrator)
+# Default agent weights — must match AGENT_WEIGHTS in verdict.py
 DEFAULT_WEIGHTS = {
-    "warren": 0.30,
-    "soros": 0.25,
-    "simons": 0.20,
-    "auditor": 0.25,
+    "warren": 0.20,
+    "soros": 0.15,
+    "simons": 0.10,
+    "auditor": 0.20,
+    "marks": 0.15,
+    "forensic": 0.10,
+    "bogle": 0.10,
 }
 
 
