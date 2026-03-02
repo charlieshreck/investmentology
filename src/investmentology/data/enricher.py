@@ -162,7 +162,12 @@ class DataEnricher:
         if not self._edgar or request.institutional_context is not None:
             return
         try:
-            request.institutional_context = self._edgar.get_institutional_holders(request.ticker)
+            result = self._edgar.get_institutional_holders(request.ticker)
+            # edgar returns {"holders": [...], ...} — agents expect a flat list
+            if isinstance(result, dict):
+                request.institutional_context = result.get("holders", [])
+            else:
+                request.institutional_context = result or []
         except Exception:
             logger.warning("Institutional holders enrichment failed for %s", request.ticker)
             request.institutional_context = []
