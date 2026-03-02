@@ -7,7 +7,7 @@ import type { PipelineStep } from "../types/models";
  * between "Competence" and "Verdict" as agent_start/agent_complete events arrive.
  */
 const PRE_AGENT_STAGES = ["Fundamentals", "Competence"] as const;
-const POST_AGENT_STAGES = ["Debate", "Adversarial", "Verdict", "Gating", "Persisting", "Complete"] as const;
+const POST_AGENT_STAGES = ["Debate", "Adversarial", "Verdict", "Advisory Board", "CIO Synthesis", "Gating", "Persisting", "Complete"] as const;
 
 /** Check if a stage name is a known non-agent pipeline stage */
 function isKnownStage(stage: string): boolean {
@@ -227,6 +227,9 @@ export function useAnalysisStream() {
                           agentStances: verdict?.agent_stances ?? undefined,
                           riskFlags: verdict?.risk_flags ?? undefined,
                           consensusScore: verdict?.consensus_score ?? null,
+                          advisoryOpinions: verdict?.advisory_opinions ?? undefined,
+                          boardNarrative: verdict?.board_narrative ?? undefined,
+                          boardAdjustedVerdict: verdict?.board_adjusted_verdict ?? undefined,
                         }
                       : null,
                   );

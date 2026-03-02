@@ -499,8 +499,33 @@ class Registry:
         consensus_score: float, reasoning: str,
         agent_stances: list[dict], risk_flags: list[str],
         auditor_override: bool, munger_override: bool,
+        advisory_opinions: list[dict] | None = None,
+        board_narrative: dict | None = None,
+        board_adjusted_verdict: str | None = None,
     ) -> int:
         """Insert a computed verdict. Returns verdict id."""
+        # Try with advisory columns first; fall back if columns don't exist yet
+        if advisory_opinions is not None or board_narrative is not None:
+            try:
+                rows = self._db.execute(
+                    "INSERT INTO invest.verdicts "
+                    "(ticker, verdict, confidence, consensus_score, reasoning, "
+                    "agent_stances, risk_flags, auditor_override, munger_override, "
+                    "advisory_opinions, board_narrative, board_adjusted_verdict) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                    (
+                        ticker, verdict, confidence, consensus_score, reasoning,
+                        json.dumps(agent_stances), json.dumps(risk_flags),
+                        auditor_override, munger_override,
+                        json.dumps(advisory_opinions) if advisory_opinions else None,
+                        json.dumps(board_narrative) if board_narrative else None,
+                        board_adjusted_verdict,
+                    ),
+                )
+                return rows[0]["id"]
+            except Exception:
+                pass  # Fall through to base insert if columns don't exist
+
         rows = self._db.execute(
             "INSERT INTO invest.verdicts "
             "(ticker, verdict, confidence, consensus_score, reasoning, "
@@ -519,7 +544,9 @@ class Registry:
         rows = self._db.execute(
             "SELECT id, ticker, verdict, confidence, consensus_score, "
             "reasoning, agent_stances, risk_flags, "
-            "auditor_override, munger_override, created_at "
+            "auditor_override, munger_override, "
+            "advisory_opinions, board_narrative, board_adjusted_verdict, "
+            "created_at "
             "FROM invest.verdicts WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT 1",
             (ticker,),
@@ -531,7 +558,9 @@ class Registry:
         return self._db.execute(
             "SELECT id, ticker, verdict, confidence, consensus_score, "
             "reasoning, agent_stances, risk_flags, "
-            "auditor_override, munger_override, created_at "
+            "auditor_override, munger_override, "
+            "advisory_opinions, board_narrative, board_adjusted_verdict, "
+            "created_at "
             "FROM invest.verdicts WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT %s",
             (ticker, limit),

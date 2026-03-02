@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from investmentology.adversarial.munger import AdversarialResult, MungerOrchestrator, MungerVerdict
+from investmentology.advisory.board import AdvisoryBoard
+from investmentology.advisory.cio import CIOSynthesizer
+from investmentology.advisory.models import BoardResult
 from investmentology.agents.auditor import AuditorAgent
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse
 from investmentology.agents.debate import DebateOrchestrator
@@ -45,7 +48,7 @@ from investmentology.verdict import VerdictResult, VotingMethod, synthesize as s
 
 # Type for optional progress callback: (ticker, stage, step_index, total_steps) -> None
 ProgressCallback = Callable[[str, str, int, int], Awaitable[None]]
-TOTAL_PIPELINE_STEPS = 9
+TOTAL_PIPELINE_STEPS = 11
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,8 @@ class CandidateAnalysis:
     sizing: SizingResult | None = None
     # Verdict
     verdict: VerdictResult | None = None
+    # L5.5: Advisory Board
+    board_result: BoardResult | None = None
     # Overall
     final_action: str = "NO_ACTION"
     final_confidence: Decimal = Decimal("0")
@@ -110,6 +115,9 @@ class AnalysisOrchestrator:
         self._yfinance = YFinanceClient(cache_ttl_hours=4)
         self._debate_enabled = enable_debate
         self._prediction_mgr = PredictionManager(registry)
+        # L5.5: Advisory Board + L6: CIO
+        self._advisory_board = AdvisoryBoard(gateway)
+        self._cio = CIOSynthesizer(gateway)
         # Dynamic agent weights from attribution (P0.4)
         self._dynamic_weights = None
         self._analyses_since_attribution = 0
@@ -569,8 +577,45 @@ class AnalysisOrchestrator:
                 f"Outside Circle of Competence ({familiarity} familiarity, {conf:.0f}% confidence)"
             )
 
+        # --- L5.5: Advisory Board ---
+        await _emit("Advisory Board", 7)
+        try:
+            board_result = await self._advisory_board.convene(
+                verdict=analysis.verdict,
+                stances=analysis.verdict.agent_stances,
+                adversarial=analysis.adversarial,
+                request=request,
+                fundamentals=fundamentals,
+            )
+            analysis.board_result = board_result
+            analysis.verdict.advisory_opinions = board_result.opinions
+
+            # Apply board vote adjustment if any
+            if board_result.adjusted_verdict:
+                from investmentology.verdict import Verdict
+                original = analysis.verdict.verdict.value
+                analysis.verdict.board_adjusted_verdict = board_result.adjusted_verdict
+                analysis.verdict.verdict = Verdict(board_result.adjusted_verdict)
+                logger.info(
+                    "Board adjusted verdict for %s: %s → %s",
+                    ticker, original, board_result.adjusted_verdict,
+                )
+
+            # --- L6: CIO Synthesis ---
+            await _emit("CIO Synthesis", 8)
+            narrative = await self._cio.synthesize(
+                verdict=analysis.verdict,
+                board_result=board_result,
+                stances=analysis.verdict.agent_stances,
+                adversarial=analysis.adversarial,
+            )
+            analysis.verdict.board_narrative = narrative
+            board_result.narrative = narrative
+        except Exception:
+            logger.exception("Advisory board failed for %s, proceeding without", ticker)
+
         # --- Phase 2: Thesis-aware verdict gating ---
-        await _emit("Gating", 7)
+        await _emit("Gating", 9)
         gating_result = None
         if held_position and thesis_context.get("position_type"):
             try:
@@ -656,7 +701,7 @@ class AnalysisOrchestrator:
                 logger.exception("L5 sizing failed for %s", ticker)
 
         # Persist verdict to DB
-        await _emit("Persisting", 8)
+        await _emit("Persisting", 10)
         self._save_verdict(ticker, analysis.verdict)
 
         # Build consensus breakdown for logging
@@ -716,7 +761,7 @@ class AnalysisOrchestrator:
             self._analyses_since_attribution = 0
             self._refresh_attribution_weights()
 
-        await _emit("Complete", 9)
+        await _emit("Complete", 11)
         return analysis
 
 
@@ -837,6 +882,38 @@ class AnalysisOrchestrator:
     def _save_verdict(self, ticker: str, verdict: VerdictResult) -> bool:
         """Persist a verdict to the database. Returns True on success."""
         try:
+            # Serialize advisory opinions if present
+            advisory_data = None
+            if verdict.advisory_opinions:
+                advisory_data = [
+                    {
+                        "advisor_name": op.advisor_name,
+                        "display_name": op.display_name,
+                        "vote": op.vote.value if hasattr(op.vote, "value") else str(op.vote),
+                        "confidence": float(op.confidence),
+                        "assessment": op.assessment,
+                        "key_concern": op.key_concern,
+                        "key_endorsement": op.key_endorsement,
+                        "reasoning": op.reasoning,
+                    }
+                    for op in verdict.advisory_opinions
+                ]
+
+            # Serialize board narrative if present
+            narrative_data = None
+            if verdict.board_narrative:
+                bn = verdict.board_narrative
+                narrative_data = {
+                    "headline": bn.headline,
+                    "narrative": bn.narrative,
+                    "risk_summary": bn.risk_summary,
+                    "pre_mortem": bn.pre_mortem,
+                    "conflict_resolution": bn.conflict_resolution,
+                    "verdict_adjustment": bn.verdict_adjustment,
+                    "adjusted_verdict": bn.adjusted_verdict,
+                    "advisor_consensus": bn.advisor_consensus,
+                }
+
             self._registry.insert_verdict(
                 ticker=ticker,
                 verdict=verdict.verdict.value,
@@ -856,6 +933,9 @@ class AnalysisOrchestrator:
                 risk_flags=verdict.risk_flags,
                 auditor_override=verdict.auditor_override,
                 munger_override=verdict.munger_override,
+                advisory_opinions=advisory_data,
+                board_narrative=narrative_data,
+                board_adjusted_verdict=verdict.board_adjusted_verdict,
             )
             return True
         except Exception:

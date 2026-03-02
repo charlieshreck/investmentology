@@ -154,6 +154,28 @@ def _format_pipeline_result(analysis_id: str, result) -> dict:
                         }
                         for s in r.verdict.agent_stances
                     ],
+                    "board_adjusted_verdict": r.verdict.board_adjusted_verdict,
+                    "advisory_opinions": [
+                        {
+                            "advisor_name": op.advisor_name,
+                            "display_name": op.display_name,
+                            "vote": op.vote.value if hasattr(op.vote, "value") else str(op.vote),
+                            "confidence": float(op.confidence),
+                            "assessment": op.assessment,
+                            "key_concern": op.key_concern,
+                            "key_endorsement": op.key_endorsement,
+                            "reasoning": op.reasoning,
+                        }
+                        for op in r.verdict.advisory_opinions
+                    ] if r.verdict.advisory_opinions else [],
+                    "board_narrative": {
+                        "headline": r.verdict.board_narrative.headline,
+                        "narrative": r.verdict.board_narrative.narrative,
+                        "risk_summary": r.verdict.board_narrative.risk_summary,
+                        "pre_mortem": r.verdict.board_narrative.pre_mortem,
+                        "conflict_resolution": r.verdict.board_narrative.conflict_resolution,
+                        "advisor_consensus": r.verdict.board_narrative.advisor_consensus,
+                    } if r.verdict.board_narrative else None,
                 } if r.verdict else None,
             }
             for r in result.results

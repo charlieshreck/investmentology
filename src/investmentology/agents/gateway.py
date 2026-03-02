@@ -527,5 +527,26 @@ class LLMGateway:
                     timeout_seconds=300,
                 )
             )
+            # Advisory Board remote CLI providers (paired prompts)
+            gw.register_remote_cli_provider(
+                RemoteCLIProviderConfig(
+                    name="remote-board-gemini",
+                    remote_url=config.hb_proxy_url,
+                    agent_name="board-gemini",
+                    auth_token=config.hb_proxy_token,
+                    default_model="gemini-2.5-pro",
+                    timeout_seconds=180,
+                )
+            )
+            gw.register_remote_cli_provider(
+                RemoteCLIProviderConfig(
+                    name="remote-board-claude",
+                    remote_url=config.hb_proxy_url,
+                    agent_name="board-claude",
+                    auth_token=config.hb_proxy_token,
+                    default_model="claude-opus-4-6",
+                    timeout_seconds=180,
+                )
+            )
 
         return gw

@@ -218,6 +218,26 @@ export interface AnalysisAgentStance {
   summary: string;
 }
 
+export interface AdvisoryOpinion {
+  advisor_name: string;
+  display_name: string;
+  vote: string;
+  confidence: number;
+  assessment: string;
+  key_concern: string | null;
+  key_endorsement: string | null;
+  reasoning: string;
+}
+
+export interface BoardNarrative {
+  headline: string;
+  narrative: string;
+  risk_summary: string;
+  pre_mortem: string;
+  conflict_resolution: string;
+  advisor_consensus: Record<string, unknown>;
+}
+
 export interface AnalysisProgress {
   ticker: string;
   steps: PipelineStep[];
@@ -229,6 +249,9 @@ export interface AnalysisProgress {
   agentStances?: AnalysisAgentStance[];
   riskFlags?: string[];
   consensusScore?: number | null;
+  advisoryOpinions?: AdvisoryOpinion[];
+  boardNarrative?: BoardNarrative;
+  boardAdjustedVerdict?: string;
 }
 
 export interface SystemHealth {

@@ -123,6 +123,10 @@ class VerdictResult:
     munger_override: bool = False  # True if adversarial changed outcome
     consensus_breakdown: ConsensusBreakdown | None = None
     regime_label: str | None = None  # Pendulum regime at analysis time
+    # L5.5: Advisory Board results
+    advisory_opinions: list = field(default_factory=list)  # list[AdvisorOpinion]
+    board_narrative: object | None = None  # BoardNarrative
+    board_adjusted_verdict: str | None = None  # Set if board vote changes verdict
 
 
 def _compute_sentiment(signal_set: AgentSignalSet) -> float:

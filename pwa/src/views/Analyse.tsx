@@ -258,6 +258,62 @@ export function Analyse() {
                   </div>
                 )}
 
+                {/* Board Narrative */}
+                {displayProgress.boardNarrative && (
+                  <div style={{ marginTop: "var(--space-lg)", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-sm)" }}>
+                      Advisory Board
+                    </div>
+                    {displayProgress.boardAdjustedVerdict && (
+                      <div style={{ marginBottom: "var(--space-sm)", display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                        <Badge variant="accent">Board Adjusted</Badge>
+                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "var(--text-sm)" }}>
+                          {displayProgress.boardAdjustedVerdict}
+                        </span>
+                      </div>
+                    )}
+                    <p style={{ fontSize: "var(--text-sm)", fontWeight: 600, color: "var(--color-text)", lineHeight: 1.4, margin: "0 0 var(--space-sm) 0" }}>
+                      {displayProgress.boardNarrative.headline}
+                    </p>
+                    <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5, margin: "0 0 var(--space-sm) 0" }}>
+                      {displayProgress.boardNarrative.risk_summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Advisory Opinions */}
+                {displayProgress.advisoryOpinions && displayProgress.advisoryOpinions.length > 0 && (
+                  <div style={{ marginTop: "var(--space-md)" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-xs)" }}>
+                      {displayProgress.advisoryOpinions.map((op) => {
+                        const voteColor =
+                          op.vote === "APPROVE" ? "var(--color-success)" :
+                          op.vote === "VETO" ? "var(--color-error)" :
+                          op.vote === "ADJUST_UP" ? "var(--color-accent-bright)" :
+                          op.vote === "ADJUST_DOWN" ? "var(--color-warning)" :
+                          "var(--color-text-muted)";
+                        return (
+                          <div key={op.advisor_name} style={{
+                            padding: "var(--space-xs) var(--space-sm)",
+                            background: "var(--color-surface-1)",
+                            borderRadius: "var(--radius-sm)",
+                            borderLeft: `3px solid ${voteColor}`,
+                            fontSize: "var(--text-xs)",
+                          }}>
+                            <span style={{ fontWeight: 600 }}>{op.display_name}</span>
+                            <span style={{ color: voteColor, marginLeft: 6, fontWeight: 700 }}>
+                              {op.vote.replace("_", " ")}
+                            </span>
+                            <span style={{ color: "var(--color-text-muted)", marginLeft: 4 }}>
+                              {(op.confidence * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* View Deep Dive button */}
                 <button
                   onClick={() => setOverlayTicker(displayProgress.result!.ticker)}
@@ -307,7 +363,9 @@ export function Analyse() {
                 <Badge variant="neutral">L2 Competence</Badge>
                 <Badge variant="neutral">L3 Agents</Badge>
                 <Badge variant="neutral">L4 Adversarial</Badge>
-                <Badge variant="neutral">L5 Timing</Badge>
+                <Badge variant="neutral">L5 Verdict</Badge>
+                <Badge variant="neutral">L5.5 Advisory Board</Badge>
+                <Badge variant="neutral">L6 CIO</Badge>
               </div>
             </div>
           </BentoCard>
