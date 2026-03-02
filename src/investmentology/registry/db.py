@@ -69,6 +69,9 @@ class Database:
                     return [dict(row) for row in rows]
                 conn.commit()
                 return []
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self._put_connection(conn)
 
@@ -83,6 +86,9 @@ class Database:
                     count += cur.rowcount if cur.rowcount >= 0 else 0
                 conn.commit()
                 return count
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self._put_connection(conn)
 
