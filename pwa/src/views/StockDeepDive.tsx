@@ -835,7 +835,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-md)" }}>
             <Metric label="Shares" value={data.position.shares.toFixed(2)} mono />
             <Metric label="Entry" value={`$${data.position.entryPrice.toFixed(2)}`} mono />
-            <Metric label="Current" value={`$${data.position.currentPrice.toFixed(2)}`} mono />
+            <Metric label="Current" value={`$${(data.position.currentPrice ?? data.position.entryPrice).toFixed(2)}`} mono />
             <Metric label="P&L" value={
               <span style={{ color: data.position.pnl >= 0 ? "var(--color-success)" : "var(--color-error)" }}>
                 {data.position.pnl >= 0 ? "+" : ""}${data.position.pnl.toFixed(2)} ({data.position.pnlPct >= 0 ? "+" : ""}{data.position.pnlPct.toFixed(1)}%)
