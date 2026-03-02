@@ -23,8 +23,12 @@ from investmentology.advisory.cio import CIOSynthesizer
 from investmentology.advisory.models import BoardResult
 from investmentology.agents.auditor import AuditorAgent
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse
+from investmentology.agents.dalio import DalioAgent
 from investmentology.agents.debate import DebateOrchestrator
+from investmentology.agents.druckenmiller import DruckenmillerAgent
 from investmentology.agents.gateway import LLMGateway
+from investmentology.agents.klarman import KlarmanAgent
+from investmentology.agents.lynch import LynchAgent
 from investmentology.agents.simons import SimonsAgent
 from investmentology.agents.soros import SorosAgent
 from investmentology.agents.warren import WarrenAgent
@@ -136,7 +140,8 @@ class AnalysisOrchestrator:
 
         # L3 agents — skip any that can't be configured
         self._agents = []
-        for agent_cls in [WarrenAgent, SorosAgent, SimonsAgent, AuditorAgent]:
+        for agent_cls in [WarrenAgent, SorosAgent, SimonsAgent, AuditorAgent,
+                          DalioAgent, LynchAgent, DruckenmillerAgent, KlarmanAgent]:
             try:
                 agent = agent_cls(gateway)
                 self._agents.append(agent)
