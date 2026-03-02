@@ -707,7 +707,14 @@ class AnalysisOrchestrator:
 
         # Persist verdict to DB
         await _emit("Persisting", 10)
-        self._save_verdict(ticker, analysis.verdict)
+        verdict_id = self._save_verdict(ticker, analysis.verdict)
+
+        # Re-entry qualification gate: create or clear block conditions
+        if verdict_id is not None:
+            self._update_reentry_blocks(
+                ticker, verdict_id, analysis.verdict.verdict.value,
+                analysis.agent_signal_sets, fundamentals,
+            )
 
         # Build consensus breakdown for logging
         breakdown_data = {}
@@ -884,8 +891,8 @@ class AnalysisOrchestrator:
         except Exception:
             logger.debug("Attribution-based weights not available, using defaults")
 
-    def _save_verdict(self, ticker: str, verdict: VerdictResult) -> bool:
-        """Persist a verdict to the database. Returns True on success."""
+    def _save_verdict(self, ticker: str, verdict: VerdictResult) -> int | None:
+        """Persist a verdict to the database. Returns verdict_id on success, None on failure."""
         try:
             # Serialize advisory opinions if present
             advisory_data = None
@@ -919,7 +926,7 @@ class AnalysisOrchestrator:
                     "advisor_consensus": bn.advisor_consensus,
                 }
 
-            self._registry.insert_verdict(
+            verdict_id = self._registry.insert_verdict(
                 ticker=ticker,
                 verdict=verdict.verdict.value,
                 confidence=verdict.confidence,
@@ -942,10 +949,54 @@ class AnalysisOrchestrator:
                 board_narrative=narrative_data,
                 board_adjusted_verdict=verdict.board_adjusted_verdict,
             )
-            return True
+            return verdict_id
         except Exception:
             logger.exception("Failed to save verdict for %s", ticker)
-            return False
+            return None
+
+    _NEGATIVE_VERDICTS = {"AVOID", "DISCARD"}
+    _POSITIVE_VERDICTS = {"STRONG_BUY", "BUY", "ACCUMULATE", "HOLD"}
+
+    def _update_reentry_blocks(
+        self, ticker: str, verdict_id: int, verdict_value: str,
+        agent_signal_sets: list, fundamentals,
+    ) -> None:
+        """Create or clear re-entry block conditions based on verdict."""
+        try:
+            from investmentology.registry.reentry import clear_blocks_for_ticker, extract_and_save_blocks
+
+            if verdict_value in self._NEGATIVE_VERDICTS:
+                # Extract signal tags from each agent's signal set
+                agent_tags: list[list[str]] = []
+                for ss in agent_signal_sets:
+                    tags = [
+                        s.tag.value if hasattr(s.tag, "value") else str(s.tag)
+                        for s in ss.signals.signals
+                    ]
+                    agent_tags.append(tags)
+
+                # Convert fundamentals to dict for baseline snapshotting
+                fund_dict = None
+                if fundamentals is not None:
+                    fund_dict = {
+                        k: getattr(fundamentals, k, None)
+                        for k in (
+                            "price", "operating_income", "revenue", "net_income",
+                            "total_debt", "total_assets", "current_assets",
+                            "current_liabilities", "net_ppe", "roic",
+                        )
+                    }
+
+                extract_and_save_blocks(
+                    self._registry, verdict_id, ticker, agent_tags, fund_dict,
+                )
+
+            elif verdict_value in self._POSITIVE_VERDICTS:
+                # Positive verdict clears any existing blocks
+                clear_blocks_for_ticker(self._registry._db, ticker, reason="positive_verdict")
+
+        except Exception:
+            logger.debug("Reentry block update failed for %s (table may not exist yet)", ticker)
 
     # Verdict → legacy action mapping for watchlist state transitions
     _VERDICT_ACTION_MAP: dict[str, str] = {

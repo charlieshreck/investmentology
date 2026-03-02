@@ -698,17 +698,128 @@ class Registry:
             ) ph ON TRUE
         """)
 
+    def get_blocked_tickers(self) -> set[str]:
+        """Return tickers with active (un-cleared) re-entry blocks.
+
+        These tickers should be excluded from re-analysis until their
+        block conditions clear (price moves, time elapses, or manual override).
+        """
+        try:
+            rows = self._db.execute(
+                "SELECT DISTINCT ticker FROM invest.reentry_blocks "
+                "WHERE is_cleared = FALSE"
+            )
+            return {r["ticker"] for r in rows}
+        except Exception:
+            # Table may not exist yet (migration not run)
+            return set()
+
     def get_watchlist_tickers_for_reanalysis(
         self, states: list[str], min_hours: int = 20,
+        min_move_pct: float = 0.0, force_after_hours: int = 0,
     ) -> list[str]:
-        """Get watchlist tickers that haven't been analyzed recently.
+        """Get watchlist tickers that need re-analysis.
 
         Returns tickers in the given states whose latest verdict is older
-        than min_hours, or who have never been analyzed.
+        than min_hours, or who have never been analyzed.  Tickers with
+        active re-entry blocks are excluded (unless held).
+
+        If min_move_pct > 0, also filters out tickers whose price hasn't
+        moved by at least that percentage since last analysis — unless
+        force_after_hours is set and the ticker hasn't been analyzed in
+        that many hours (ensures periodic full re-analysis).
+
+        Held positions (CONVICTION_BUY, POSITION_HOLD) always pass the
+        materiality check and re-entry block check since we need to
+        monitor our holdings.
         """
+        held_states = {"CONVICTION_BUY", "POSITION_HOLD"}
+        blocked = self.get_blocked_tickers()
+
+        if min_move_pct > 0:
+            # Materiality-aware query: skip non-movers unless forced
+            rows = self._db.execute(
+                """
+                SELECT w.ticker, w.state,
+                       latest_v.created_at AS last_verdict_at,
+                       latest_v.price_at_verdict,
+                       current_p.price AS current_price
+                FROM invest.watchlist w
+                LEFT JOIN LATERAL (
+                    SELECT v.created_at,
+                           fc.price AS price_at_verdict
+                    FROM invest.verdicts v
+                    LEFT JOIN LATERAL (
+                        SELECT price FROM invest.fundamentals_cache fc2
+                        WHERE fc2.ticker = v.ticker
+                          AND fc2.price > 0
+                          AND fc2.fetched_at <= v.created_at + interval '1 hour'
+                        ORDER BY fc2.fetched_at DESC LIMIT 1
+                    ) fc ON TRUE
+                    WHERE v.ticker = w.ticker
+                    ORDER BY v.created_at DESC LIMIT 1
+                ) latest_v ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT price FROM invest.fundamentals_cache fc3
+                    WHERE fc3.ticker = w.ticker AND fc3.price > 0
+                    ORDER BY fc3.fetched_at DESC LIMIT 1
+                ) current_p ON TRUE
+                WHERE w.state = ANY(%s)
+                  AND (latest_v.created_at IS NULL
+                       OR latest_v.created_at < NOW() - make_interval(hours => %s))
+                ORDER BY latest_v.created_at ASC NULLS FIRST
+                """,
+                (states, min_hours),
+            )
+
+            result = []
+            for r in rows:
+                ticker = r["ticker"]
+                state = r.get("state", "")
+
+                # Never analyzed → always include
+                if r.get("last_verdict_at") is None:
+                    result.append(ticker)
+                    continue
+
+                # Held positions → always include (bypass blocks + materiality)
+                if state in held_states:
+                    result.append(ticker)
+                    continue
+
+                # Re-entry block check: skip if agents flagged specific issues
+                if ticker in blocked:
+                    continue
+
+                # Force re-analysis after N hours regardless of movement
+                if force_after_hours > 0:
+                    from datetime import datetime, timezone
+                    last_at = r["last_verdict_at"]
+                    if hasattr(last_at, "tzinfo") and last_at.tzinfo is None:
+                        last_at = last_at.replace(tzinfo=timezone.utc)
+                    hours_since = (datetime.now(timezone.utc) - last_at).total_seconds() / 3600
+                    if hours_since >= force_after_hours:
+                        result.append(ticker)
+                        continue
+
+                # Materiality check: has price moved enough?
+                old_price = r.get("price_at_verdict")
+                new_price = r.get("current_price")
+                if old_price and new_price and float(old_price) > 0:
+                    move_pct = abs(float(new_price) - float(old_price)) / float(old_price) * 100
+                    if move_pct >= min_move_pct:
+                        result.append(ticker)
+                    # else: skip — hasn't moved enough
+                else:
+                    # Can't determine movement → include to be safe
+                    result.append(ticker)
+
+            return result
+
+        # Simple time-based query (original behavior)
         rows = self._db.execute(
             """
-            SELECT w.ticker
+            SELECT w.ticker, w.state
             FROM invest.watchlist w
             LEFT JOIN LATERAL (
                 SELECT created_at
@@ -723,7 +834,11 @@ class Registry:
             """,
             (states, min_hours),
         )
-        return [r["ticker"] for r in rows]
+        # Filter out blocked tickers (held positions bypass block check)
+        return [
+            r["ticker"] for r in rows
+            if r["ticker"] not in blocked or r.get("state") in held_states
+        ]
 
     def get_watch_verdicts_enriched(self) -> list[dict]:
         """Get WATCHLIST verdicts enriched with entry price, current price, and price history.

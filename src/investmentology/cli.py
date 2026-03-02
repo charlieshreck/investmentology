@@ -272,6 +272,16 @@ def cmd_cron(args: argparse.Namespace) -> None:
             )
             tickers = [r["ticker"] for r in rows]
 
+            # Filter out tickers with active re-entry blocks
+            blocked = registry.get_blocked_tickers()
+            if blocked:
+                before = len(tickers)
+                tickers = [t for t in tickers if t not in blocked]
+                skipped = before - len(tickers)
+                if skipped:
+                    logging.info("Skipped %d blocked tickers in post-screen", skipped)
+                    print(f"Skipped {skipped} blocked tickers (re-entry conditions not met)")
+
             if tickers:
                 async def _run():
                     await gateway.start()
@@ -295,7 +305,29 @@ def cmd_cron(args: argparse.Namespace) -> None:
 
             states = ["CANDIDATE", "ASSESSED", "CONVICTION_BUY", "POSITION_HOLD",
                        "WATCHLIST_EARLY", "WATCHLIST_CATALYST"]
-            tickers = registry.get_watchlist_tickers_for_reanalysis(states, min_hours=args.min_hours)
+
+            # Run block-clearing check before building the queue
+            try:
+                from investmentology.registry.reentry import check_and_clear_blocks
+                # Build fundamentals lookup for block clearing
+                fund_rows = registry._db.execute(
+                    "SELECT DISTINCT ON (ticker) ticker, price, operating_income, "
+                    "revenue, net_income, total_debt, total_assets, current_assets, "
+                    "current_liabilities, net_ppe "
+                    "FROM invest.fundamentals_cache "
+                    "ORDER BY ticker, fetched_at DESC"
+                )
+                fund_by_ticker = {r["ticker"]: r for r in fund_rows}
+                cleared = check_and_clear_blocks(registry._db, fund_by_ticker)
+                if cleared:
+                    print(f"Cleared {cleared} re-entry blocks (conditions satisfied)")
+            except Exception:
+                logging.debug("Block clearing check skipped (table may not exist)")
+
+            tickers = registry.get_watchlist_tickers_for_reanalysis(
+                states, min_hours=args.min_hours,
+                min_move_pct=3.0, force_after_hours=168,
+            )
             tickers = tickers[:limit]
 
             if tickers:
