@@ -150,6 +150,15 @@ class DebateOrchestrator:
 
         # Parse the revised response using the agent's own parser
         revised_signals = agent.parse_response(llm_response.content, request)
+
+        # If parsing failed, keep original response instead of zeroed confidence
+        if getattr(revised_signals, "parse_failed", False):
+            logger.warning(
+                "Debate: %s parse failed, keeping original response",
+                original.agent_name,
+            )
+            return original
+
         revised_signals.token_usage = llm_response.token_usage
         revised_signals.latency_ms = llm_response.latency_ms
 
