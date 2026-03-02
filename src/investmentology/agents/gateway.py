@@ -169,15 +169,27 @@ class LLMGateway:
                 "Authorization": f"Bearer {config.api_key}",
                 "Content-Type": "application/json",
             }
-            body = {
-                "model": target_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
+            is_reasoner = target_model and "reasoner" in target_model
+            if is_reasoner:
+                # deepseek-reasoner rejects temperature and may reject system role
+                body = {
+                    "model": target_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                }
+            else:
+                body = {
+                    "model": target_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
 
         # Retry loop
         last_error: Exception | None = None

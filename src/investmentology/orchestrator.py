@@ -839,7 +839,7 @@ class AnalysisOrchestrator:
                 logger.debug("Could not backfill market context on predictions for %s", ticker)
 
     async def _run_agent(
-        self, agent: WarrenAgent | SorosAgent | SimonsAgent | AuditorAgent,
+        self, agent: BaseAgent,
         request: AnalysisRequest,
     ) -> AnalysisResponse:
         """Run a single agent with error wrapping."""

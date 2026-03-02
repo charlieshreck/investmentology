@@ -173,5 +173,9 @@ def _resolve_provider(agent: BaseAgent) -> str:
         "soros": "gemini-cli",
         "simons": "groq",
         "auditor": "claude-cli",
+        "dalio": "groq",
+        "lynch": "groq",
+        "druckenmiller": "deepseek",
+        "klarman": "deepseek",
     }
     return provider_map.get(name, "deepseek")

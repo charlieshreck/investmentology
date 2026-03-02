@@ -77,18 +77,22 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 - LLM-assessed: Circle of Competence + Moat Analysis
 - Source: `src/investmentology/competence/`
 
-### Layer 3: Multi-Agent Analysis (Tri-Modal Consensus)
-Four independent agents with weighted voting:
-| Agent | Focus | Provider (K8s pod) | Provider (HB LXC) |
-|-------|-------|--------------------|--------------------|
-| Warren | Fundamentals, intrinsic value | DeepSeek API | DeepSeek API |
-| Soros | Macro, cycles, geopolitics | Remote proxy → HB LXC → Gemini CLI | Gemini CLI (local) |
-| Simons | Technicals, momentum, timing | Groq API | Groq API |
-| Auditor | Risk, correlation, portfolio | Remote proxy → HB LXC → Claude CLI | Claude CLI (local) |
+### Layer 3: Multi-Agent Analysis (8-Agent Consensus)
+Eight independent agents with weighted voting:
+| Agent | Focus | Provider | Model |
+|-------|-------|----------|-------|
+| Warren | Fundamentals, intrinsic value | DeepSeek API | deepseek-reasoner |
+| Soros | Macro, cycles, geopolitics | Gemini CLI / Remote proxy | gemini-2.5-pro |
+| Simons | Technicals, momentum, timing | Groq API | llama-3.3-70b |
+| Auditor | Risk, correlation, portfolio | Claude CLI / Remote proxy | claude-opus-4-6 |
+| Dalio | All Weather, macro cycles, debt dynamics | Groq API | llama-3.3-70b |
+| Lynch | GARP, stock classification, PEG | Groq API | llama-3.3-70b |
+| Druckenmiller | Catalysts, risk/reward asymmetry, sizing | DeepSeek API | deepseek-reasoner |
+| Klarman | Margin of safety, bear case, downside | DeepSeek API | deepseek-reasoner |
 
-**All 4 agents run on every analysis** (web UI and overnight pipeline):
-- **K8s pod**: Warren + Simons use HTTP APIs directly; Soros + Auditor delegate to HB LXC proxy (`HB_PROXY_URL`)
-- **HB LXC**: All 4 agents run locally (CLI subscriptions for Soros + Auditor)
+**All 8 agents run on every analysis** (web UI and overnight pipeline):
+- **K8s pod**: Warren + Simons + Dalio + Lynch + Druckenmiller + Klarman use HTTP APIs directly; Soros + Auditor delegate to HB LXC proxy (`HB_PROXY_URL`)
+- **HB LXC**: All 8 agents run locally (CLI subscriptions for Soros + Auditor)
 - Provider preference order: local CLI > remote proxy > HTTP API fallback
 - `HB_PROXY_URL` + `HB_PROXY_TOKEN` env vars enable remote proxy on K8s pod
 - `USE_GEMINI_CLI=1` / `USE_CLAUDE_CLI=1` env vars enable local CLI on HB LXC
