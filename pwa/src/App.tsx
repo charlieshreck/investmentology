@@ -99,6 +99,12 @@ function AppShell({ offline }: { offline: boolean }) {
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const isDesktop = useIsDesktop();
 
+  // Keep last ticker visible during close animation to prevent blank flash
+  const [lastOverlayTicker, setLastOverlayTicker] = useState<string | null>(null);
+  useEffect(() => {
+    if (overlayTicker !== null) setLastOverlayTicker(overlayTicker);
+  }, [overlayTicker]);
+
   return (
     <div style={{
       height: "100%",
@@ -172,12 +178,15 @@ function AppShell({ offline }: { offline: boolean }) {
       <CommandPalette />
 
       {/* Stock deep-dive overlay */}
+      {/* Use overlayTicker when open, fall back to lastOverlayTicker during close animation */}
       <LayerOverlay
         isOpen={overlayTicker !== null}
         onClose={() => setOverlayTicker(null)}
-        title={overlayTicker ?? ""}
+        title={overlayTicker ?? lastOverlayTicker ?? ""}
       >
-        {overlayTicker && <StockDeepDive ticker={overlayTicker} />}
+        {(overlayTicker ?? lastOverlayTicker) != null && (
+          <StockDeepDive ticker={(overlayTicker ?? lastOverlayTicker)!} />
+        )}
       </LayerOverlay>
     </div>
   );

@@ -13,6 +13,13 @@ export interface Position {
   entryDate?: string;
   positionType?: string;
   name?: string;
+  priceUnavailable?: boolean;
+  dividendPerShare?: number;
+  dividendYield?: number;
+  annualDividend?: number;
+  monthlyDividend?: number;
+  dividendFrequency?: string;
+  exDividendDate?: string | null;
 }
 
 export interface EarningsMomentum {
@@ -75,6 +82,9 @@ export interface Recommendation {
   suggestedType?: string;
   suggestedLabel?: string;
   heldPosition?: HeldPosition;
+  advisoryOpinions?: AdvisoryOpinion[] | null;
+  boardNarrative?: BoardNarrative | null;
+  boardAdjustedVerdict?: string | null;
 }
 
 export interface AgentStance {
@@ -147,6 +157,9 @@ export interface WatchlistVerdict {
   agentStances: unknown[] | null;
   riskFlags: string[] | null;
   verdictDate: string | null;
+  advisoryOpinions?: AdvisoryOpinion[] | null;
+  boardNarrative?: BoardNarrative | null;
+  boardAdjustedVerdict?: string | null;
 }
 
 export interface WatchlistItem {

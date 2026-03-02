@@ -331,6 +331,9 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
             "riskFlags": vr["risk_flags"],
             "auditorOverride": vr["auditor_override"],
             "mungerOverride": vr["munger_override"],
+            "advisoryOpinions": vr.get("advisory_opinions"),
+            "boardNarrative": vr.get("board_narrative"),
+            "boardAdjustedVerdict": vr.get("board_adjusted_verdict"),
             "createdAt": str(vr["created_at"]) if vr["created_at"] else None,
         }
         verdict_history.append(entry)

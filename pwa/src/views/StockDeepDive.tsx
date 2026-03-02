@@ -81,6 +81,26 @@ interface AgentStance {
   summary: string;
 }
 
+interface AdvisoryOpinion {
+  advisor_name: string;
+  display_name: string;
+  vote: string;
+  confidence: number;
+  assessment: string;
+  key_concern: string | null;
+  key_endorsement: string | null;
+  reasoning: string;
+}
+
+interface BoardNarrative {
+  headline: string;
+  narrative: string;
+  risk_summary: string;
+  pre_mortem: string;
+  conflict_resolution: string;
+  advisor_consensus: Record<string, unknown>;
+}
+
 interface VerdictData {
   recommendation: string;
   confidence: number | null;
@@ -90,6 +110,9 @@ interface VerdictData {
   riskFlags: string[] | null;
   auditorOverride: boolean;
   mungerOverride: boolean;
+  advisoryOpinions: AdvisoryOpinion[] | null;
+  boardNarrative: BoardNarrative | null;
+  boardAdjustedVerdict: string | null;
   createdAt: string | null;
 }
 
@@ -387,6 +410,190 @@ function SignalRow({ signal }: { signal: Signal }) {
   );
 }
 
+function voteColor(vote: string): string {
+  if (vote === "APPROVE") return "var(--color-success)";
+  if (vote === "VETO") return "var(--color-error)";
+  if (vote === "ADJUST_UP") return "var(--color-accent-bright)";
+  if (vote === "ADJUST_DOWN") return "var(--color-warning)";
+  return "var(--color-text-muted)";
+}
+
+function voteLabel(vote: string): string {
+  return vote.replace(/_/g, " ");
+}
+
+function AdvisoryBoardPanel({
+  opinions,
+  narrative,
+  boardAdjustedVerdict,
+  agentConsensusVerdict,
+}: {
+  opinions: AdvisoryOpinion[];
+  narrative: BoardNarrative | null;
+  boardAdjustedVerdict: string | null;
+  agentConsensusVerdict: string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Vote tally
+  const tally = { APPROVE: 0, VETO: 0, ADJUST_UP: 0, ADJUST_DOWN: 0, ABSTAIN: 0 };
+  for (const op of opinions) {
+    const key = op.vote as keyof typeof tally;
+    if (key in tally) tally[key]++;
+    else tally.ABSTAIN++;
+  }
+  const approveCount = tally.APPROVE;
+  const vetoCount = tally.VETO;
+  const adjustCount = tally.ADJUST_UP + tally.ADJUST_DOWN;
+  const total = opinions.length || 1;
+
+  const boardOverrode = boardAdjustedVerdict && boardAdjustedVerdict !== agentConsensusVerdict;
+
+  return (
+    <div style={{
+      background: "var(--color-surface-1)",
+      border: "1px solid var(--glass-border)",
+      borderRadius: "var(--radius-lg)",
+      overflow: "hidden",
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "var(--space-lg)",
+        borderBottom: "1px solid var(--glass-border)",
+        background: "linear-gradient(135deg, rgba(168, 85, 247, 0.06) 0%, rgba(99, 102, 241, 0.04) 100%)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "var(--space-sm)" }}>
+          <div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>
+              Advisory Board
+            </div>
+            {narrative?.headline && (
+              <div style={{ fontSize: "var(--text-base)", fontWeight: 700, color: "var(--color-text)", lineHeight: 1.4, maxWidth: 480 }}>
+                {narrative.headline}
+              </div>
+            )}
+          </div>
+          {boardOverrode && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-xs)" }}>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600 }}>Board Override</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "var(--text-lg)", color: verdictColor[boardAdjustedVerdict] ?? "var(--color-accent-bright)" }}>
+                {verdictLabel[boardAdjustedVerdict] ?? boardAdjustedVerdict}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Vote bar */}
+        <div style={{ marginTop: "var(--space-md)", display: "flex", gap: "var(--space-md)", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ flex: 1, minWidth: 180, height: 8, borderRadius: 4, background: "var(--color-surface-2)", overflow: "hidden", display: "flex" }}>
+            {approveCount > 0 && (
+              <div style={{ width: `${(approveCount / total) * 100}%`, background: "var(--color-success)", transition: "width 0.4s ease" }} />
+            )}
+            {adjustCount > 0 && (
+              <div style={{ width: `${(adjustCount / total) * 100}%`, background: "var(--color-accent-bright)", transition: "width 0.4s ease" }} />
+            )}
+            {vetoCount > 0 && (
+              <div style={{ width: `${(vetoCount / total) * 100}%`, background: "var(--color-error)", transition: "width 0.4s ease" }} />
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-sm)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
+            {approveCount > 0 && <span style={{ color: "var(--color-success)" }}>{approveCount} Approve</span>}
+            {adjustCount > 0 && <span style={{ color: "var(--color-accent-bright)" }}>{adjustCount} Adjust</span>}
+            {vetoCount > 0 && <span style={{ color: "var(--color-error)" }}>{vetoCount} Veto</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Advisor grid — 2 columns */}
+      <div style={{ padding: "var(--space-md)", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "var(--space-sm)" }}>
+        {opinions.map((op) => {
+          const vc = voteColor(op.vote);
+          return (
+            <div key={op.advisor_name} style={{
+              padding: "var(--space-md)",
+              background: "var(--color-surface-0)",
+              borderRadius: "var(--radius-sm)",
+              borderLeft: `3px solid ${vc}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-xs)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{op.display_name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}>
+                  <span style={{ color: vc, fontWeight: 700, fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+                    {voteLabel(op.vote)}
+                  </span>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
+                    {(op.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+                {op.assessment.length > 140 ? op.assessment.slice(0, 140) + "…" : op.assessment}
+              </div>
+              {op.key_concern && (
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-error)", fontStyle: "italic" }}>
+                  Risk: {op.key_concern.length > 80 ? op.key_concern.slice(0, 80) + "…" : op.key_concern}
+                </div>
+              )}
+              {op.key_endorsement && (
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-success)", fontStyle: "italic" }}>
+                  Upside: {op.key_endorsement.length > 80 ? op.key_endorsement.slice(0, 80) + "…" : op.key_endorsement}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* CIO Narrative — expandable */}
+      {narrative && (narrative.narrative || narrative.risk_summary || narrative.pre_mortem) && (
+        <div style={{ borderTop: "1px solid var(--glass-border)" }}>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              width: "100%", padding: "var(--space-sm) var(--space-lg)",
+              background: "none", border: "none", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontWeight: 600,
+            }}
+          >
+            <span>CIO SYNTHESIS</span>
+            <span style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+          </button>
+          {expanded && (
+            <div style={{ padding: "0 var(--space-lg) var(--space-lg)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+              {narrative.narrative && (
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.7 }}>
+                  {narrative.narrative}
+                </div>
+              )}
+              {narrative.risk_summary && (
+                <div style={{ padding: "var(--space-md)", background: "rgba(248, 113, 113, 0.06)", borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--color-error)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-error)", fontWeight: 600, marginBottom: "var(--space-xs)" }}>RISK ASSESSMENT</div>
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{narrative.risk_summary}</div>
+                </div>
+              )}
+              {narrative.pre_mortem && (
+                <div style={{ padding: "var(--space-md)", background: "rgba(251, 146, 60, 0.06)", borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--color-warning)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-warning)", fontWeight: 600, marginBottom: "var(--space-xs)" }}>PRE-MORTEM</div>
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{narrative.pre_mortem}</div>
+                </div>
+              )}
+              {narrative.conflict_resolution && (
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", lineHeight: 1.6, borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-sm)" }}>
+                  <span style={{ fontWeight: 600 }}>Conflict Resolution: </span>{narrative.conflict_resolution}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function StockDeepDive({ ticker }: { ticker: string }) {
   const [data, setData] = useState<StockResponse | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
@@ -646,7 +853,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
               </Badge>
             )}
             <button
-              onClick={() => { setShowCloseModal(true); setCloseExitPrice(data.position!.currentPrice.toString()); }}
+              onClick={() => { setShowCloseModal(true); setCloseExitPrice((data.position!.currentPrice ?? data.position!.entryPrice).toString()); }}
               style={{
                 marginLeft: "auto",
                 padding: "var(--space-xs) var(--space-md)",
@@ -723,6 +930,16 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
 
       {/* Verdict */}
       {data.verdict && <VerdictCard verdict={data.verdict} />}
+
+      {/* Advisory Board */}
+      {data.verdict?.advisoryOpinions && data.verdict.advisoryOpinions.length > 0 && (
+        <AdvisoryBoardPanel
+          opinions={data.verdict.advisoryOpinions}
+          narrative={data.verdict.boardNarrative}
+          boardAdjustedVerdict={data.verdict.boardAdjustedVerdict}
+          agentConsensusVerdict={data.verdict.recommendation}
+        />
+      )}
 
       {/* Signal Intelligence */}
       {(data.buzz || data.earningsMomentum || data.stabilityLabel || data.consensusTier) && (

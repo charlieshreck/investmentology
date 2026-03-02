@@ -198,6 +198,28 @@ function ItemCard({
             {riskFlags.length} risk flag{riskFlags.length > 1 ? "s" : ""}
           </div>
         )}
+        {(() => {
+          const opinions = v?.advisoryOpinions || [];
+          if (opinions.length === 0) return null;
+          const approveCount = opinions.filter((o: any) => o.vote === "APPROVE" || o.vote === "ENDORSE").length;
+          const vetoCount = opinions.filter((o: any) => o.vote === "VETO").length;
+          const total = opinions.length;
+          let bg = "rgba(148, 163, 184, 0.12)";
+          let fg = "var(--color-text-muted)";
+          if (vetoCount > 0) { bg = "rgba(248, 113, 113, 0.12)"; fg = "var(--color-error)"; }
+          else if (approveCount >= total * 0.75) { bg = "rgba(52, 211, 153, 0.12)"; fg = "var(--color-success)"; }
+          else { bg = "rgba(251, 191, 36, 0.12)"; fg = "var(--color-warning)"; }
+          const label = vetoCount > 0 ? `Board: ${vetoCount} Veto` : `Board: ${approveCount}/${total}`;
+          return (
+            <span style={{
+              display: "inline-flex", alignItems: "center",
+              padding: "1px 6px", borderRadius: 99, fontSize: 9, fontWeight: 600,
+              background: bg, color: fg, marginTop: 2, whiteSpace: "nowrap",
+            }}>
+              {label}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Sparkline */}

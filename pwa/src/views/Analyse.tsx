@@ -7,7 +7,257 @@ import { StreamText } from "../components/shared/StreamText";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useConfetti } from "../hooks/useConfetti";
 import { useStore } from "../stores/useStore";
-import type { AnalysisProgress } from "../types/models";
+import type { AnalysisProgress, AdvisoryOpinion, BoardNarrative } from "../types/models";
+
+// ─── Advisory Board Section ────────────────────────────────────────────────
+
+function voteColor(vote: string): string {
+  switch (vote) {
+    case "APPROVE":     return "var(--color-success)";
+    case "VETO":        return "var(--color-error)";
+    case "ADJUST_UP":   return "var(--color-accent-bright)";
+    case "ADJUST_DOWN": return "var(--color-warning)";
+    default:            return "var(--color-text-muted)";
+  }
+}
+
+function voteLabel(vote: string): string {
+  switch (vote) {
+    case "APPROVE":     return "Approve";
+    case "VETO":        return "Veto";
+    case "ADJUST_UP":   return "Adjust Up";
+    case "ADJUST_DOWN": return "Adjust Down";
+    default:            return vote;
+  }
+}
+
+function AdvisoryBoardSection({
+  boardNarrative,
+  advisoryOpinions,
+  boardAdjustedVerdict,
+}: {
+  boardNarrative?: BoardNarrative;
+  advisoryOpinions: AdvisoryOpinion[];
+  boardAdjustedVerdict?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const approve    = advisoryOpinions.filter((o) => o.vote === "APPROVE").length;
+  const veto       = advisoryOpinions.filter((o) => o.vote === "VETO").length;
+  const adjustUp   = advisoryOpinions.filter((o) => o.vote === "ADJUST_UP").length;
+  const adjustDown = advisoryOpinions.filter((o) => o.vote === "ADJUST_DOWN").length;
+  const total      = advisoryOpinions.length;
+
+  return (
+    <div style={{ marginTop: "var(--space-lg)", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
+      {/* Section header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Advisory Board
+        </div>
+        {boardAdjustedVerdict && (
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            <Badge variant="accent">Board Adjusted</Badge>
+            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "var(--text-sm)" }}>
+              {boardAdjustedVerdict}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* CIO Synthesis Card */}
+      {boardNarrative && (
+        <div style={{
+          padding: "var(--space-md)",
+          background: "var(--color-surface-1)",
+          borderRadius: "var(--radius-sm)",
+          border: "1px solid var(--glass-border)",
+          marginBottom: "var(--space-md)",
+        }}>
+          <p style={{ fontSize: "var(--text-base)", fontWeight: 700, color: "var(--color-text)", lineHeight: 1.4, margin: "0 0 var(--space-xs) 0" }}>
+            {boardNarrative.headline}
+          </p>
+          <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5, margin: "0 0 var(--space-md) 0" }}>
+            {boardNarrative.risk_summary}
+          </p>
+
+          {/* Board vote summary bar */}
+          {total > 0 && (
+            <div>
+              <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", gap: 1 }}>
+                {approve > 0 && (
+                  <div style={{ flex: approve, background: "var(--color-success)", borderRadius: "3px 0 0 3px" }} />
+                )}
+                {adjustUp > 0 && (
+                  <div style={{ flex: adjustUp, background: "var(--color-accent-bright)" }} />
+                )}
+                {adjustDown > 0 && (
+                  <div style={{ flex: adjustDown, background: "var(--color-warning)" }} />
+                )}
+                {veto > 0 && (
+                  <div style={{ flex: veto, background: "var(--color-error)", borderRadius: "0 3px 3px 0" }} />
+                )}
+              </div>
+              <div style={{ display: "flex", gap: "var(--space-md)", marginTop: "var(--space-xs)" }}>
+                {approve > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-success)", fontWeight: 600 }}>
+                    {approve} Approve
+                  </span>
+                )}
+                {adjustUp > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-accent-bright)", fontWeight: 600 }}>
+                    {adjustUp} Adjust Up
+                  </span>
+                )}
+                {adjustDown > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-warning)", fontWeight: 600 }}>
+                    {adjustDown} Adjust Down
+                  </span>
+                )}
+                {veto > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-error)", fontWeight: 600 }}>
+                    {veto} Veto
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Advisor Grid — 2 columns */}
+      {advisoryOpinions.length > 0 && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "var(--space-sm)",
+          marginBottom: "var(--space-md)",
+        }}>
+          {advisoryOpinions.map((op) => {
+            const color = voteColor(op.vote);
+            return (
+              <div key={op.advisor_name} style={{
+                padding: "var(--space-sm)",
+                background: "var(--color-surface-1)",
+                borderRadius: "var(--radius-sm)",
+                borderTop: `3px solid ${color}`,
+              }}>
+                {/* Name + vote pill */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-xs)" }}>
+                  <span style={{ fontWeight: 700, fontSize: "var(--text-sm)", color: "var(--color-text)" }}>
+                    {op.display_name}
+                  </span>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color,
+                    background: `${color}22`,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    letterSpacing: "0.03em",
+                  }}>
+                    {voteLabel(op.vote)}
+                  </span>
+                </div>
+
+                {/* Confidence bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)", marginBottom: "var(--space-xs)" }}>
+                  <div style={{ flex: 1, height: 3, background: "var(--color-surface-2)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${(op.confidence * 100).toFixed(0)}%`, height: "100%", background: color, borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--color-text-muted)", flexShrink: 0 }}>
+                    {(op.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+
+                {/* One-line assessment */}
+                {op.assessment && (
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.4, margin: "0 0 var(--space-xs) 0", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {op.assessment}
+                  </p>
+                )}
+
+                {/* Key concern / endorsement */}
+                {op.key_concern && (
+                  <p style={{ fontSize: 10, color: "var(--color-error)", margin: 0, lineHeight: 1.3 }}>
+                    Risk: {op.key_concern}
+                  </p>
+                )}
+                {!op.key_concern && op.key_endorsement && (
+                  <p style={{ fontSize: 10, color: "var(--color-success)", margin: 0, lineHeight: 1.3 }}>
+                    Edge: {op.key_endorsement}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Full Narrative — expandable */}
+      {boardNarrative && (boardNarrative.narrative || boardNarrative.pre_mortem || boardNarrative.conflict_resolution) && (
+        <div>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-xs)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--color-text-muted)",
+              fontSize: "var(--text-xs)",
+              fontWeight: 600,
+              padding: 0,
+              marginBottom: expanded ? "var(--space-sm)" : 0,
+            }}
+          >
+            <span style={{ transform: expanded ? "rotate(90deg)" : "none", display: "inline-block", transition: "transform 0.15s" }}>▶</span>
+            {expanded ? "Hide" : "Full"} Board Analysis
+          </button>
+
+          {expanded && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+              {boardNarrative.narrative && (
+                <div style={{ padding: "var(--space-sm)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>
+                    Narrative
+                  </div>
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                    {boardNarrative.narrative}
+                  </p>
+                </div>
+              )}
+              {boardNarrative.pre_mortem && (
+                <div style={{ padding: "var(--space-sm)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>
+                    Pre-Mortem
+                  </div>
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                    {boardNarrative.pre_mortem}
+                  </p>
+                </div>
+              )}
+              {boardNarrative.conflict_resolution && (
+                <div style={{ padding: "var(--space-sm)", background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-xs)" }}>
+                    Conflict Resolution
+                  </div>
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                    {boardNarrative.conflict_resolution}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main View ────────────────────────────────────────────────────────────────
 
 export function Analyse() {
   const [ticker, setTicker] = useState("");
@@ -189,7 +439,9 @@ export function Analyse() {
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-sm)" }}>
                   <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>Confidence</span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                    {(displayProgress.result.confidence * 100).toFixed(0)}%
+                    {displayProgress.result.confidence != null
+                      ? `${(displayProgress.result.confidence * 100).toFixed(0)}%`
+                      : "—"}
                   </span>
                 </div>
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
@@ -258,60 +510,13 @@ export function Analyse() {
                   </div>
                 )}
 
-                {/* Board Narrative */}
-                {displayProgress.boardNarrative && (
-                  <div style={{ marginTop: "var(--space-lg)", borderTop: "1px solid var(--glass-border)", paddingTop: "var(--space-md)" }}>
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--space-sm)" }}>
-                      Advisory Board
-                    </div>
-                    {displayProgress.boardAdjustedVerdict && (
-                      <div style={{ marginBottom: "var(--space-sm)", display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-                        <Badge variant="accent">Board Adjusted</Badge>
-                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "var(--text-sm)" }}>
-                          {displayProgress.boardAdjustedVerdict}
-                        </span>
-                      </div>
-                    )}
-                    <p style={{ fontSize: "var(--text-sm)", fontWeight: 600, color: "var(--color-text)", lineHeight: 1.4, margin: "0 0 var(--space-sm) 0" }}>
-                      {displayProgress.boardNarrative.headline}
-                    </p>
-                    <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5, margin: "0 0 var(--space-sm) 0" }}>
-                      {displayProgress.boardNarrative.risk_summary}
-                    </p>
-                  </div>
-                )}
-
-                {/* Advisory Opinions */}
-                {displayProgress.advisoryOpinions && displayProgress.advisoryOpinions.length > 0 && (
-                  <div style={{ marginTop: "var(--space-md)" }}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-xs)" }}>
-                      {displayProgress.advisoryOpinions.map((op) => {
-                        const voteColor =
-                          op.vote === "APPROVE" ? "var(--color-success)" :
-                          op.vote === "VETO" ? "var(--color-error)" :
-                          op.vote === "ADJUST_UP" ? "var(--color-accent-bright)" :
-                          op.vote === "ADJUST_DOWN" ? "var(--color-warning)" :
-                          "var(--color-text-muted)";
-                        return (
-                          <div key={op.advisor_name} style={{
-                            padding: "var(--space-xs) var(--space-sm)",
-                            background: "var(--color-surface-1)",
-                            borderRadius: "var(--radius-sm)",
-                            borderLeft: `3px solid ${voteColor}`,
-                            fontSize: "var(--text-xs)",
-                          }}>
-                            <span style={{ fontWeight: 600 }}>{op.display_name}</span>
-                            <span style={{ color: voteColor, marginLeft: 6, fontWeight: 700 }}>
-                              {op.vote.replace("_", " ")}
-                            </span>
-                            <span style={{ color: "var(--color-text-muted)", marginLeft: 4 }}>
-                              {(op.confidence * 100).toFixed(0)}%
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                {/* Advisory Board — CIO Synthesis + Advisor Grid */}
+                {(displayProgress.boardNarrative || (displayProgress.advisoryOpinions && displayProgress.advisoryOpinions.length > 0)) && (
+                  <AdvisoryBoardSection
+                    boardNarrative={displayProgress.boardNarrative}
+                    advisoryOpinions={displayProgress.advisoryOpinions ?? []}
+                    boardAdjustedVerdict={displayProgress.boardAdjustedVerdict}
+                  />
                 )}
 
                 {/* View Deep Dive button */}

@@ -606,7 +606,9 @@ class Registry:
             ) qg ON TRUE
             LEFT JOIN LATERAL (
                 SELECT verdict, confidence, consensus_score, reasoning,
-                       agent_stances, risk_flags, created_at
+                       agent_stances, risk_flags,
+                       advisory_opinions, board_narrative, board_adjusted_verdict,
+                       created_at
                 FROM invest.verdicts vd
                 WHERE vd.ticker = w.ticker
                 ORDER BY vd.created_at DESC LIMIT 1
@@ -641,7 +643,9 @@ class Registry:
                 SELECT DISTINCT ON (v.ticker)
                     v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
                     v.reasoning, v.agent_stances, v.risk_flags,
-                    v.auditor_override, v.munger_override, v.created_at
+                    v.auditor_override, v.munger_override,
+                    v.advisory_opinions, v.board_narrative, v.board_adjusted_verdict,
+                    v.created_at
                 FROM invest.verdicts v
                 WHERE v.verdict != 'DISCARD'
                 ORDER BY v.ticker, v.created_at DESC
@@ -649,7 +653,9 @@ class Registry:
             SELECT
                 lv.id, lv.ticker, lv.verdict, lv.confidence, lv.consensus_score,
                 lv.reasoning, lv.agent_stances, lv.risk_flags,
-                lv.auditor_override, lv.munger_override, lv.created_at,
+                lv.auditor_override, lv.munger_override,
+                lv.advisory_opinions, lv.board_narrative, lv.board_adjusted_verdict,
+                lv.created_at,
                 s.name, s.sector, s.industry,
                 f.price AS current_price, f.market_cap,
                 w.state AS watchlist_state,

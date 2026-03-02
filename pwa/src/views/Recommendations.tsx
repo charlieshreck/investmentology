@@ -418,6 +418,62 @@ function RecCard({
           )}
         </div>
 
+        {/* Advisory Board summary strip */}
+        {(rec.boardNarrative?.headline || (rec.advisoryOpinions && rec.advisoryOpinions.length > 0)) && (() => {
+          const opinions = rec.advisoryOpinions || [];
+          const approveCount = opinions.filter((o) => o.vote === "APPROVE" || o.vote === "ENDORSE").length;
+          const vetoCount = opinions.filter((o) => o.vote === "VETO").length;
+          const total = opinions.length;
+          const adjustedDiffers = rec.boardAdjustedVerdict && rec.boardAdjustedVerdict !== rec.verdict;
+
+          let voteBg = "rgba(148, 163, 184, 0.12)";
+          let voteFg = "var(--color-text-muted)";
+          if (total > 0) {
+            if (vetoCount > 0) {
+              voteBg = "rgba(248, 113, 113, 0.12)";
+              voteFg = "var(--color-error)";
+            } else if (approveCount >= total * 0.75) {
+              voteBg = "rgba(52, 211, 153, 0.12)";
+              voteFg = "var(--color-success)";
+            } else {
+              voteBg = "rgba(251, 191, 36, 0.12)";
+              voteFg = "var(--color-warning)";
+            }
+          }
+
+          return (
+            <div style={{
+              marginTop: "var(--space-sm)",
+              display: "flex", alignItems: "center", gap: "var(--space-sm)", flexWrap: "wrap",
+            }}>
+              {rec.boardNarrative?.headline && (
+                <span style={{
+                  flex: 1, minWidth: 0,
+                  fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  fontStyle: "italic",
+                }}>
+                  {rec.boardNarrative.headline}
+                </span>
+              )}
+              {total > 0 && (
+                <SignalPill
+                  label={vetoCount > 0 ? `Board: ${vetoCount} Veto` : `Board: ${approveCount}/${total} Approve`}
+                  bg={voteBg}
+                  fg={voteFg}
+                />
+              )}
+              {adjustedDiffers && (
+                <SignalPill
+                  label={`Board: ${rec.boardAdjustedVerdict}`}
+                  bg="rgba(251, 191, 36, 0.15)"
+                  fg="var(--color-warning)"
+                />
+              )}
+            </div>
+          );
+        })()}
+
         {/* Held position thesis strip */}
         {rec.heldPosition && (
           <div style={{

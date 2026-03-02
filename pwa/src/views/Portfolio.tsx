@@ -1160,7 +1160,8 @@ export function Portfolio() {
 
   const totalPnl = enrichedPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
   const enrichedTotalValue = enrichedPositions.reduce((s, p) => s + p.marketValue, 0) + cash;
-  const totalPnlPct = enrichedTotalValue > 0 ? (totalPnl / (enrichedTotalValue - totalPnl - cash)) * 100 : 0;
+  const costBasis = enrichedTotalValue - totalPnl - cash;
+  const totalPnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0;
   const cashPct = enrichedTotalValue > 0 ? (cash / enrichedTotalValue) * 100 : 0;
   const enrichedDayPnl = enrichedPositions.reduce((s, p) => s + (p.dayChange || 0), 0);
   const liveDayPnl = Object.keys(livePrices).length > 0 ? enrichedDayPnl : dayPnl;
@@ -1171,9 +1172,9 @@ export function Portfolio() {
   // Filter positions
   const winnersCount = enrichedPositions.filter(p => p.unrealizedPnl > 0).length;
   const losersCount = enrichedPositions.filter(p => p.unrealizedPnl < 0).length;
-  const dividendPositions = enrichedPositions.filter((p: any) => (p.annualDividend ?? 0) > 0);
-  const totalMonthlyDiv = enrichedPositions.reduce((s: number, p: any) => s + (p.monthlyDividend || 0), 0);
-  const totalAnnualDiv = enrichedPositions.reduce((s: number, p: any) => s + (p.annualDividend || 0), 0);
+  const dividendPositions = enrichedPositions.filter(p => (p.annualDividend ?? 0) > 0);
+  const totalMonthlyDiv = enrichedPositions.reduce((s, p) => s + (p.monthlyDividend || 0), 0);
+  const totalAnnualDiv = enrichedPositions.reduce((s, p) => s + (p.annualDividend || 0), 0);
   const filteredPositions = posFilter === "all" ? enrichedPositions
     : posFilter === "winners" ? enrichedPositions.filter(p => p.unrealizedPnl > 0)
     : posFilter === "losers" ? enrichedPositions.filter(p => p.unrealizedPnl <= 0)

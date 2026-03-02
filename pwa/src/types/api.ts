@@ -32,6 +32,25 @@ export interface PortfolioPerformance {
   maxDrawdownPct: number;
 }
 
+export interface DividendSummary {
+  totalAnnual: number;
+  totalMonthly: number;
+  yield: number;
+}
+
+export interface PortfolioPerformanceExtended extends PortfolioPerformance {
+  portfolioReturnPct?: number;
+  spyReturnPct?: number;
+  avgWinPct?: number;
+  avgLossPct?: number;
+  totalTrades?: number;
+  expectancy?: number;
+  dispositionRatio?: number;
+  avgWinnerHoldDays?: number;
+  avgLoserHoldDays?: number;
+  measurementDays?: number;
+}
+
 export interface PortfolioResponse {
   positions: Position[];
   totalValue: number;
@@ -39,7 +58,8 @@ export interface PortfolioResponse {
   dayPnlPct: number;
   cash: number;
   alerts: Alert[];
-  performance?: PortfolioPerformance;
+  performance?: PortfolioPerformanceExtended;
+  dividendSummary?: DividendSummary;
 }
 
 export interface QuantGateResponse {
