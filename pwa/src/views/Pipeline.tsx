@@ -15,12 +15,8 @@ import type {
   PipelineTickerSummary,
   PipelineStepDetail,
   PipelineScreenerVerdict,
-  PipelineTickerDetail,
   PipelineFunnel,
   PipelineHealth,
-  PipelineStepHealth,
-  PipelineStepTiming,
-  PipelineRecentError,
 } from "../types/models";
 
 // ---------------------------------------------------------------------------
