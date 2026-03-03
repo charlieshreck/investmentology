@@ -537,6 +537,7 @@ class TestSkillsRegistry:
             "warren", "soros", "simons", "auditor",
             "dalio", "druckenmiller", "klarman", "lynch",
             "data_analyst",
+            "fundamental_screener", "market_screener",
         }
         assert expected == set(SKILLS.keys())
 
@@ -545,7 +546,7 @@ class TestSkillsRegistry:
             assert skill.name == name
             assert skill.display_name
             assert skill.philosophy
-            assert skill.role in ("primary", "scout", "validator")
+            assert skill.role in ("primary", "scout", "validator", "screener")
             assert skill.provider_preference
             assert skill.default_model
             assert skill.methodology
