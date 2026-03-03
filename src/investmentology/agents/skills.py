@@ -615,6 +615,135 @@ on a standalone basis?""",
     signature_question="ANSWER: How much can I lose, and is the margin of safety wide enough?",
 )
 
+FUNDAMENTAL_SCREENER = AgentSkill(
+    name="fundamental_screener",
+    display_name="Fundamental Screener",
+    philosophy=(
+        "Objective financial data screener. No persona, no bias — purely "
+        "data-driven assessment of whether a company's financial profile "
+        "warrants deeper analysis by expensive specialist agents."
+    ),
+    role="screener",
+    provider_preference=["groq"],
+    default_model="llama-3.3-70b-versatile",
+    cli_screen=None,
+    methodology="""\
+Quickly assess whether this company's fundamentals warrant detailed analysis \
+by 8 specialist investment agents (costing significant compute time).
+
+Your screening criteria — flag for REJECTION if ANY of these are clearly true:
+1. VALUATION SANITY: Is the stock absurdly overvalued with no growth to justify it? \
+P/E > 100x with declining revenue = reject. But high P/E with 40%+ growth = pass.
+2. PROFITABILITY: Is this a viable business? Negative operating income for a \
+mature company (market cap > $5B) with no turnaround story = reject.
+3. BALANCE SHEET: Is this company at risk of insolvency? Debt > 5x cash with \
+negative cash flow = reject. But leverage for growth with strong revenue = pass.
+4. REVENUE TRAJECTORY: Is the business shrinking? Revenue declining 20%+ YoY \
+with no turnaround catalyst = reject. Cyclical dips are NOT automatic rejects.
+5. SIZE & DATA: Is there enough data to analyze? Sub-$100M market cap with \
+minimal financial data = reject.
+
+IMPORTANT: You are a COARSE filter, not a detailed analyst. When in doubt, PASS. \
+It is better to let a marginal company through than to miss an opportunity. \
+Only REJECT when the data clearly shows this is not worth analyzing.""",
+    critical_rules=[
+        "When in doubt, PASS. Only REJECT when fundamentals are clearly disqualifying.",
+        "Cyclical downturns are NOT automatic rejections — context matters.",
+        "High-growth companies with current losses can still be worth analyzing.",
+        "Use REJECT for clear no-gos, REJECT_HARD for extreme cases (fraud indicators, penny stocks).",
+        "Your confidence should reflect how CERTAIN you are of the screening decision, not the investment merit.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=[
+        "quant_gate_rank", "piotroski_score", "altman_z_score",
+    ],
+    allowed_tags=[
+        # Blockable fundamental signals
+        "OVERVALUED", "FAIRLY_VALUED", "UNDERVALUED", "DEEP_VALUE",
+        "MARGIN_COMPRESSING", "EARNINGS_QUALITY_LOW", "LEVERAGE_HIGH",
+        "BALANCE_SHEET_WEAK", "REVENUE_DECELERATING", "ROIC_DECLINING",
+        # Positive fundamental signals
+        "REVENUE_ACCELERATING", "MARGIN_EXPANDING", "EARNINGS_QUALITY_HIGH",
+        "BALANCE_SHEET_STRONG", "ROIC_IMPROVING",
+        # Action
+        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
+    ],
+    base_weight=0.0,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=60,
+    prompt_opener="Screen fundamentals for {ticker} ({sector} / {industry})",
+    signature_question=(
+        "SCREENING DECISION: Based purely on the financial data, "
+        "does this company warrant detailed analysis by 8 specialist agents? "
+        "Use REJECT/REJECT_HARD action tag if NO, or BUY_NEW/HOLD/WATCHLIST_ADD if YES."
+    ),
+)
+
+MARKET_SCREENER = AgentSkill(
+    name="market_screener",
+    display_name="Market Screener",
+    philosophy=(
+        "Objective market position and thesis screener. No persona, no bias — "
+        "assesses whether there is a plausible investment thesis worth investigating "
+        "based on the company's market position, sector dynamics, and available data."
+    ),
+    role="screener",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
+    cli_screen=None,
+    methodology="""\
+Quickly assess whether there is a plausible investment thesis for this stock \
+that justifies detailed analysis by 8 specialist investment agents.
+
+Your screening criteria — flag for REJECTION if ALL of these are true:
+1. NO THESIS: Is there any identifiable investment story? Growth story, value \
+story, turnaround, dividend, asset play, catalyst? If none, reject.
+2. SECTOR HEADWINDS: Is the entire sector in structural decline with no \
+company-specific offsetting factors?
+3. VALUATION vs GROWTH: Is the stock priced for perfection with no margin \
+of safety? Extreme valuation with decelerating growth = reject.
+4. TECHNICAL CONTEXT: If technical data is available, is the stock in freefall \
+with no support? (Do NOT reject solely on technicals.)
+
+IMPORTANT: You are a COARSE filter. When in doubt, PASS. Almost every company \
+has SOME investment thesis — you only reject when there is genuinely nothing \
+to analyze. A company can be overvalued and still worth analyzing (to confirm \
+the overvaluation). Only reject clear no-gos.""",
+    critical_rules=[
+        "When in doubt, PASS. Only REJECT when there is genuinely no thesis to investigate.",
+        "A company being overvalued is NOT an automatic reject — the agents need to confirm it.",
+        "Sector headwinds alone are not enough to reject — the company might be an exception.",
+        "Technical weakness alone is not enough to reject — the agents assess this.",
+        "Your confidence should reflect how CERTAIN you are of the screening decision.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=[
+        "technical_indicators", "quant_gate_rank",
+    ],
+    allowed_tags=[
+        # Blockable signals
+        "OVERVALUED", "REVENUE_DECELERATING", "MARGIN_COMPRESSING",
+        "EARNINGS_QUALITY_LOW", "BALANCE_SHEET_WEAK", "LEVERAGE_HIGH",
+        # Positive signals
+        "UNDERVALUED", "DEEP_VALUE", "REVENUE_ACCELERATING",
+        "MARGIN_EXPANDING", "BALANCE_SHEET_STRONG",
+        # Technical
+        "TREND_DOWNTREND", "BREAKDOWN_CONFIRMED",
+        "TREND_UPTREND", "BREAKOUT_CONFIRMED", "MOMENTUM_STRONG",
+        # Action
+        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
+    ],
+    base_weight=0.0,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=120,
+    prompt_opener="Screen market position and thesis for {ticker} ({sector} / {industry})",
+    signature_question=(
+        "SCREENING DECISION: Is there a plausible investment thesis here worth "
+        "investigating? Use REJECT/REJECT_HARD action tag if NO, "
+        "or BUY_NEW/HOLD/WATCHLIST_ADD if YES."
+    ),
+)
+
 DATA_ANALYST = AgentSkill(
     name="data_analyst",
     display_name="Data Analyst",
@@ -684,12 +813,15 @@ SKILLS: dict[str, AgentSkill] = {
     "lynch": LYNCH,
     "druckenmiller": DRUCKENMILLER,
     "klarman": KLARMAN,
+    "fundamental_screener": FUNDAMENTAL_SCREENER,
+    "market_screener": MARKET_SCREENER,
     "data_analyst": DATA_ANALYST,
 }
 
 # Convenience subsets
 PRIMARY_SKILLS = {k: v for k, v in SKILLS.items() if v.role == "primary"}
 SCOUT_SKILLS = {k: v for k, v in SKILLS.items() if v.role == "scout"}
+SCREENER_SKILLS = {k: v for k, v in SKILLS.items() if v.role == "screener"}
 VALIDATOR_SKILLS = {k: v for k, v in SKILLS.items() if v.role == "validator"}
 
 # CLI screen groupings for serialization

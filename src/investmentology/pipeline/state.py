@@ -21,6 +21,8 @@ STALENESS_HOURS = 24
 # Steps in dependency order
 STEP_DATA_FETCH = "data_fetch"
 STEP_DATA_VALIDATE = "data_validate"
+STEP_SCREENER_PREFIX = "screener:"
+STEP_GATE_DECISION = "gate_decision"
 STEP_AGENT_PREFIX = "agent:"
 STEP_DEBATE = "debate"
 STEP_SYNTHESIS = "synthesis"
@@ -363,10 +365,10 @@ def get_all_data_cache(
 def get_agent_signals_for_ticker(
     db: Database, cycle_id: UUID, ticker: str,
 ) -> list[dict]:
-    """Load all completed agent signal results for a ticker in this cycle.
+    """Load all completed agent/screener signal results for a ticker in this cycle.
 
     Joins pipeline_state (for step tracking) with agent_signals (for signal data)
-    via the result_ref foreign key.
+    via the result_ref foreign key. Includes both agent:* and screener:* steps.
     """
     return db.execute(
         "SELECT s.id, s.ticker, s.agent_name, s.model, s.signals, "
@@ -374,7 +376,8 @@ def get_agent_signals_for_ticker(
         "FROM invest.pipeline_state ps "
         "JOIN invest.agent_signals s ON s.id = ps.result_ref "
         "WHERE ps.cycle_id = %s AND ps.ticker = %s "
-        "AND ps.step LIKE 'agent:%%' AND ps.status = 'completed' "
+        "AND (ps.step LIKE 'agent:%%' OR ps.step LIKE 'screener:%%') "
+        "AND ps.status = 'completed' "
         "AND ps.result_ref IS NOT NULL",
         (cycle_id, ticker),
     )
@@ -411,4 +414,70 @@ def create_ticker_steps(
         "Created %d pipeline steps for %s in cycle %s",
         created, ticker, cycle_id,
     )
+    return created
+
+
+def create_screening_steps(
+    db: Database,
+    cycle_id: UUID,
+    ticker: str,
+    screener_names: list[str],
+) -> int:
+    """Create Phase 1 steps: data_fetch, data_validate, screeners, gate_decision.
+
+    These are the cheap, fast steps that run for ALL tickers. Phase 2 steps
+    (analysis agents, debate, synthesis) are only created for tickers that pass
+    the gate decision.
+    """
+    steps = [STEP_DATA_FETCH, STEP_DATA_VALIDATE]
+    for name in screener_names:
+        steps.append(f"{STEP_SCREENER_PREFIX}{name}")
+    steps.append(STEP_GATE_DECISION)
+
+    created = 0
+    for step in steps:
+        row_id = create_step(db, cycle_id, ticker, step)
+        if row_id:
+            created += 1
+
+    if created:
+        logger.info(
+            "Created %d screening steps for %s in cycle %s",
+            created, ticker, cycle_id,
+        )
+    return created
+
+
+def create_analysis_steps(
+    db: Database,
+    cycle_id: UUID,
+    ticker: str,
+    agent_names: list[str],
+    include_debate: bool = True,
+    include_synthesis: bool = True,
+) -> int:
+    """Create Phase 2 steps: analysis agents, debate, synthesis.
+
+    Called only for tickers that pass the scout gate. Data fetch/validate
+    and screener steps already exist from Phase 1.
+    """
+    steps = []
+    for name in agent_names:
+        steps.append(f"{STEP_AGENT_PREFIX}{name}")
+    if include_debate:
+        steps.append(STEP_DEBATE)
+    if include_synthesis:
+        steps.append(STEP_SYNTHESIS)
+
+    created = 0
+    for step in steps:
+        row_id = create_step(db, cycle_id, ticker, step)
+        if row_id:
+            created += 1
+
+    if created:
+        logger.info(
+            "Created %d analysis steps for %s in cycle %s (passed gate)",
+            created, ticker, cycle_id,
+        )
     return created

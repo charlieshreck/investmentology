@@ -26,13 +26,14 @@ from investmentology.agents.skills import (
     API_ONLY_AGENTS,
     PRIMARY_SKILLS,
     SCOUT_SKILLS,
+    SCREENER_SKILLS,
     SKILLS,
 )
 from investmentology.pipeline import state
 from investmentology.pipeline.convergence import should_debate  # noqa: F401
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
 from investmentology.registry.db import Database
-from investmentology.registry.reentry import get_blocked_tickers
+from investmentology.registry.reentry import create_gate_blocks, get_blocked_tickers
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,16 @@ POLL_INTERVAL = 60
 # Agent names by role
 PRIMARY_AGENT_NAMES = list(PRIMARY_SKILLS.keys())
 SCOUT_AGENT_NAMES = list(SCOUT_SKILLS.keys())
+SCREENER_AGENT_NAMES = list(SCREENER_SKILLS.keys())
 ALL_AGENT_NAMES = list(SKILLS.keys())
-# Remove data_analyst from agent analysis steps (it's a validation step)
-ANALYSIS_AGENT_NAMES = [n for n in ALL_AGENT_NAMES if n != "data_analyst"]
+# Analysis agents = all except data_analyst and screeners
+ANALYSIS_AGENT_NAMES = [
+    n for n in ALL_AGENT_NAMES
+    if n != "data_analyst" and n not in SCREENER_AGENT_NAMES
+]
+
+# Action tags that indicate a REJECT decision from screeners
+_REJECT_TAGS = {"REJECT", "REJECT_HARD"}
 
 # Watchlist states eligible for analysis
 _ANALYSABLE_STATES = [
@@ -120,15 +128,14 @@ class PipelineController:
             return
         self._current_cycle_id = cycle_id
 
-        # 3. Populate steps for tickers needing analysis
+        # 3. Populate screening steps for tickers needing analysis
         tickers = self._get_analysis_tickers()
         for ticker in tickers:
             existing = state.get_ticker_progress(self.db, cycle_id, ticker)
             if not existing:
-                state.create_ticker_steps(
-                    self.db, cycle_id, ticker, ANALYSIS_AGENT_NAMES,
+                state.create_screening_steps(
+                    self.db, cycle_id, ticker, SCREENER_AGENT_NAMES,
                 )
-                logger.info("Created pipeline steps for %s", ticker)
 
         # 4. Get pending work
         pending = state.get_pending_steps(self.db, cycle_id)
@@ -153,6 +160,13 @@ class PipelineController:
 
             elif step == state.STEP_DATA_VALIDATE:
                 await self._handle_data_validate(cycle_id, ticker, step_id)
+
+            elif step.startswith(state.STEP_SCREENER_PREFIX):
+                screener_name = step[len(state.STEP_SCREENER_PREFIX):]
+                await self._handle_screener(cycle_id, ticker, step_id, screener_name)
+
+            elif step == state.STEP_GATE_DECISION:
+                await self._handle_gate_decision(cycle_id, ticker, step_id)
 
             elif step.startswith(state.STEP_AGENT_PREFIX):
                 agent_name = step[len(state.STEP_AGENT_PREFIX):]
@@ -266,12 +280,127 @@ class PipelineController:
         except Exception as e:
             state.mark_failed(self.db, step_id, str(e))
 
+    async def _handle_screener(
+        self, cycle_id: UUID, ticker: str, step_id: int, screener_name: str,
+    ) -> None:
+        """Dispatch a screener agent (API-only, fast)."""
+        if not state.is_step_completed(
+            self.db, cycle_id, ticker, state.STEP_DATA_VALIDATE,
+        ):
+            return
+
+        skill = SCREENER_SKILLS.get(screener_name)
+        if not skill:
+            state.mark_failed(self.db, step_id, f"Unknown screener: {screener_name}")
+            return
+
+        runner = self._runners.get(screener_name)
+        if not runner:
+            state.mark_failed(self.db, step_id, f"No runner for: {screener_name}")
+            return
+
+        state.mark_running(self.db, step_id)
+        asyncio.create_task(
+            self._run_api_agent(step_id, runner, ticker),
+            name=f"screener-{screener_name}-{ticker}",
+        )
+
+    async def _handle_gate_decision(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+    ) -> None:
+        """Deterministic gate decision: check screener consensus, pass or block."""
+        # Check all screeners completed
+        all_done = True
+        for name in SCREENER_AGENT_NAMES:
+            screener_step = f"{state.STEP_SCREENER_PREFIX}{name}"
+            if not state.is_step_completed(self.db, cycle_id, ticker, screener_step):
+                all_done = False
+                break
+
+        if not all_done:
+            return
+
+        state.mark_running(self.db, step_id)
+        try:
+            # Load screener signal results
+            signal_rows = state.get_agent_signals_for_ticker(
+                self.db, cycle_id, ticker,
+            )
+            screener_results = [
+                r for r in signal_rows
+                if r["agent_name"] in SCREENER_AGENT_NAMES
+            ]
+
+            if not screener_results:
+                logger.warning(
+                    "No screener signals for %s, defaulting to PASS", ticker,
+                )
+                self._gate_pass(cycle_id, ticker, step_id)
+                return
+
+            # Check each screener's action tags for REJECT
+            reject_count = 0
+            screener_tags: list[list[str]] = []
+            for row in screener_results:
+                signals_data = row["signals"]
+                if isinstance(signals_data, str):
+                    signals_data = json.loads(signals_data)
+
+                tags = [s.get("tag", "") for s in signals_data.get("signals", [])]
+                screener_tags.append(tags)
+
+                # Check if this screener rejected
+                action_tags = set(tags) & _REJECT_TAGS
+                if action_tags:
+                    reject_count += 1
+
+            # Gate decision: FAIL only if ALL screeners reject
+            if reject_count >= len(screener_results) and reject_count >= 2:
+                self._gate_fail(cycle_id, ticker, step_id, screener_tags)
+            else:
+                self._gate_pass(cycle_id, ticker, step_id)
+
+        except Exception as e:
+            state.mark_failed(self.db, step_id, str(e))
+            logger.exception("Gate decision failed for %s", ticker)
+
+    def _gate_pass(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+    ) -> None:
+        """Ticker passed the gate — create Phase 2 analysis steps."""
+        state.create_analysis_steps(
+            self.db, cycle_id, ticker, ANALYSIS_AGENT_NAMES,
+        )
+        state.mark_completed(self.db, step_id)
+        logger.info("Gate PASS for %s — created analysis steps", ticker)
+
+    def _gate_fail(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+        screener_tags: list[list[str]],
+    ) -> None:
+        """Ticker failed the gate — create reentry blocks."""
+        # Load fundamentals for baseline snapshot
+        fundamentals = None
+        if self._current_cycle_id:
+            fundamentals = state.get_data_cache(
+                self.db, self._current_cycle_id, ticker, "fundamentals",
+            )
+
+        blocks = create_gate_blocks(
+            self.db, ticker, screener_tags, fundamentals,
+        )
+        state.mark_completed(self.db, step_id)
+        logger.info(
+            "Gate FAIL for %s — filtered out (%d reentry blocks created)",
+            ticker, blocks,
+        )
+
     async def _handle_agent(
         self, cycle_id: UUID, ticker: str, step_id: int, agent_name: str,
     ) -> None:
         """Dispatch an agent analysis step."""
         if not state.is_step_completed(
-            self.db, cycle_id, ticker, state.STEP_DATA_VALIDATE,
+            self.db, cycle_id, ticker, state.STEP_GATE_DECISION,
         ):
             return
 

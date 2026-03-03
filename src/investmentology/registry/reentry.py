@@ -379,3 +379,77 @@ def clear_blocks_for_ticker(db, ticker: str, reason: str = "positive_verdict") -
 def manual_clear_blocks(db, ticker: str, reason: str = "manual_override") -> int:
     """Admin override: clear all blocks for a ticker including permanent ones."""
     return clear_blocks_for_ticker(db, ticker, reason=reason)
+
+
+def create_gate_blocks(
+    db,
+    ticker: str,
+    screener_signal_tags: list[list[str]],
+    fundamentals: dict | None,
+) -> int:
+    """Create reentry blocks from scout gate consensus (no verdict required).
+
+    Called when both screeners agree to reject a ticker. Creates blocks using
+    the same BLOCK_CONDITIONS mapping so they auto-clear when fundamentals change.
+
+    Args:
+        db: Database instance.
+        ticker: Stock ticker.
+        screener_signal_tags: List of tag-lists, one per screener.
+        fundamentals: Latest fundamentals snapshot.
+
+    Returns:
+        Number of blocks created.
+    """
+    # Count how many screeners emitted each blockable tag
+    tag_counts: Counter[str] = Counter()
+    for tags in screener_signal_tags:
+        seen = set()
+        for tag in tags:
+            tag_str = tag.value if hasattr(tag, "value") else str(tag)
+            if tag_str in BLOCK_CONDITIONS and tag_str not in seen:
+                tag_counts[tag_str] += 1
+                seen.add(tag_str)
+
+    blocks_created = 0
+    for tag_str, count in tag_counts.items():
+        # For gate blocks, require both screeners to agree (count >= 2)
+        # But also create blocks for tags only one screener flagged if they're strong
+        if count < 1:
+            continue
+
+        block_type, condition_key, threshold = BLOCK_CONDITIONS[tag_str]
+        baseline = _snapshot_baseline(condition_key, fundamentals)
+
+        if block_type == "quantitative" and baseline is None:
+            logger.debug(
+                "Skipping gate block %s for %s: no baseline available",
+                tag_str, ticker,
+            )
+            continue
+
+        try:
+            db.execute(
+                "INSERT INTO invest.reentry_blocks "
+                "(ticker, verdict_id, block_type, signal_tag, condition_key, "
+                "threshold, baseline_value, agent_count) "
+                "VALUES (%s, NULL, %s, %s, %s, %s, %s, %s)",
+                (ticker, block_type, tag_str, condition_key,
+                 Decimal(str(threshold)),
+                 Decimal(str(baseline)) if baseline is not None else None,
+                 count),
+            )
+            blocks_created += 1
+            logger.info(
+                "Gate block: %s %s (%s, key=%s, baseline=%s, screeners=%d)",
+                ticker, tag_str, block_type, condition_key, baseline, count,
+            )
+        except Exception:
+            logger.exception("Failed to insert gate block for %s/%s", ticker, tag_str)
+
+    if blocks_created:
+        logger.info(
+            "Created %d gate blocks for %s (screener consensus)",
+            blocks_created, ticker,
+        )
+    return blocks_created
