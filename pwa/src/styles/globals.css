@@ -318,6 +318,12 @@ html::after {
   to { transform: rotate(360deg); }
 }
 
+/* Orbiting dot on card borders — driven by stroke-dashoffset */
+@keyframes orbit-dot {
+  from { stroke-dashoffset: var(--perimeter); }
+  to { stroke-dashoffset: 0; }
+}
+
 /* Inner glow border effect */
 .inner-glow {
   box-shadow:

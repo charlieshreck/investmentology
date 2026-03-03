@@ -8,6 +8,8 @@ import { MarketStatus } from "../components/shared/MarketStatus";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
 import { SignalTagCloud } from "../components/shared/SignalTagCloud";
+import { FormattedProse } from "../components/shared/FormattedProse";
+import { OrbitBorder } from "../components/shared/OrbitBorder";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
@@ -215,6 +217,7 @@ function RecCard({
     : vColor;
 
   return (
+    <OrbitBorder verdict={rec.verdict} radius={18}>
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -628,12 +631,9 @@ function RecCard({
                   }}>
                     {((rec.portfolioFit as any).score * 100).toFixed(0)}%
                   </span>
-                  <p style={{
-                    fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.4,
-                    margin: "4px 0 0",
-                  }}>
-                    {(rec.portfolioFit as any).reasoning}
-                  </p>
+                  <div style={{ marginTop: 4 }}>
+                    <FormattedProse text={(rec.portfolioFit as any).reasoning} fontSize="11px" color="var(--color-text-muted)" />
+                  </div>
                 </div>
               )}
             </div>
@@ -641,6 +641,7 @@ function RecCard({
         )}
       </AnimatePresence>
     </motion.div>
+    </OrbitBorder>
   );
 }
 

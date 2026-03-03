@@ -229,6 +229,60 @@ function ActionRow({ action, onTicker }: { action: AdvisorAction; onTicker: (t: 
               lineHeight: 1.5,
             }}>
               {action.reasoning}
+
+              {/* Agent stance tiles */}
+              {action.agent_summary && action.agent_summary.length > 0 && (
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: "var(--space-sm)",
+                  flexWrap: "wrap",
+                }}>
+                  {action.agent_summary.map((a) => {
+                    const sentColor = a.sentiment >= 0.3 ? "var(--color-success)" : a.sentiment <= -0.3 ? "var(--color-error)" : "var(--color-text-muted)";
+                    const agentColors: Record<string, string> = {
+                      warren: "#34d399", auditor: "#fbbf24", klarman: "#60a5fa",
+                      soros: "#f472b6", druckenmiller: "#c084fc", dalio: "#fb923c",
+                      simons: "#a78bfa", lynch: "#38bdf8", data_analyst: "#94a3b8",
+                    };
+                    const agentInitials: Record<string, string> = {
+                      warren: "WB", auditor: "RA", klarman: "SK",
+                      soros: "GS", druckenmiller: "SD", dalio: "RD",
+                      simons: "JS", lynch: "PL", data_analyst: "DA",
+                    };
+                    const bg = agentColors[a.agent] ?? "var(--color-text-muted)";
+                    const initials = agentInitials[a.agent] ?? a.agent.charAt(0).toUpperCase();
+                    return (
+                      <div
+                        key={a.agent}
+                        title={`${a.agent}: ${a.summary || (a.sentiment > 0 ? "Bullish" : a.sentiment < 0 ? "Bearish" : "Neutral")}`}
+                        style={{
+                          width: 24, height: 24,
+                          borderRadius: 4,
+                          background: `${sentColor}18`,
+                          border: `1.5px solid ${bg}`,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 8, fontWeight: 700, fontFamily: "var(--font-mono)",
+                          color: bg,
+                          cursor: "default",
+                        }}
+                      >
+                        {initials}
+                      </div>
+                    );
+                  })}
+                  {action.consensus_score != null && (
+                    <span style={{
+                      fontSize: 10, fontFamily: "var(--font-mono)",
+                      color: "var(--color-text-muted)", marginLeft: 2,
+                    }}>
+                      cs:{action.consensus_score > 0 ? "+" : ""}{action.consensus_score.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              )}
+
               {action.ticker && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onTicker(action.ticker!); }}
@@ -236,7 +290,8 @@ function ActionRow({ action, onTicker }: { action: AdvisorAction; onTicker: (t: 
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 4,
-                    marginLeft: 8,
+                    marginTop: action.agent_summary?.length ? "var(--space-sm)" : 0,
+                    marginLeft: action.agent_summary?.length ? 0 : 8,
                     padding: "2px 8px",
                     background: "var(--color-accent-ghost)",
                     border: "1px solid rgba(99,102,241,0.15)",

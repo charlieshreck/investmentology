@@ -31,7 +31,10 @@ app.mount("/assets", StaticFiles(directory=PWA_DIR / "assets"), name="assets")
 
 @app.get("/manifest.webmanifest")
 async def manifest():
-    return FileResponse(PWA_DIR / "manifest.webmanifest")
+    return FileResponse(
+        PWA_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
 
 
 @app.get("/sw.js")

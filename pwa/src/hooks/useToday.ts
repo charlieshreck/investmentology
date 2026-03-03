@@ -47,6 +47,13 @@ export function useDailyBriefing() {
 
 // --- Portfolio Advisor Actions ---
 
+export interface AgentStanceSummary {
+  agent: string;
+  sentiment: number;
+  confidence: number;
+  summary: string;
+}
+
 export interface AdvisorAction {
   type: string;
   ticker: string | null;
@@ -58,6 +65,8 @@ export interface AdvisorAction {
   current_shares?: number;
   current_price?: number;
   current_weight?: number;
+  agent_summary?: AgentStanceSummary[];
+  consensus_score?: number;
 }
 
 export function usePortfolioAdvisor() {

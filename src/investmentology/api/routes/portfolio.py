@@ -1052,8 +1052,38 @@ def get_portfolio_advisor(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         pass
 
-    # -- 7. Ideal portfolio snapshot --
-    # Sort: high priority first, then medium, then low
+    # -- 7. Enrich with agent stances --
+    enriched_tickers: dict[str, dict] = {}
+    for action in actions:
+        t = action.get("ticker")
+        if not t or t in enriched_tickers:
+            continue
+        try:
+            v = registry.get_latest_verdict(t)
+            if v and v.get("agent_stances"):
+                stances = v["agent_stances"]
+                enriched_tickers[t] = {
+                    "agent_summary": [
+                        {
+                            "agent": s.get("agent") or s.get("name", ""),
+                            "sentiment": float(s.get("sentiment", 0)),
+                            "confidence": float(s.get("confidence", 0)),
+                            "summary": (s.get("summary") or "")[:80],
+                        }
+                        for s in stances if isinstance(s, dict)
+                    ],
+                    "consensus_score": float(v.get("consensus_score") or 0),
+                }
+        except Exception:
+            pass
+
+    for action in actions:
+        t = action.get("ticker")
+        if t and t in enriched_tickers:
+            action["agent_summary"] = enriched_tickers[t]["agent_summary"]
+            action["consensus_score"] = enriched_tickers[t]["consensus_score"]
+
+    # -- 8. Sort: high priority first, then medium, then low --
     priority_order = {"high": 0, "medium": 1, "low": 2}
     actions.sort(key=lambda a: priority_order.get(a["priority"], 99))
 

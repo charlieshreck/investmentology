@@ -8,6 +8,8 @@ import { MarketStatus } from "../components/shared/MarketStatus";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
+import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
+import { OrbitBorder } from "../components/shared/OrbitBorder";
 import { ChevronDown } from "lucide-react";
 
 import type { WatchlistItem, AgentStance } from "../types/models";
@@ -244,6 +246,7 @@ function ItemCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
+    <OrbitBorder verdict={v?.recommendation || "WATCHLIST"} radius={10}>
     <div style={{
       borderRadius: "var(--radius-sm)",
       overflow: "hidden",
@@ -406,11 +409,21 @@ function ItemCard({
             transition={{ duration: 0.15 }}
             style={{ overflow: "hidden" }}
           >
+            {/* Agent consensus — all 9 agents */}
+            {stances.length > 0 && (
+              <div style={{ padding: "var(--space-sm) var(--space-md)", borderBottom: "1px solid var(--glass-border)" }}>
+                <AgentConsensusPanel
+                  stances={stances}
+                  consensusScore={v?.consensusScore ?? null}
+                />
+              </div>
+            )}
             <EntryTriggerChecklist item={item} />
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+    </OrbitBorder>
   );
 }
 
