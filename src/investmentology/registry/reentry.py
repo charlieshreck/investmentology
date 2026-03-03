@@ -387,9 +387,9 @@ def create_gate_blocks(
     screener_signal_tags: list[list[str]],
     fundamentals: dict | None,
 ) -> int:
-    """Create reentry blocks from scout gate consensus (no verdict required).
+    """Create reentry blocks from scout gate rejection (no verdict required).
 
-    Called when both screeners agree to reject a ticker. Creates blocks using
+    Called when a screener rejects a ticker at the gate. Creates blocks using
     the same BLOCK_CONDITIONS mapping so they auto-clear when fundamentals change.
 
     Args:

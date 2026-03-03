@@ -628,30 +628,32 @@ FUNDAMENTAL_SCREENER = AgentSkill(
     default_model="llama-3.3-70b-versatile",
     cli_screen=None,
     methodology="""\
-Quickly assess whether this company's fundamentals warrant detailed analysis \
-by 8 specialist investment agents (costing significant compute time).
+You are an AGGRESSIVE filter. Each ticker you pass costs ~$5-10 in LLM compute \
+across 8 specialist agents. Your job is to protect that budget by only passing \
+companies with genuinely strong fundamentals.
 
-Your screening criteria — flag for REJECTION if ANY of these are clearly true:
-1. VALUATION SANITY: Is the stock absurdly overvalued with no growth to justify it? \
-P/E > 100x with declining revenue = reject. But high P/E with 40%+ growth = pass.
-2. PROFITABILITY: Is this a viable business? Negative operating income for a \
-mature company (market cap > $5B) with no turnaround story = reject.
-3. BALANCE SHEET: Is this company at risk of insolvency? Debt > 5x cash with \
-negative cash flow = reject. But leverage for growth with strong revenue = pass.
-4. REVENUE TRAJECTORY: Is the business shrinking? Revenue declining 20%+ YoY \
-with no turnaround catalyst = reject. Cyclical dips are NOT automatic rejects.
-5. SIZE & DATA: Is there enough data to analyze? Sub-$100M market cap with \
-minimal financial data = reject.
+REJECT unless the company demonstrates MOST of these qualities:
+1. PROFITABILITY: Positive operating income AND net income. Unprofitable companies \
+must show clear path to profitability (rapid revenue growth >30% AND improving margins).
+2. BALANCE SHEET HEALTH: Debt/equity < 2.0 for non-financials. Current ratio > 1.0. \
+No immediate solvency concerns. Leverage is acceptable only with strong cash flow.
+3. EARNINGS QUALITY: Positive and growing earnings. Declining EPS or net income \
+for 2+ periods = reject unless clear cyclical bottom with improving fundamentals.
+4. VALUATION DISCIPLINE: P/E > 50x = reject unless revenue growth > 30%. \
+P/E > 30x with declining revenue = reject. Negative P/E with no growth = reject.
+5. REVENUE TRAJECTORY: Revenue must be growing or stable. Declining revenue \
+with no turnaround evidence = reject. Flat revenue with margin compression = reject.
+6. RETURN ON CAPITAL: ROIC should exceed cost of capital (~8-10%). \
+Consistently below-average returns = reject.
 
-IMPORTANT: You are a COARSE filter, not a detailed analyst. When in doubt, PASS. \
-It is better to let a marginal company through than to miss an opportunity. \
-Only REJECT when the data clearly shows this is not worth analyzing.""",
+You should REJECT roughly 30-40% of tickers. Be decisive — mediocre companies \
+with no clear competitive advantage or growth story should be rejected.""",
     critical_rules=[
-        "When in doubt, PASS. Only REJECT when fundamentals are clearly disqualifying.",
-        "Cyclical downturns are NOT automatic rejections — context matters.",
-        "High-growth companies with current losses can still be worth analyzing.",
-        "Use REJECT for clear no-gos, REJECT_HARD for extreme cases (fraud indicators, penny stocks).",
-        "Your confidence should reflect how CERTAIN you are of the screening decision, not the investment merit.",
+        "When in doubt, REJECT. Passing a mediocre company wastes expensive compute.",
+        "Mediocre fundamentals = REJECT. Only pass companies with clear financial merit.",
+        "Use REJECT for weak fundamentals, REJECT_HARD for extreme cases (distressed, fraud indicators).",
+        "High-growth companies with current losses CAN pass if growth is exceptional (>30% rev growth).",
+        "Your confidence should reflect how CERTAIN you are of the screening decision.",
     ],
     required_data=["fundamentals", "sector", "industry"],
     optional_data=[
@@ -673,9 +675,10 @@ Only REJECT when the data clearly shows this is not worth analyzing.""",
     timeout_seconds=60,
     prompt_opener="Screen fundamentals for {ticker} ({sector} / {industry})",
     signature_question=(
-        "SCREENING DECISION: Based purely on the financial data, "
-        "does this company warrant detailed analysis by 8 specialist agents? "
-        "Use REJECT/REJECT_HARD action tag if NO, or BUY_NEW/HOLD/WATCHLIST_ADD if YES."
+        "SCREENING DECISION: Are the fundamentals strong enough to justify "
+        "$5-10 in compute across 8 specialist agents? Be selective — REJECT "
+        "mediocre companies. Use REJECT/REJECT_HARD if fundamentals are weak "
+        "or mediocre, BUY_NEW/WATCHLIST_ADD only if genuinely strong."
     ),
 )
 
@@ -692,28 +695,33 @@ MARKET_SCREENER = AgentSkill(
     default_model="deepseek-chat",
     cli_screen=None,
     methodology="""\
-Quickly assess whether there is a plausible investment thesis for this stock \
-that justifies detailed analysis by 8 specialist investment agents.
+You are an AGGRESSIVE filter. Each ticker you pass costs ~$5-10 in LLM compute \
+across 8 specialist agents. Your job is to only pass companies with a COMPELLING \
+investment thesis.
 
-Your screening criteria — flag for REJECTION if ALL of these are true:
-1. NO THESIS: Is there any identifiable investment story? Growth story, value \
-story, turnaround, dividend, asset play, catalyst? If none, reject.
-2. SECTOR HEADWINDS: Is the entire sector in structural decline with no \
-company-specific offsetting factors?
-3. VALUATION vs GROWTH: Is the stock priced for perfection with no margin \
-of safety? Extreme valuation with decelerating growth = reject.
-4. TECHNICAL CONTEXT: If technical data is available, is the stock in freefall \
-with no support? (Do NOT reject solely on technicals.)
+REJECT unless the company has a CLEAR, SPECIFIC investment thesis:
+1. IDENTIFIABLE EDGE: Can you articulate WHY this stock would outperform? \
+A vague "good company" is not a thesis. You need: growth catalyst, valuation \
+discount, turnaround trigger, competitive moat, or structural advantage.
+2. VALUATION SUPPORT: Is there margin of safety? Stocks trading above sector \
+median P/E with below-median growth = reject. Premium valuation needs premium \
+growth or premium quality to justify analysis.
+3. SECTOR POSITIONING: Is the company well-positioned within its sector? \
+Commodity businesses with no differentiation and average returns = reject. \
+Sector leaders or disruptors with clear advantages = pass.
+4. CATALYST OR TIMING: Is there a reason to analyze NOW? Stable, fairly-valued \
+companies with no near-term catalyst = reject. Save compute for actionable ideas.
+5. TECHNICAL CONTEXT: If available, severe technical deterioration (breakdown, \
+death cross) without fundamental improvement = reject.
 
-IMPORTANT: You are a COARSE filter. When in doubt, PASS. Almost every company \
-has SOME investment thesis — you only reject when there is genuinely nothing \
-to analyze. A company can be overvalued and still worth analyzing (to confirm \
-the overvaluation). Only reject clear no-gos.""",
+You should REJECT roughly 30-40% of tickers. Be selective — only pass companies \
+where you can articulate a specific reason the full analysis team should spend \
+time on this stock. "It might be interesting" is not enough.""",
     critical_rules=[
-        "When in doubt, PASS. Only REJECT when there is genuinely no thesis to investigate.",
-        "A company being overvalued is NOT an automatic reject — the agents need to confirm it.",
-        "Sector headwinds alone are not enough to reject — the company might be an exception.",
-        "Technical weakness alone is not enough to reject — the agents assess this.",
+        "When in doubt, REJECT. Passing a mediocre thesis wastes expensive compute.",
+        "You must articulate a SPECIFIC thesis to justify passing — vague potential is not enough.",
+        "Overvalued stocks with no catalyst or thesis = REJECT. Don't pass just to confirm overvaluation.",
+        "Commodity businesses with average returns and no edge = REJECT.",
         "Your confidence should reflect how CERTAIN you are of the screening decision.",
     ],
     required_data=["fundamentals", "sector", "industry"],
@@ -738,9 +746,10 @@ the overvaluation). Only reject clear no-gos.""",
     timeout_seconds=120,
     prompt_opener="Screen market position and thesis for {ticker} ({sector} / {industry})",
     signature_question=(
-        "SCREENING DECISION: Is there a plausible investment thesis here worth "
-        "investigating? Use REJECT/REJECT_HARD action tag if NO, "
-        "or BUY_NEW/HOLD/WATCHLIST_ADD if YES."
+        "SCREENING DECISION: Is there a COMPELLING, SPECIFIC investment thesis "
+        "that justifies $5-10 in compute across 8 specialist agents? Be selective "
+        "— REJECT stocks with no clear edge or catalyst. Use REJECT/REJECT_HARD "
+        "if no strong thesis, BUY_NEW/WATCHLIST_ADD only if genuinely compelling."
     ),
 )
 

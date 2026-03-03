@@ -355,8 +355,9 @@ class PipelineController:
                 if action_tags:
                     reject_count += 1
 
-            # Gate decision: FAIL only if ALL screeners reject
-            if reject_count >= len(screener_results) and reject_count >= 2:
+            # Gate decision: FAIL if EITHER screener rejects
+            # Both screeners must see value to justify expensive analysis
+            if reject_count > 0:
                 self._gate_fail(cycle_id, ticker, step_id, screener_tags)
             else:
                 self._gate_pass(cycle_id, ticker, step_id)
