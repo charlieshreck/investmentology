@@ -6,17 +6,18 @@ export interface BriefingSummary {
   date: string;
   pendulumScore: number;
   pendulumLabel: string;
-  sizingMultiplier: number;
   positionCount: number;
   totalValue: number;
-  alertCounts: { critical: number; high: number; medium: number };
+  totalUnrealizedPnl: number;
+  newRecommendationCount: number;
+  alertCount: number;
+  criticalAlertCount: number;
+  overallRiskLevel: string;
   topActions: {
-    type: string;
+    priority: number;
+    category: string;
     ticker: string | null;
-    priority: string;
-    title: string;
-    detail: string;
-    reasoning: string;
+    action: string;
   }[];
 }
 

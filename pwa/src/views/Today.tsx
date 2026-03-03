@@ -605,7 +605,7 @@ export function Today() {
         </BentoCard>
 
         {/* ═══════ Alerts ═══════ */}
-        {briefing && (briefing.alertCounts.critical > 0 || briefing.alertCounts.high > 0) && (
+        {briefing && (briefing.criticalAlertCount > 0 || briefing.alertCount > 0) && (
           <BentoCard variant="error" compact>
             <div style={{
               display: "flex",
@@ -618,9 +618,9 @@ export function Today() {
                 fontWeight: 600,
                 color: "var(--color-text)",
               }}>
-                {briefing.alertCounts.critical > 0
-                  ? `${briefing.alertCounts.critical} critical alert${briefing.alertCounts.critical > 1 ? "s" : ""}`
-                  : `${briefing.alertCounts.high} high-priority alert${briefing.alertCounts.high > 1 ? "s" : ""}`
+                {briefing.criticalAlertCount > 0
+                  ? `${briefing.criticalAlertCount} critical alert${briefing.criticalAlertCount > 1 ? "s" : ""}`
+                  : `${briefing.alertCount} alert${briefing.alertCount > 1 ? "s" : ""}`
                 }
               </span>
               <button
