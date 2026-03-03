@@ -7,6 +7,7 @@ resources:
   - namespace.yaml
   - infisical-secret.yaml
   - deployment.yaml
+  - controller-deployment.yaml
   - service.yaml
   - ingress.yaml
   - cronjob-price-refresh.yaml

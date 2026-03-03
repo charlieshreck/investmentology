@@ -6,6 +6,7 @@ Provides commands for running the pipeline stages:
   - monitor: Run daily monitoring loop
   - status: Show pipeline and portfolio status
   - migrate: Run database migrations
+  - controller: Run the agent-first pipeline controller
 """
 
 from __future__ import annotations
@@ -443,6 +444,57 @@ def cmd_cron(args: argparse.Namespace) -> None:
         raise
 
 
+def cmd_controller(args: argparse.Namespace) -> None:
+    """Run the agent-first pipeline controller.
+
+    Long-running process that polls pipeline_state every 60 seconds,
+    dispatches agent work to CLI queues or API calls, and manages
+    convergence/debate/synthesis.
+    """
+    import signal
+
+    from investmentology.agents.gateway import LLMGateway
+    from investmentology.pipeline.controller import PipelineController
+
+    config = load_config()
+    db = Database(config.db_dsn)
+    db.connect()
+    gateway = LLMGateway.from_config(config)
+
+    controller = PipelineController(db, gateway)
+
+    async def _run() -> None:
+        await controller.start()
+        loop = asyncio.get_event_loop()
+
+        # Graceful shutdown on SIGTERM/SIGINT
+        stop_event = asyncio.Event()
+
+        def _signal_handler() -> None:
+            logging.info("Shutdown signal received")
+            stop_event.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _signal_handler)
+
+        logging.info("Pipeline controller running (Ctrl+C to stop)")
+
+        # Run controller loop in a task so we can cancel on signal
+        loop_task = asyncio.create_task(controller.run_loop())
+        await stop_event.wait()
+
+        # Shutdown
+        controller._running = False
+        loop_task.cancel()
+        try:
+            await loop_task
+        except asyncio.CancelledError:
+            pass
+        await controller.stop()
+
+    asyncio.run(_run())
+
+
 def cmd_migrate(args: argparse.Namespace) -> None:
     """Run database migrations."""
     config = load_config()
@@ -494,6 +546,9 @@ def main(argv: list[str] | None = None) -> None:
     p_cron.add_argument("--min-hours", type=int, default=20,
                         help="Min hours since last analysis (daily-watchlist-analyze)")
 
+    # controller
+    subs.add_parser("controller", help="Run agent-first pipeline controller")
+
     # migrate
     subs.add_parser("migrate", help="Run database migrations")
 
@@ -506,6 +561,7 @@ def main(argv: list[str] | None = None) -> None:
         "monitor": cmd_monitor,
         "status": cmd_status,
         "cron": cmd_cron,
+        "controller": cmd_controller,
         "migrate": cmd_migrate,
     }
     commands[args.command](args)

@@ -6,3 +6,4 @@ export { Decisions } from "./Decisions";
 export { Learning } from "./Learning";
 export { SystemHealth } from "./SystemHealth";
 export { Analyse } from "./Analyse";
+export { Pipeline } from "./Pipeline";

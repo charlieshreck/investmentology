@@ -29,11 +29,19 @@ if not PROXY_TOKEN:
     raise RuntimeError("HB_PROXY_TOKEN env var is required")
 
 AGENT_CONFIG = {
-    "soros": {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 300},
-    "auditor": {"cli": "claude", "model": "claude-opus-4-6", "timeout": 300},
-    # Advisory Board paired prompts (L5.5)
-    "board-gemini": {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 180},
-    "board-claude": {"cli": "claude", "model": "claude-opus-4-6", "timeout": 180},
+    # Claude CLI screen agents
+    "warren":       {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
+    "auditor":      {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
+    "klarman":      {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
+    "debate":       {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
+    "synthesis":    {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
+    "board-claude": {"cli": "claude", "model": "claude-opus-4-6", "timeout": 360},
+    # Gemini CLI screen agents
+    "soros":          {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
+    "druckenmiller":  {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
+    "dalio":          {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
+    "data-analyst":   {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
+    "board-gemini":   {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 360},
 }
 
 app = FastAPI(title="HB Agent Proxy", docs_url=None, redoc_url=None)

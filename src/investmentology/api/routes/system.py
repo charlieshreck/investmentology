@@ -44,36 +44,26 @@ def _provider_status(gateway: LLMGateway) -> dict[str, bool]:
     return status
 
 
-AGENT_PROFILES = {
-    "warren": {
-        "name": "Warren",
-        "role": "Fundamentals Analyst",
-        "philosophy": "Warren Buffett",
-        "focus": "Intrinsic value, moat quality, earnings quality, balance sheet strength",
-        "category": "Fundamental",
-    },
-    "soros": {
-        "name": "Soros",
-        "role": "Macro/Cycle Analyst",
-        "philosophy": "George Soros",
-        "focus": "Macro regime, sector rotation, credit conditions, reflexivity",
-        "category": "Macro",
-    },
-    "simons": {
-        "name": "Simons",
-        "role": "Technical Analyst",
-        "philosophy": "Jim Simons",
-        "focus": "Trend, momentum, volume, support/resistance, relative strength",
-        "category": "Technical",
-    },
-    "auditor": {
-        "name": "Auditor",
-        "role": "Risk Analyst",
-        "philosophy": "Charlie Munger",
-        "focus": "Concentration, correlation, leverage, liquidity, governance, accounting",
-        "category": "Risk",
-    },
-}
+def _build_agent_profiles() -> dict[str, dict]:
+    """Build agent profiles from the skills registry."""
+    try:
+        from investmentology.agents.skills import SKILLS
+        profiles = {}
+        for name, skill in SKILLS.items():
+            if name == "data_analyst":
+                continue  # Validator, not shown in panel
+            profiles[name] = {
+                "name": skill.display_name.split()[-1] if " " in skill.display_name else skill.display_name,
+                "role": skill.role.title(),
+                "philosophy": skill.display_name,
+                "focus": skill.philosophy[:80],
+                "category": skill.role.title(),
+            }
+        return profiles
+    except ImportError:
+        return {}
+
+AGENT_PROFILES = _build_agent_profiles()
 
 
 @router.get("/agents/panel")
@@ -85,33 +75,19 @@ def agents_panel(
     """Agent panel: profiles, providers, and recent activity."""
     providers = _provider_status(gateway)
 
-    # Agent-to-provider/model mapping from gateway
+    # Agent-to-provider/model mapping from skills registry
     agent_providers = {}
-    provider_map = {
-        "warren": ("deepseek", "DeepSeek R1"),
-        "simons": ("groq", "Groq Llama"),
-    }
-    for agent, (prov_key, label) in provider_map.items():
-        if prov_key in gateway._providers:
-            cfg = gateway._providers[prov_key]
-            agent_providers[agent] = {"provider": label, "model": cfg.default_model}
-
-    cli_map = {
-        "auditor": ("claude-cli", "Claude CLI"),
-        "soros": ("gemini-cli", "Gemini CLI"),
-    }
-    for agent, (cli_key, label) in cli_map.items():
-        if cli_key in gateway._cli_providers:
-            cfg = gateway._cli_providers[cli_key]
-            agent_providers[agent] = {"provider": label, "model": cfg.default_model}
-
-    # Fallbacks for API providers
-    if "auditor" not in agent_providers and "anthropic" in gateway._providers:
-        cfg = gateway._providers["anthropic"]
-        agent_providers["auditor"] = {"provider": "Anthropic API", "model": cfg.default_model}
-    if "soros" not in agent_providers and "xai" in gateway._providers:
-        cfg = gateway._providers["xai"]
-        agent_providers["soros"] = {"provider": "xAI Grok", "model": cfg.default_model}
+    try:
+        from investmentology.agents.skills import SKILLS
+        for name, skill in SKILLS.items():
+            if name == "data_analyst":
+                continue
+            agent_providers[name] = {
+                "provider": skill.provider_preference[0] if skill.provider_preference else "unknown",
+                "model": skill.default_model,
+            }
+    except ImportError:
+        pass
 
     # Per-agent stats
     stat_rows = registry._db.execute(

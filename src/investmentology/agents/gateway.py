@@ -519,46 +519,46 @@ class LLMGateway:
 
         # Register remote CLI providers (K8s pod delegates to HB LXC)
         if config.hb_proxy_url and config.hb_proxy_token:
-            gw.register_remote_cli_provider(
-                RemoteCLIProviderConfig(
-                    name="remote-soros",
-                    remote_url=config.hb_proxy_url,
-                    agent_name="soros",
-                    auth_token=config.hb_proxy_token,
-                    default_model="gemini-2.5-pro",
-                    timeout_seconds=300,
+            _url = config.hb_proxy_url
+            _tok = config.hb_proxy_token
+
+            # Claude CLI screen agents
+            for name, agent, model in [
+                ("remote-warren", "warren", "claude-opus-4-6"),
+                ("remote-auditor", "auditor", "claude-opus-4-6"),
+                ("remote-klarman", "klarman", "claude-opus-4-6"),
+                ("remote-debate", "debate", "claude-opus-4-6"),
+                ("remote-synthesis", "synthesis", "claude-opus-4-6"),
+                ("remote-board-claude", "board-claude", "claude-opus-4-6"),
+            ]:
+                gw.register_remote_cli_provider(
+                    RemoteCLIProviderConfig(
+                        name=name,
+                        remote_url=_url,
+                        agent_name=agent,
+                        auth_token=_tok,
+                        default_model=model,
+                        timeout_seconds=600,
+                    )
                 )
-            )
-            gw.register_remote_cli_provider(
-                RemoteCLIProviderConfig(
-                    name="remote-auditor",
-                    remote_url=config.hb_proxy_url,
-                    agent_name="auditor",
-                    auth_token=config.hb_proxy_token,
-                    default_model="claude-opus-4-6",
-                    timeout_seconds=300,
+
+            # Gemini CLI screen agents
+            for name, agent, model in [
+                ("remote-soros", "soros", "gemini-2.5-pro"),
+                ("remote-druckenmiller", "druckenmiller", "gemini-2.5-pro"),
+                ("remote-dalio", "dalio", "gemini-2.5-pro"),
+                ("remote-data-analyst", "data-analyst", "gemini-2.5-pro"),
+                ("remote-board-gemini", "board-gemini", "gemini-2.5-pro"),
+            ]:
+                gw.register_remote_cli_provider(
+                    RemoteCLIProviderConfig(
+                        name=name,
+                        remote_url=_url,
+                        agent_name=agent,
+                        auth_token=_tok,
+                        default_model=model,
+                        timeout_seconds=600,
+                    )
                 )
-            )
-            # Advisory Board remote CLI providers (paired prompts)
-            gw.register_remote_cli_provider(
-                RemoteCLIProviderConfig(
-                    name="remote-board-gemini",
-                    remote_url=config.hb_proxy_url,
-                    agent_name="board-gemini",
-                    auth_token=config.hb_proxy_token,
-                    default_model="gemini-2.5-pro",
-                    timeout_seconds=180,
-                )
-            )
-            gw.register_remote_cli_provider(
-                RemoteCLIProviderConfig(
-                    name="remote-board-claude",
-                    remote_url=config.hb_proxy_url,
-                    agent_name="board-claude",
-                    auth_token=config.hb_proxy_token,
-                    default_model="claude-opus-4-6",
-                    timeout_seconds=180,
-                )
-            )
 
         return gw

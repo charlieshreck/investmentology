@@ -12,6 +12,7 @@ import { Analyse } from "./views/Analyse";
 import { Learning } from "./views/Learning";
 import { SystemHealth } from "./views/SystemHealth";
 import { Agents } from "./views/Agents";
+import { Pipeline } from "./views/Pipeline";
 import { Recommendations } from "./views/Recommendations";
 import { Backtest } from "./views/Backtest";
 import { SettingsView } from "./views/SettingsView";
@@ -166,6 +167,7 @@ function AppShell({ offline }: { offline: boolean }) {
             <Route path="/learning" element={<PageTransition><Learning /></PageTransition>} />
             <Route path="/recommendations" element={<PageTransition><Recommendations /></PageTransition>} />
             <Route path="/agents" element={<PageTransition><Agents /></PageTransition>} />
+            <Route path="/pipeline" element={<PageTransition><Pipeline /></PageTransition>} />
             <Route path="/backtest" element={<PageTransition><Backtest /></PageTransition>} />
             <Route path="/health" element={<PageTransition><SystemHealth /></PageTransition>} />
             <Route path="/settings" element={<PageTransition><SettingsView /></PageTransition>} />

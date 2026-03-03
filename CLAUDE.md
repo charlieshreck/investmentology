@@ -53,6 +53,7 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 - `Dockerfile` — Multi-stage: builds PWA (node), then Python API + copies `pwa/dist`
 - `serve.py` — FastAPI app that serves API routes AND PWA static files (SPA fallback)
 - `k8s/base/deployment.yaml` — K8s deployment (image, env, probes)
+- `k8s/base/controller-deployment.yaml` — K8s deployment for pipeline controller
 - `k8s/base/service.yaml` — NodePort 30580
 - `k8s/base/ingress.yaml` — Traefik ingress for `haute-banque.kernow.io`
 - `k8s/argocd-app.yaml` — ArgoCD Application targeting agentic cluster
@@ -77,29 +78,63 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 - LLM-assessed: Circle of Competence + Moat Analysis
 - Source: `src/investmentology/competence/`
 
-### Layer 3: Multi-Agent Analysis (8-Agent Consensus)
-Eight independent agents with weighted voting:
-| Agent | Focus | Provider | Model |
-|-------|-------|----------|-------|
-| Warren | Fundamentals, intrinsic value | DeepSeek API | deepseek-reasoner |
-| Soros | Macro, cycles, geopolitics | Gemini CLI / Remote proxy | gemini-2.5-pro |
-| Simons | Technicals, momentum, timing | Groq API | llama-3.3-70b |
-| Auditor | Risk, correlation, portfolio | Claude CLI / Remote proxy | claude-opus-4-6 |
-| Dalio | All Weather, macro cycles, debt dynamics | Groq API | llama-3.3-70b |
-| Lynch | GARP, stock classification, PEG | Groq API | llama-3.3-70b |
-| Druckenmiller | Catalysts, risk/reward asymmetry, sizing | DeepSeek API | deepseek-reasoner |
-| Klarman | Margin of safety, bear case, downside | DeepSeek API | deepseek-reasoner |
+### Layer 3: Multi-Agent Analysis (Agent-First Pipeline)
 
-**All 8 agents run on every analysis** (web UI and overnight pipeline):
-- **K8s pod**: Warren + Simons + Dalio + Lynch + Druckenmiller + Klarman use HTTP APIs directly; Soros + Auditor delegate to HB LXC proxy (`HB_PROXY_URL`)
-- **HB LXC**: All 8 agents run locally (CLI subscriptions for Soros + Auditor)
-- Provider preference order: local CLI > remote proxy > HTTP API fallback
-- `HB_PROXY_URL` + `HB_PROXY_TOKEN` env vars enable remote proxy on K8s pod
-- `USE_GEMINI_CLI=1` / `USE_CLAUDE_CLI=1` env vars enable local CLI on HB LXC
-- Proxy service: `scripts/hb-agent-proxy.py` on HB LXC:9100 (systemd: `hb-agent-proxy.service`)
+**Architecture**: Agent-first, event-driven pipeline with per-agent independence. Each agent runs across all its tickers independently (not per-ticker-all-agents). State tracked in `invest.pipeline_state` table with 24h staleness window.
+
+#### Agent Skills Framework
+
+All 8 investment agents + Data Analyst defined as `AgentSkill` dataclass in `agents/skills.py`. A single `AgentRunner` class (`agents/runner.py`) replaces all individual agent classes.
+
+| Agent | Role | Provider | Model | CLI Screen | Weight |
+|-------|------|----------|-------|------------|--------|
+| **Warren** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.18 |
+| **Auditor** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.14 |
+| **Klarman** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.14 |
+| **Soros** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.14 |
+| **Druckenmiller** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.12 |
+| **Dalio** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.12 |
+| **Data Analyst** | Validator | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.0 |
+| **Simons** | Scout | Groq API | llama-3.3-70b | None (API) | 0.08 |
+| **Lynch** | Scout | DeepSeek API | deepseek-reasoner | None (API) | 0.08 |
+
+#### Pipeline Flow
+
+```
+Controller (K8s, 60s poll) monitors invest.pipeline_state:
+  data_fetch → data_validate (Data Analyst) → agent:{name} (8 agents)
+    → debate (if <75% consensus) → synthesis (CIO verdict)
+```
+
+- **CLI serialization**: Two async queues (claude/gemini). Warren runs all tickers, then Auditor, then Klarman. Similarly for Gemini screen.
+- **API agents** (Simons, Lynch): Run in parallel via HTTP, bypass CLI queues entirely.
+- **Hybrid debate**: Only triggers when primary agents disagree (<75% sentiment agreement).
+- **Staleness**: All pipeline rows expire after 24h. Controller retries failed steps (max 2).
+
+#### Key Files — Pipeline
+
+| File | Purpose |
+|------|---------|
+| `agents/skills.py` | `AgentSkill` dataclass + `SKILLS` registry (9 skills) |
+| `agents/runner.py` | Generic `AgentRunner` (prompt builder, response parser, provider resolution) |
+| `pipeline/controller.py` | Main K8s controller loop (dispatches work every 60s) |
+| `pipeline/scheduler.py` | `CLIScheduler` with claude/gemini async queue workers |
+| `pipeline/convergence.py` | Debate trigger logic + synthesis readiness checks |
+| `pipeline/state.py` | Pipeline state DB operations (CRUD, expiry, readiness queries) |
+| `registry/migrations/012_pipeline_state.sql` | `pipeline_state` + `pipeline_cycles` tables |
+
+#### HB Proxy (11 routes)
+
+`scripts/hb-agent-proxy.py` on HB LXC:9100. Routes CLI calls to claude/gemini screens:
+
+- **Claude screen**: warren, auditor, klarman, debate, synthesis, board-claude
+- **Gemini screen**: soros, druckenmiller, dalio, data-analyst, board-gemini
+- All agent timeouts: 600s. Board timeouts: 360s.
+- Provider preference: remote CLI proxy > local CLI > HTTP API fallback
+- `HB_PROXY_URL` + `HB_PROXY_TOKEN` env vars on K8s pod
 - **NEVER add ANTHROPIC_API_KEY or GROK_API_KEY to the K8s pod** — CLI subscriptions are the intended path
 
-Source: `src/investmentology/agents/`
+Source: `src/investmentology/agents/`, `src/investmentology/pipeline/`
 
 ### Layer 4: Adversarial Check (Munger)
 - Bias checklist (25 cognitive biases)
@@ -153,15 +188,18 @@ produces nonsensical verdicts (e.g. labelling a $16B revenue defense contractor 
 
 ---
 
-## Current Phase: Phase 1 (Foundation)
+## Current Phase: Pipeline Rearchitecture (Phase 1-4 complete)
 
-Build priority order:
-1. **Decision Registry** - PostgreSQL schema for logging ALL decisions
-2. **Quant Gate** - Greenblatt screener (pure Python, no LLM)
-3. **Data Integration** - yfinance + Alpaca paper trading
-4. **Weekly Review** - Automated portfolio review process
+### Completed
+- [x] **Phase 1**: Skills framework — `AgentSkill` dataclass + generic `AgentRunner`
+- [x] **Phase 2**: Pipeline state machine — DB migration, controller, scheduler, convergence
+- [x] **Phase 3**: HB proxy (11 routes), gateway (11 providers), CLI entry point, K8s controller deployment, DB migration 012 applied live
+- [x] **Phase 4**: Pipeline API routes (`/api/invest/pipeline/*`), agent panel uses skills registry
 
-### Phase 1 "Done" Criteria
+### Remaining
+- [ ] **Phase 5**: Cleanup — retire old orchestrator + individual agent classes (after end-to-end validation with live traffic)
+
+### Foundation (ongoing)
 - [ ] Magic Formula runs on 5000+ stocks weekly
 - [ ] Top 100 logged to Decision Registry
 - [ ] Paper portfolio tracking operational

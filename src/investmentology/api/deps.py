@@ -30,6 +30,12 @@ class AppState:
 app_state = AppState()
 
 
+def get_db() -> Database:
+    if app_state.db is None:
+        raise RuntimeError("Database not initialised")
+    return app_state.db
+
+
 def get_registry() -> Registry:
     if app_state.registry is None:
         raise RuntimeError("Registry not initialised")

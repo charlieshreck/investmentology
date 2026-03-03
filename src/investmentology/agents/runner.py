@@ -1,0 +1,586 @@
+"""Generic AgentRunner — replaces individual agent classes.
+
+Uses AgentSkill definitions to build prompts, route to providers,
+parse responses, and apply post-processing rules.  A single class
+handles all investment persona agents (Warren, Soros, Simons, etc.)
+as well as the Data Analyst validator.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from decimal import Decimal
+
+from investmentology.agents.base import AnalysisRequest, AnalysisResponse
+from investmentology.agents.gateway import LLMGateway
+from investmentology.agents.skills import AgentSkill
+from investmentology.compatibility.taxonomy import ALL_DOMAIN_TAGS, resolve_tag
+from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
+
+logger = logging.getLogger(__name__)
+
+_VALID_TAGS = ALL_DOMAIN_TAGS
+
+
+class AgentRunner:
+    """Generic agent that builds prompts and routes calls via AgentSkill."""
+
+    def __init__(self, skill: AgentSkill, gateway: LLMGateway) -> None:
+        self.skill = skill
+        self.gateway = gateway
+
+    # ------------------------------------------------------------------
+    # System prompt
+    # ------------------------------------------------------------------
+
+    def build_system_prompt(self) -> str:
+        """Assemble the system prompt from skill fields."""
+        parts = [
+            f"You are {self.skill.display_name}.",
+            "",
+            self.skill.philosophy,
+            "",
+            self.skill.methodology,
+            "",
+        ]
+
+        # Critical rules
+        if self.skill.critical_rules:
+            parts.append("CRITICAL RULES:")
+            for i, rule in enumerate(self.skill.critical_rules, 1):
+                parts.append(f"{i}. {rule}")
+            parts.append("")
+
+        # Allowed tags — list them so the LLM knows what to use
+        if self.skill.allowed_tags:
+            parts.append(f"Allowed signal tags: {', '.join(self.skill.allowed_tags)}")
+            parts.append("")
+
+        # Output format
+        parts.append(self.skill.output_format)
+
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # User prompt — built from AnalysisRequest + skill data requirements
+    # ------------------------------------------------------------------
+
+    def build_user_prompt(self, request: AnalysisRequest) -> str:
+        """Build the user prompt from the skill's data requirements."""
+        parts: list[str] = []
+
+        # Opening line
+        opener = self.skill.prompt_opener.format(
+            ticker=request.ticker,
+            sector=request.sector,
+            industry=request.industry,
+        )
+        parts.append(opener)
+
+        # Fundamentals — always included (in required_data for all skills)
+        parts.extend(self._fmt_fundamentals(request))
+
+        # Optional context sections — include only those listed in optional_data
+        opt = set(self.skill.optional_data)
+
+        if "quant_gate_rank" in opt and request.quant_gate_rank is not None:
+            parts.append(f"  Quant Gate Rank: {request.quant_gate_rank}")
+        if "piotroski_score" in opt and request.piotroski_score is not None:
+            parts.append(f"  Piotroski F-Score: {request.piotroski_score}")
+        if "altman_z_score" in opt and request.altman_z_score is not None:
+            parts.append(f"  Altman Z-Score: {request.altman_z_score}")
+
+        if "earnings_context" in opt and request.earnings_context:
+            parts.extend(self._fmt_earnings(request.earnings_context))
+
+        if "news_context" in opt and request.news_context:
+            parts.extend(self._fmt_news(request.news_context))
+
+        if "insider_context" in opt and request.insider_context:
+            parts.extend(self._fmt_insider(request.insider_context))
+
+        if "filing_context" in opt and request.filing_context:
+            parts.extend(self._fmt_filing(request.filing_context))
+
+        if "institutional_context" in opt and request.institutional_context:
+            parts.extend(self._fmt_institutional(request.institutional_context))
+
+        if "social_sentiment" in opt and request.social_sentiment:
+            parts.extend(self._fmt_social(request))
+
+        if "macro_context" in opt and request.macro_context:
+            parts.extend(self._fmt_macro(request.macro_context))
+
+        if "market_snapshot" in opt and request.market_snapshot:
+            parts.extend(self._fmt_market_snapshot(request.market_snapshot))
+
+        if "technical_indicators" in opt:
+            parts.extend(self._fmt_technical(request))
+
+        if "portfolio_context" in opt and request.portfolio_context:
+            parts.extend(self._fmt_portfolio(request))
+
+        # Thesis lifecycle context
+        if "position_thesis" in opt and request.position_thesis:
+            parts.extend(self._fmt_thesis(request))
+
+        # Previous verdict
+        if "previous_verdict" in opt and request.previous_verdict:
+            parts.extend(self._fmt_previous_verdict(request.previous_verdict))
+
+        # Entry price / P&L context
+        if "entry_price" in opt and request.entry_price is not None:
+            parts.append("")
+            parts.append("POSITION METRICS:")
+            parts.append(f"  Entry price: ${request.entry_price:.2f}")
+            if request.pnl_pct is not None:
+                parts.append(f"  Unrealized P&L: {request.pnl_pct:+.1f}%")
+
+        # Signature question (closing line)
+        if self.skill.signature_question:
+            parts.append("")
+            parts.append(self.skill.signature_question)
+
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Response parsing
+    # ------------------------------------------------------------------
+
+    def parse_response(self, raw: str, request: AnalysisRequest) -> AgentSignalSet:
+        """Parse LLM JSON response into an AgentSignalSet."""
+        data = self._extract_json(raw)
+        if data is None:
+            logger.warning(
+                "%s: failed to parse JSON for %s",
+                self.skill.display_name, request.ticker,
+            )
+            return self._empty_signal_set()
+
+        # Data Analyst has a different output schema
+        if self.skill.role == "validator":
+            return self._parse_validator_response(data)
+
+        return self._parse_standard_response(data, request)
+
+    def _parse_standard_response(
+        self, data: dict, request: AnalysisRequest,
+    ) -> AgentSignalSet:
+        """Parse the standard investment agent JSON response."""
+        signals: list[Signal] = []
+        for s in data.get("signals", []):
+            tag_str = resolve_tag(s.get("tag", ""))
+            try:
+                tag = SignalTag(tag_str)
+            except ValueError:
+                logger.warning(
+                    "%s: unknown signal tag %r, skipping",
+                    self.skill.display_name, tag_str,
+                )
+                continue
+            if tag not in _VALID_TAGS:
+                logger.warning(
+                    "%s: tag %s not in valid set, skipping",
+                    self.skill.display_name, tag,
+                )
+                continue
+            strength = s.get("strength", "moderate")
+            if strength not in ("strong", "moderate", "weak"):
+                strength = "moderate"
+            signals.append(Signal(tag=tag, strength=strength, detail=s.get("detail", "")))
+
+        try:
+            confidence = Decimal(str(data.get("confidence", 0.5)))
+            confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+        except Exception:
+            confidence = Decimal("0.5")
+
+        target_price = data.get("target_price")
+        if target_price is not None:
+            try:
+                target_price = Decimal(str(target_price))
+            except Exception:
+                target_price = None
+
+        # Post-processing: Simons data gate
+        if self.skill.name == "simons" and not request.technical_indicators:
+            confidence = min(confidence, Decimal("0.15"))
+            if not any(s.tag == SignalTag.NO_ACTION for s in signals):
+                signals.append(Signal(
+                    tag=SignalTag.NO_ACTION,
+                    strength="strong",
+                    detail="No technical indicators available — cannot assess",
+                ))
+
+        return AgentSignalSet(
+            agent_name=self.skill.name,
+            model=self.skill.default_model,
+            signals=SignalSet(signals=signals),
+            confidence=confidence,
+            reasoning=data.get("summary", ""),
+            target_price=target_price,
+        )
+
+    def _parse_validator_response(self, data: dict) -> AgentSignalSet:
+        """Parse a Data Analyst validation response."""
+        status = data.get("status", "REJECTED")
+        issues = data.get("issues", [])
+        summary = data.get("summary", "")
+
+        try:
+            confidence = Decimal(str(data.get("confidence", 0.5)))
+            confidence = max(Decimal("0"), min(Decimal("1"), confidence))
+        except Exception:
+            confidence = Decimal("0.5")
+
+        # Map status to a pseudo-signal for pipeline consumption
+        tag_map = {
+            "VALIDATED": "DATA_VALIDATED",
+            "SUSPICIOUS": "DATA_SUSPICIOUS",
+            "REJECTED": "DATA_REJECTED",
+        }
+        tag_str = tag_map.get(status, "DATA_REJECTED")
+
+        detail_parts = []
+        for issue in issues[:5]:
+            detail_parts.append(
+                f"{issue.get('field', '?')}: {issue.get('detail', '')}"
+            )
+        detail = "; ".join(detail_parts) if detail_parts else status
+
+        # DATA_VALIDATED etc. are not in SignalTag enum — use reasoning field
+        return AgentSignalSet(
+            agent_name=self.skill.name,
+            model=self.skill.default_model,
+            signals=SignalSet(signals=[]),
+            confidence=confidence,
+            reasoning=f"[{tag_str}] {summary}",
+        )
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    async def analyze(self, request: AnalysisRequest) -> AnalysisResponse:
+        """Run analysis using the skill's provider preference."""
+        system_prompt = self.build_system_prompt()
+        user_prompt = self.build_user_prompt(request)
+
+        provider = self._resolve_provider()
+        model = self.skill.default_model
+
+        llm_response = await self.gateway.call(
+            provider=provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+        )
+
+        signal_set = self.parse_response(llm_response.content, request)
+        signal_set.token_usage = llm_response.token_usage
+        signal_set.latency_ms = llm_response.latency_ms
+
+        return AnalysisResponse(
+            agent_name=self.skill.name,
+            model=llm_response.model or model,
+            ticker=request.ticker,
+            signal_set=signal_set,
+            summary=signal_set.reasoning,
+            target_price=signal_set.target_price,
+            token_usage=llm_response.token_usage,
+            latency_ms=llm_response.latency_ms,
+        )
+
+    # ------------------------------------------------------------------
+    # Provider resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_provider(self) -> str:
+        """Pick the first available provider from the skill's preference list."""
+        all_providers = (
+            set(self.gateway._providers)
+            | set(self.gateway._cli_providers)
+            | set(self.gateway._remote_cli_providers)
+        )
+        for candidate in self.skill.provider_preference:
+            if candidate in all_providers:
+                return candidate
+
+        raise RuntimeError(
+            f"No available provider for {self.skill.name}. "
+            f"Tried: {self.skill.provider_preference}. "
+            f"Available: {sorted(all_providers)}"
+        )
+
+    # ------------------------------------------------------------------
+    # JSON extraction helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_json(raw: str) -> dict | None:
+        """Extract JSON from raw LLM output, handling code fences."""
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        # Try extracting from code fences
+        stripped = raw.strip()
+        if "```" in stripped:
+            lines = stripped.split("\n")
+            json_lines: list[str] = []
+            inside = False
+            for line in lines:
+                if line.strip().startswith("```"):
+                    inside = not inside
+                    continue
+                if inside:
+                    json_lines.append(line)
+            try:
+                return json.loads("\n".join(json_lines))
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _empty_signal_set(self) -> AgentSignalSet:
+        return AgentSignalSet(
+            agent_name=self.skill.name,
+            model=self.skill.default_model,
+            signals=SignalSet(signals=[]),
+            confidence=Decimal("0"),
+            reasoning="Failed to parse LLM response",
+            parse_failed=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Prompt section formatters
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fmt_fundamentals(request: AnalysisRequest) -> list[str]:
+        """Format the fundamentals section."""
+        f = request.fundamentals
+        parts = [
+            "",
+            "FUNDAMENTALS:",
+            f"  Price: ${f.price}",
+            f"  Market Cap: ${float(f.market_cap):,.0f}",
+        ]
+        if f.enterprise_value:
+            parts.append(f"  Enterprise Value: ${float(f.enterprise_value):,.0f}")
+        parts.extend([
+            f"  Revenue: ${float(f.revenue):,.0f}",
+            f"  Net Income: ${float(f.net_income):,.0f}",
+        ])
+        if f.operating_income:
+            parts.append(f"  Operating Income: ${float(f.operating_income):,.0f}")
+        if f.earnings_yield:
+            parts.append(f"  Earnings Yield: {float(f.earnings_yield):.1%}")
+        if f.roic:
+            parts.append(f"  ROIC: {float(f.roic):.1%}")
+        parts.extend([
+            f"  Total Debt: ${float(f.total_debt):,.0f}",
+            f"  Cash: ${float(f.cash):,.0f}",
+        ])
+        if f.total_assets:
+            parts.append(f"  Total Assets: ${float(f.total_assets):,.0f}")
+        if f.total_liabilities:
+            parts.append(f"  Total Liabilities: ${float(f.total_liabilities):,.0f}")
+        return parts
+
+    @staticmethod
+    def _fmt_earnings(ec: dict) -> list[str]:
+        parts = ["", "EARNINGS CONTEXT:"]
+        if ec.get("upcoming"):
+            u = ec["upcoming"]
+            parts.append(f"  Next earnings: {u.get('date', 'TBD')}")
+            if u.get("eps_estimate"):
+                parts.append(f"  EPS estimate: {u['eps_estimate']}")
+        beat = ec.get("beat_count", 0)
+        miss = ec.get("miss_count", 0)
+        if beat or miss:
+            parts.append(f"  Last 4 quarters: {beat} beat, {miss} miss")
+        return parts
+
+    @staticmethod
+    def _fmt_news(news: list[dict]) -> list[str]:
+        parts = ["", "RECENT NEWS:"]
+        for item in news[:5]:
+            headline = item.get("headline", "")[:100]
+            dt = item.get("datetime", "")[:10]
+            parts.append(f"  [{dt}] {headline}")
+        return parts
+
+    @staticmethod
+    def _fmt_insider(insider: list[dict]) -> list[str]:
+        buys = sum(1 for t in insider if t.get("transaction_type") == "buy")
+        sells = sum(1 for t in insider if t.get("transaction_type") == "sell")
+        if not buys and not sells:
+            return []
+        return ["", f"INSIDER ACTIVITY (recent): {buys} buys, {sells} sells"]
+
+    @staticmethod
+    def _fmt_filing(fc: dict) -> list[str]:
+        parts: list[str] = []
+        if fc.get("risk_factors"):
+            parts.extend([
+                "",
+                f"10-K RISK FACTORS ({fc.get('filing_date', 'recent')}):",
+                f"  {fc['risk_factors'][:1500]}",
+            ])
+        if fc.get("mda"):
+            parts.extend([
+                "",
+                "MANAGEMENT DISCUSSION & ANALYSIS:",
+                f"  {fc['mda'][:1500]}",
+            ])
+        return parts
+
+    @staticmethod
+    def _fmt_institutional(holders: list[dict]) -> list[str]:
+        parts = ["", "TOP INSTITUTIONAL HOLDERS (13F):"]
+        for h in holders[:10]:
+            name = h.get("name", "Unknown")[:40]
+            shares = h.get("shares", 0)
+            parts.append(f"  {name}: {shares:,} shares")
+        return parts
+
+    @staticmethod
+    def _fmt_social(request: AnalysisRequest) -> list[str]:
+        agg = request.social_sentiment.get("aggregate", {}) if request.social_sentiment else {}
+        if not agg:
+            return []
+        parts = ["", "SOCIAL SENTIMENT:"]
+        bias = agg.get("bias", "unknown")
+        pos_ratio = agg.get("positive_ratio", "N/A")
+        mentions = agg.get("total_mentions", 0)
+        parts.append(f"  Bias: {bias}")
+        parts.append(f"  Positive ratio: {pos_ratio}")
+        parts.append(f"  Total mentions: {mentions}")
+        # Contrarian notes
+        if bias == "bullish" and pos_ratio and float(pos_ratio) > 0.8:
+            parts.append("  NOTE: Extreme social bullishness — contrarian caution warranted")
+        elif bias == "bearish" and pos_ratio and float(pos_ratio) < 0.3:
+            parts.append("  NOTE: Social bearishness — potential value opportunity if fundamentals strong")
+        return parts
+
+    @staticmethod
+    def _fmt_macro(macro: dict) -> list[str]:
+        parts = ["", "MACRO ENVIRONMENT:"]
+        for k, v in macro.items():
+            parts.append(f"  {k}: {v}")
+        return parts
+
+    @staticmethod
+    def _fmt_market_snapshot(snap: dict) -> list[str]:
+        parts = ["", "MARKET SNAPSHOT:"]
+        for k, v in snap.items():
+            parts.append(f"  {k}: {v}")
+        return parts
+
+    @staticmethod
+    def _fmt_technical(request: AnalysisRequest) -> list[str]:
+        """Format technical indicators with interpretation hints."""
+        if not request.technical_indicators:
+            return [
+                "",
+                "WARNING: No pre-computed technical indicators available.",
+                "Without technical data, you CANNOT perform meaningful technical analysis.",
+                "Set confidence to 0.0-0.15 and use NO_ACTION tag.",
+            ]
+
+        ti = request.technical_indicators
+        parts = ["", "PRE-COMPUTED TECHNICAL INDICATORS:"]
+        for k, v in ti.items():
+            parts.append(f"  {k}: {v}")
+
+        # Interpretation hints
+        hints: list[str] = []
+        if ti.get("rsi_14"):
+            rsi = float(ti["rsi_14"])
+            if rsi > 70:
+                hints.append(f"  - RSI is {rsi:.1f} (ABOVE 70 = OVERBOUGHT territory)")
+            elif rsi < 30:
+                hints.append(f"  - RSI is {rsi:.1f} (BELOW 30 = OVERSOLD territory)")
+        if ti.get("macd_histogram"):
+            macd_h = float(ti["macd_histogram"])
+            if macd_h < 0:
+                hints.append(f"  - MACD histogram is NEGATIVE ({macd_h:.4f}) = bearish momentum")
+        if ti.get("price_vs_sma200") == "below":
+            hints.append("  - Price is BELOW 200-day SMA = bearish trend")
+        if ti.get("pct_from_52w_high"):
+            pct = float(ti["pct_from_52w_high"])
+            if pct < -20:
+                hints.append(f"  - Stock is {abs(pct):.1f}% below 52-week high = significant drawdown")
+
+        if hints:
+            parts.append("")
+            parts.append("Key thresholds to evaluate:")
+            parts.extend(hints)
+
+        return parts
+
+    def _fmt_portfolio(self, request: AnalysisRequest) -> list[str]:
+        """Format portfolio context."""
+        pc = request.portfolio_context
+        if not pc:
+            return []
+
+        parts = ["", "PORTFOLIO CONTEXT:"]
+        parts.append(f"  Total value: ${pc.get('total_value', 0):,.0f}")
+        parts.append(f"  Positions: {pc.get('position_count', 0)}")
+
+        held = pc.get("held_tickers", [])
+        if request.ticker in held:
+            parts.append(f"  NOTE: Already hold {request.ticker}")
+            for pos in pc.get("positions", []):
+                if pos.get("ticker") == request.ticker:
+                    parts.append(f"    Current weight: {pos.get('weight_pct', 0):.1f}%")
+                    pnl = pos.get("pnl_pct", 0)
+                    parts.append(f"    P&L: {pnl:+.1f}%")
+                    break
+        else:
+            parts.append(f"  This would be a NEW position")
+
+        # Sector exposure
+        se = pc.get("sector_exposure", {})
+        if se:
+            sector_pct = se.get(request.sector, 0)
+            if sector_pct > 25:
+                parts.append(f"  WARNING: {request.sector} already at {sector_pct:.0f}% of portfolio")
+            elif sector_pct > 0:
+                parts.append(f"  {request.sector} exposure: {sector_pct:.0f}%")
+            else:
+                parts.append(f"  {request.sector} is a NEW sector — adds diversification")
+
+        return parts
+
+    @staticmethod
+    def _fmt_thesis(request: AnalysisRequest) -> list[str]:
+        parts = ["", "THESIS CONTEXT:"]
+        parts.append(f"  Original buy thesis: {request.position_thesis[:300]}")
+        if request.position_type:
+            parts.append(f"  Position type: {request.position_type}")
+        if request.days_held is not None:
+            parts.append(f"  Held for: {request.days_held} days")
+        if request.thesis_health:
+            parts.append(f"  Thesis health: {request.thesis_health}")
+        parts.append("  CRITICAL: Evaluate whether this thesis remains INTACT.")
+        parts.append("  Do NOT recommend selling just because of short-term noise.")
+        parts.append("  Only recommend selling if the fundamental thesis is BROKEN.")
+        return parts
+
+    @staticmethod
+    def _fmt_previous_verdict(pv: dict) -> list[str]:
+        parts = [
+            "",
+            "PREVIOUS ANALYSIS:",
+            f"  Last verdict: {pv.get('verdict')} on {pv.get('date', 'unknown date')}",
+            f"  Confidence: {pv.get('confidence')}, Consensus: {pv.get('consensus_score')}",
+        ]
+        if pv.get("reasoning"):
+            parts.append(f"  Reasoning: {pv['reasoning'][:200]}")
+        parts.append("  Consider: Has anything materially changed since the last analysis?")
+        return parts

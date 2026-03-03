@@ -29,6 +29,11 @@ interface AgentProfile {
 }
 
 const categoryColor: Record<string, string> = {
+  // New pipeline roles from skills registry
+  Primary: "var(--color-accent-bright)",
+  Scout: "var(--color-success)",
+  Synthesis: "var(--color-warning)",
+  // Legacy categories (backward compat)
   Fundamental: "var(--color-accent-bright)",
   Macro: "var(--color-warning)",
   Technical: "var(--color-success)",

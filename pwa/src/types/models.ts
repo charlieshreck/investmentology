@@ -275,3 +275,35 @@ export interface SystemHealth {
   decisionsLogged: number;
   uptime: number;
 }
+
+// Pipeline controller state types
+
+export interface PipelineCycle {
+  id: string;
+  startedAt: string;
+  tickerCount: number;
+  status: "active" | "completed" | "expired";
+}
+
+export interface PipelineStatus {
+  cycle: PipelineCycle | null;
+  steps: Record<string, number>;
+}
+
+export interface PipelineTickerSummary {
+  ticker: string;
+  total_steps: number;
+  completed: number;
+  failed: number;
+  running: number;
+  pending: number;
+}
+
+export interface PipelineStepDetail {
+  step: string;
+  status: "pending" | "running" | "completed" | "failed" | "expired";
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  retryCount: number;
+}
