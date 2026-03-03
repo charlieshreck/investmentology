@@ -290,6 +290,12 @@ export interface PipelineStatus {
   steps: Record<string, number>;
 }
 
+export interface PipelineTickerPreFilter {
+  passed: boolean;
+  reason: string | null;
+  rulesFailed: string[];
+}
+
 export interface PipelineTickerSummary {
   ticker: string;
   total_steps: number;
@@ -297,6 +303,8 @@ export interface PipelineTickerSummary {
   failed: number;
   running: number;
   pending: number;
+  preFilter?: PipelineTickerPreFilter;
+  gateOutcome?: "pre_filtered" | "passed" | "rejected" | null;
 }
 
 export interface PipelineStepDetail {
@@ -306,4 +314,81 @@ export interface PipelineStepDetail {
   completedAt: string | null;
   error: string | null;
   retryCount: number;
+}
+
+export interface PipelineScreenerVerdict {
+  name: string;
+  verdict: "pass" | "reject";
+  confidence: number | null;
+  tags: string[];
+  latencyMs: number | null;
+}
+
+export interface PipelineScreenerVotes {
+  pass: number;
+  reject: number;
+  total: number;
+  required: number;
+}
+
+export interface PipelineTickerDetail {
+  ticker: string;
+  steps: PipelineStepDetail[];
+  preFilter: {
+    passed: boolean;
+    reason: string | null;
+    rulesChecked: number;
+    rulesFailed: string[];
+  } | null;
+  screeners: PipelineScreenerVerdict[];
+  gateOutcome: "pre_filtered" | "passed" | "rejected" | null;
+  screenerVotes: PipelineScreenerVotes | null;
+}
+
+export interface PipelineFunnelStages {
+  dataFetch: { completed: number; failed: number; pending: number; running: number };
+  preFilter: { completed: number; pending: number; passed: number; rejected: number; reasons: Record<string, number> };
+  screeners: { stats: Record<string, Record<string, number>>; totalScreenerSteps: number };
+  gate: { completed: number; pending: number; passed: number; rejected: number; preFiltered: number };
+  analysis: { tickers: number; completed: number; running: number; pending: number; failed: number };
+}
+
+export interface PipelineFunnel {
+  hasCycle: boolean;
+  cycleId?: string;
+  startedAt?: string;
+  totalTickers?: number;
+  stages?: PipelineFunnelStages;
+}
+
+export interface PipelineStepHealth {
+  step: string;
+  total: number;
+  completed: number;
+  failed: number;
+  errorRate: number;
+}
+
+export interface PipelineStepTiming {
+  step: string;
+  avgSeconds: number;
+  maxSeconds: number;
+  count: number;
+}
+
+export interface PipelineRecentError {
+  ticker: string;
+  step: string;
+  error: string | null;
+  at: string | null;
+  retries: number;
+}
+
+export interface PipelineHealth {
+  hasCycle: boolean;
+  cycleId?: string;
+  stepHealth?: PipelineStepHealth[];
+  stepTiming?: PipelineStepTiming[];
+  recentErrors?: PipelineRecentError[];
+  reentryBlocks?: { total: number; active: number };
 }

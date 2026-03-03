@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Search, Star, Lightbulb, Settings } from "lucide-react";
+import { LayoutDashboard, Search, Star, Lightbulb, GitBranch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useIsDesktop } from "../../hooks/useMediaQuery";
 
@@ -9,7 +9,7 @@ const navItems: { to: string; label: string; icon: LucideIcon; end?: boolean }[]
   { to: "/screener", label: "Screen", icon: Search },
   { to: "/watchlist", label: "Watch", icon: Star },
   { to: "/recommendations", label: "Recs", icon: Lightbulb },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/pipeline", label: "Pipeline", icon: GitBranch },
 ];
 
 export function BottomNav() {

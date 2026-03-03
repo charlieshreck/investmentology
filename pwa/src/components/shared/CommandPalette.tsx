@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Search, Star, Lightbulb, Plus,
-  BookOpen, Activity, Bot, TrendingUp, Heart, Settings,
+  BookOpen, Activity, Bot, TrendingUp, Heart, Settings, GitBranch,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useStore } from "../../stores/useStore";
@@ -55,6 +55,7 @@ export function CommandPalette() {
     { id: "nav-analyze", label: "Analyze", icon: Plus, action: () => navigate("/analyze"), category: "nav" },
     { id: "nav-log", label: "Decision Log", icon: BookOpen, action: () => navigate("/log"), category: "nav" },
     { id: "nav-learning", label: "Learning", icon: TrendingUp, action: () => navigate("/learning"), category: "nav" },
+    { id: "nav-pipeline", label: "Pipeline", icon: GitBranch, action: () => navigate("/pipeline"), category: "nav" },
     { id: "nav-agents", label: "Agents", icon: Bot, action: () => navigate("/agents"), category: "nav" },
     { id: "nav-backtest", label: "Backtest", icon: Activity, action: () => navigate("/backtest"), category: "nav" },
     { id: "nav-health", label: "System Health", icon: Heart, action: () => navigate("/health"), category: "nav" },

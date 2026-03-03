@@ -2,7 +2,9 @@ import { useEffect, useState, useCallback } from "react";
 import type {
   PipelineStatus,
   PipelineTickerSummary,
-  PipelineStepDetail,
+  PipelineTickerDetail,
+  PipelineFunnel,
+  PipelineHealth,
 } from "../types/models";
 
 export function usePipelineStatus() {
@@ -67,13 +69,13 @@ export function usePipelineTickers(cycleId?: string) {
 }
 
 export function usePipelineTickerDetail(ticker: string | null) {
-  const [steps, setSteps] = useState<PipelineStepDetail[]>([]);
+  const [detail, setDetail] = useState<PipelineTickerDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ticker) {
-      setSteps([]);
+      setDetail(null);
       return;
     }
     let cancelled = false;
@@ -85,9 +87,9 @@ export function usePipelineTickerDetail(ticker: string | null) {
           `/api/invest/pipeline/ticker/${encodeURIComponent(ticker!)}`
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data: PipelineTickerDetail = await res.json();
         if (!cancelled) {
-          setSteps(data.steps ?? []);
+          setDetail(data);
           setError(null);
         }
       } catch (err) {
@@ -106,5 +108,63 @@ export function usePipelineTickerDetail(ticker: string | null) {
     };
   }, [ticker]);
 
-  return { steps, loading, error };
+  return { detail, loading, error };
+}
+
+export function usePipelineFunnel() {
+  const [funnel, setFunnel] = useState<PipelineFunnel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/invest/pipeline/funnel");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: PipelineFunnel = await res.json();
+      setFunnel(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 15_000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { funnel, loading, error, refresh };
+}
+
+export function usePipelineHealth() {
+  const [health, setHealth] = useState<PipelineHealth | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/invest/pipeline/health");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: PipelineHealth = await res.json();
+      setHealth(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 30_000); // 30s for health
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  return { health, loading, error, refresh };
 }

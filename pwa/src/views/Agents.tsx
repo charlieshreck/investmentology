@@ -31,6 +31,7 @@ interface AgentProfile {
 const categoryColor: Record<string, string> = {
   // New pipeline roles from skills registry
   Primary: "var(--color-accent-bright)",
+  Screener: "var(--color-warning)",
   Scout: "var(--color-success)",
   Synthesis: "var(--color-warning)",
   // Legacy categories (backward compat)
@@ -39,6 +40,15 @@ const categoryColor: Record<string, string> = {
   Technical: "var(--color-success)",
   Risk: "var(--color-error)",
 };
+
+const categoryDescriptions: Record<string, string> = {
+  Primary: "The main analysts — each examines stocks through a different investment philosophy",
+  Screener: "Quick-check experts — they decide if a stock is worth the full team's time",
+  Scout: "Fast, cost-effective analysts that provide supporting opinions",
+  Synthesis: "Combines all agent opinions into a final recommendation",
+};
+
+const categoryOrder = ["Primary", "Screener", "Scout", "Synthesis"];
 
 function AgentCard({ agent, expanded, onToggle }: { agent: AgentProfile; expanded: boolean; onToggle: () => void }) {
   const isAuditor = agent.key === "auditor";
@@ -365,12 +375,64 @@ export function Agents() {
           </BentoCard>
         )}
 
-        {/* Agent cards — auditor first */}
-        {[...agents].sort((a, b) => {
-          if (a.key === "auditor") return -1;
-          if (b.key === "auditor") return 1;
-          return 0;
-        }).map((agent) => (
+        {/* Agent cards grouped by category */}
+        {categoryOrder.map((cat) => {
+          const catAgents = agents.filter((a) => a.category === cat);
+          if (catAgents.length === 0) return null;
+          // Sort auditor first within Primary
+          const sorted = cat === "Primary"
+            ? [...catAgents].sort((a, b) => a.key === "auditor" ? -1 : b.key === "auditor" ? 1 : 0)
+            : catAgents;
+          return (
+            <div key={cat}>
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-sm)",
+                marginBottom: "var(--space-sm)",
+                marginTop: "var(--space-sm)",
+              }}>
+                <div style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "var(--radius-full)",
+                  background: categoryColor[cat] ?? "var(--color-accent)",
+                }} />
+                <span style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 700,
+                  color: "var(--color-text)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}>
+                  {cat} ({sorted.length})
+                </span>
+              </div>
+              {categoryDescriptions[cat] && (
+                <div style={{
+                  fontSize: 11,
+                  color: "var(--color-text-muted)",
+                  marginBottom: "var(--space-md)",
+                  lineHeight: 1.4,
+                }}>
+                  {categoryDescriptions[cat]}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)", marginBottom: "var(--space-lg)" }}>
+                {sorted.map((agent) => (
+                  <AgentCard
+                    key={agent.key}
+                    agent={agent}
+                    expanded={expandedKey === agent.key}
+                    onToggle={() => setExpandedKey(expandedKey === agent.key ? null : agent.key)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {/* Ungrouped agents (legacy) */}
+        {agents.filter((a) => !categoryOrder.includes(a.category)).map((agent) => (
           <AgentCard
             key={agent.key}
             agent={agent}
