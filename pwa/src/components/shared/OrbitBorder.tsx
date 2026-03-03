@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, type ReactNode } from "react";
+import { motion } from "framer-motion";
 
 /**
  * Verdict → orbiting dot parameters.
@@ -17,15 +18,10 @@ const VERDICT_CONFIG: Record<string, { color: string; duration: number; reverse:
 
 const DEFAULT_CONFIG = { color: "#a78bfa", duration: 8, reverse: false };
 
-/**
- * Draws a rounded-rect SVG path for the given dimensions and radius.
- * Returns the path `d` string and its total length.
- */
 function roundedRectPath(w: number, h: number, r: number): { d: string; length: number } {
-  // Clamp radius to half of smallest dimension
   const cr = Math.min(r, w / 2, h / 2);
   const straight = 2 * (w - 2 * cr) + 2 * (h - 2 * cr);
-  const corners = 2 * Math.PI * cr; // 4 quarter-arcs ≈ full circle
+  const corners = 2 * Math.PI * cr;
   const length = straight + corners;
 
   const d = [
@@ -42,6 +38,53 @@ function roundedRectPath(w: number, h: number, r: number): { d: string; length: 
   ].join(" ");
 
   return { d, length };
+}
+
+/** Animated orbiting dot layer */
+function OrbitPath({
+  d,
+  perimeter,
+  dotLen,
+  color,
+  width,
+  duration,
+  reverse,
+  filter,
+  opacity = 1,
+}: {
+  d: string;
+  perimeter: number;
+  dotLen: number;
+  color: string;
+  width: number;
+  duration: number;
+  reverse: boolean;
+  filter?: string;
+  opacity?: number;
+}) {
+  const from = reverse ? 0 : perimeter;
+  const to = reverse ? perimeter : 0;
+
+  return (
+    <motion.path
+      d={d}
+      fill="none"
+      stroke={color}
+      strokeWidth={width}
+      strokeLinecap="round"
+      strokeDasharray={`${dotLen} ${perimeter - dotLen}`}
+      filter={filter}
+      opacity={opacity}
+      animate={{ strokeDashoffset: [from, to] }}
+      transition={{
+        strokeDashoffset: {
+          duration,
+          ease: "linear",
+          repeat: Infinity,
+        },
+      }}
+    />
+  );
 }
 
 export function OrbitBorder({
@@ -80,15 +123,13 @@ export function OrbitBorder({
   }
 
   const dotLen = 14;
+  const filterId = `glow-${verdict}-${size?.w ?? 0}`;
+  const filterOuterId = `glow-outer-${verdict}-${size?.w ?? 0}`;
 
   return (
-    <div
-      ref={containerRef}
-      style={{ position: "relative" }}
-    >
+    <div ref={containerRef} style={{ position: "relative" }}>
       {children}
 
-      {/* SVG overlay — orbiting dot */}
       {pathData && (
         <svg
           width={size!.w}
@@ -103,58 +144,49 @@ export function OrbitBorder({
           }}
         >
           <defs>
-            <filter id={`glow-${verdict}`} x="-50%" y="-50%" width="200%" height="200%">
+            <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" />
             </filter>
-            <filter id={`glow-outer-${verdict}`} x="-50%" y="-50%" width="200%" height="200%">
+            <filter id={filterOuterId} x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="8" />
             </filter>
           </defs>
 
           {/* Outer glow trail */}
-          <path
+          <OrbitPath
             d={pathData.d}
-            fill="none"
-            stroke={config.color}
-            strokeWidth={strokeWidth + 4}
-            strokeLinecap="round"
-            strokeDasharray={`${dotLen} ${pathData.length - dotLen}`}
-            filter={`url(#glow-outer-${verdict})`}
+            perimeter={pathData.length}
+            dotLen={dotLen}
+            color={config.color}
+            width={strokeWidth + 4}
+            duration={config.duration}
+            reverse={config.reverse}
+            filter={`url(#${filterOuterId})`}
             opacity={0.3}
-            style={{
-              ["--perimeter" as string]: pathData.length,
-              animation: `orbit-dot ${config.duration}s linear infinite${config.reverse ? " reverse" : ""}`,
-            } as React.CSSProperties}
           />
 
           {/* Inner glow halo */}
-          <path
+          <OrbitPath
             d={pathData.d}
-            fill="none"
-            stroke={config.color}
-            strokeWidth={strokeWidth + 2}
-            strokeLinecap="round"
-            strokeDasharray={`${dotLen} ${pathData.length - dotLen}`}
-            filter={`url(#glow-${verdict})`}
+            perimeter={pathData.length}
+            dotLen={dotLen}
+            color={config.color}
+            width={strokeWidth + 2}
+            duration={config.duration}
+            reverse={config.reverse}
+            filter={`url(#${filterId})`}
             opacity={0.5}
-            style={{
-              ["--perimeter" as string]: pathData.length,
-              animation: `orbit-dot ${config.duration}s linear infinite${config.reverse ? " reverse" : ""}`,
-            } as React.CSSProperties}
           />
 
           {/* Core dot */}
-          <path
+          <OrbitPath
             d={pathData.d}
-            fill="none"
-            stroke={config.color}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeDasharray={`${dotLen} ${pathData.length - dotLen}`}
-            style={{
-              ["--perimeter" as string]: pathData.length,
-              animation: `orbit-dot ${config.duration}s linear infinite${config.reverse ? " reverse" : ""}`,
-            } as React.CSSProperties}
+            perimeter={pathData.length}
+            dotLen={dotLen}
+            color={config.color}
+            width={strokeWidth}
+            duration={config.duration}
+            reverse={config.reverse}
           />
         </svg>
       )}

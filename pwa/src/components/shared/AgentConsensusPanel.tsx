@@ -124,9 +124,7 @@ export function AgentConsensusPanel({ stances, consensusScore }: {
           gap: 6,
           flex: 1,
         }}>
-          {stances
-            .filter((s) => s.summary && s.summary !== "Failed to parse LLM response")
-            .map((stance) => {
+          {stances.map((stance) => {
               const key = stance.name.toLowerCase();
               const agentCol = AGENT_COLORS[key] ?? "var(--color-text-muted)";
               const initials = AGENT_INITIALS[key] ?? stance.name.charAt(0).toUpperCase();
