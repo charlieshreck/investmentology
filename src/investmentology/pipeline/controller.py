@@ -100,12 +100,13 @@ class PipelineController:
         """Start the controller and its workers."""
         self._running = True
         await self.gateway.start()
-        # Start a dedicated queue worker for each CLI agent
+        # Start parallel queue workers for each CLI agent.
+        # 2 workers per agent = 2 concurrent tickers per agent.
         cli_agent_names = [
             name for name, skill in SKILLS.items()
             if skill.cli_screen and name not in API_ONLY_AGENTS
         ]
-        await self.scheduler.start(cli_agent_names)
+        await self.scheduler.start(cli_agent_names, workers_per_agent=2)
         logger.info("Pipeline controller started")
 
     async def stop(self) -> None:

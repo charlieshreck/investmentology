@@ -38,31 +38,39 @@ class CLIScheduler:
 
     def __init__(self) -> None:
         self._queues: dict[str, asyncio.Queue[AgentJob]] = {}
-        self._workers: dict[str, asyncio.Task] = {}
+        self._workers: dict[str, list[asyncio.Task]] = {}
         self._running = False
 
-    async def start(self, agent_names: list[str]) -> None:
-        """Start a dedicated worker for each agent."""
+    async def start(self, agent_names: list[str], workers_per_agent: int = 1) -> None:
+        """Start workers for each agent. Multiple workers per agent share a queue."""
         self._running = True
+        total = 0
         for name in agent_names:
             queue: asyncio.Queue[AgentJob] = asyncio.Queue()
             self._queues[name] = queue
-            self._workers[name] = asyncio.create_task(
-                self._worker(name, queue),
-                name=f"cli-worker-{name}",
-            )
+            self._workers[name] = []
+            for i in range(workers_per_agent):
+                label = name if workers_per_agent == 1 else f"{name}-{i+1}"
+                task = asyncio.create_task(
+                    self._worker(label, queue),
+                    name=f"cli-worker-{label}",
+                )
+                self._workers[name].append(task)
+                total += 1
         logger.info(
-            "CLI scheduler started (%d workers: %s)",
-            len(agent_names), ", ".join(agent_names),
+            "CLI scheduler started (%d workers across %d agents, %d per agent)",
+            total, len(agent_names), workers_per_agent,
         )
 
     async def stop(self) -> None:
         """Stop all queue workers gracefully."""
         self._running = False
-        for queue in self._queues.values():
-            await queue.put(None)  # type: ignore[arg-type]
-        for task in self._workers.values():
-            await task
+        for name, tasks in self._workers.items():
+            for _ in tasks:
+                await self._queues[name].put(None)  # type: ignore[arg-type]
+        for tasks in self._workers.values():
+            for task in tasks:
+                await task
         logger.info("CLI scheduler stopped")
 
     def submit(self, job: AgentJob) -> asyncio.Future:
