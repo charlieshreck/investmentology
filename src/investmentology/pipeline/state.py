@@ -172,7 +172,7 @@ def expire_stale_steps(db: Database) -> int:
 
 
 # Max time a step can stay in "running" before being reset (minutes)
-RUNNING_TIMEOUT_MINUTES = 10
+RUNNING_TIMEOUT_MINUTES = 20
 
 
 def reset_stale_running_steps(db: Database) -> int:

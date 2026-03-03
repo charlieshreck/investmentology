@@ -201,8 +201,8 @@ SIMONS = AgentSkill(
         "relative strength. Data-driven, no guessing."
     ),
     role="scout",
-    provider_preference=["groq"],
-    default_model="llama-3.3-70b-versatile",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
     cli_screen=None,
     methodology="""\
 Interpret the pre-computed technical indicators provided for the given stock. \
@@ -402,7 +402,7 @@ LYNCH = AgentSkill(
     ),
     role="scout",
     provider_preference=["deepseek"],
-    default_model="deepseek-reasoner",
+    default_model="deepseek-chat",
     cli_screen=None,
     methodology="""\
 You classify every company into one of six categories, and each has different \

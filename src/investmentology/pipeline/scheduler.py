@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from investmentology.agents.base import AnalysisRequest
 from investmentology.agents.runner import AgentRunner
@@ -30,6 +31,7 @@ class AgentJob:
     request: AnalysisRequest
     step_id: int  # pipeline_state row id
     future: asyncio.Future  # Set result when complete
+    on_start: Callable[[], None] | None = field(default=None)  # Called when worker picks up job
 
 
 class CLIScheduler:
@@ -108,6 +110,13 @@ class CLIScheduler:
                 screen, job.skill.name, job.request.ticker,
                 job.step_id, queue.qsize(),
             )
+
+            # Mark the step as running NOW (when the worker actually starts it)
+            if job.on_start:
+                try:
+                    job.on_start()
+                except Exception:
+                    logger.exception("on_start callback failed for step %d", job.step_id)
 
             try:
                 response = await job.runner.analyze(job.request)
