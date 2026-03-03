@@ -100,7 +100,12 @@ class PipelineController:
         """Start the controller and its workers."""
         self._running = True
         await self.gateway.start()
-        await self.scheduler.start()
+        # Start a dedicated queue worker for each CLI agent
+        cli_agent_names = [
+            name for name, skill in SKILLS.items()
+            if skill.cli_screen and name not in API_ONLY_AGENTS
+        ]
+        await self.scheduler.start(cli_agent_names)
         logger.info("Pipeline controller started")
 
     async def stop(self) -> None:
@@ -158,23 +163,9 @@ class PipelineController:
         )
 
         # 5. Process each pending step.
-        # CLI agent steps are batched: dispatch at most CLI_DISPATCH_LIMIT
-        # jobs per queue per tick to avoid flooding queues. Ticker-first
-        # ordering ensures all agents for one ticker complete before the next.
-        CLI_DISPATCH_LIMIT = 5  # max CLI jobs per queue per tick
-        cli_dispatched: dict[str, int] = {"claude": 0, "gemini": 0}
-
-        # Separate agent steps for ticker-first ordering
-        agent_steps: list[dict] = []
-        other_steps: list[dict] = []
+        # Each CLI agent has its own queue worker, so all agents run in
+        # parallel. No dispatch limit needed — workers self-serialize.
         for row in pending:
-            if row["step"].startswith(state.STEP_AGENT_PREFIX):
-                agent_steps.append(row)
-            else:
-                other_steps.append(row)
-
-        # Process non-agent steps immediately (data_fetch, screener, etc.)
-        for row in other_steps:
             step = row["step"]
             ticker = row["ticker"]
             step_id = row["id"]
@@ -195,37 +186,15 @@ class PipelineController:
             elif step == state.STEP_GATE_DECISION:
                 await self._handle_gate_decision(cycle_id, ticker, step_id)
 
+            elif step.startswith(state.STEP_AGENT_PREFIX):
+                agent_name = step[len(state.STEP_AGENT_PREFIX):]
+                await self._handle_agent(cycle_id, ticker, step_id, agent_name)
+
             elif step == state.STEP_DEBATE:
                 await self._handle_debate(cycle_id, ticker, step_id)
 
             elif step == state.STEP_SYNTHESIS:
                 await self._handle_synthesis(cycle_id, ticker, step_id)
-
-        # Process agent steps: group by ticker, dispatch ticker-first
-        from collections import defaultdict
-        ticker_agents: dict[str, list[dict]] = defaultdict(list)
-        for row in agent_steps:
-            ticker_agents[row["ticker"]].append(row)
-
-        for ticker, rows in ticker_agents.items():
-            for row in rows:
-                step = row["step"]
-                step_id = row["id"]
-                agent_name = step[len(state.STEP_AGENT_PREFIX):]
-
-                # Check CLI dispatch limit for CLI agents
-                skill = SKILLS.get(agent_name)
-                if skill and skill.cli_screen and agent_name not in API_ONLY_AGENTS:
-                    screen = skill.cli_screen
-                    if cli_dispatched.get(screen, 0) >= CLI_DISPATCH_LIMIT:
-                        continue  # Leave as pending for next tick
-                    await self._handle_agent(cycle_id, ticker, step_id, agent_name)
-                    # Only count if actually dispatched (not already queued)
-                    if step_id in self._cli_queued_steps:
-                        cli_dispatched[screen] = cli_dispatched.get(screen, 0) + 1
-                else:
-                    # API agents — no limit
-                    await self._handle_agent(cycle_id, ticker, step_id, agent_name)
 
         # 6. Check if cycle is complete
         self._check_cycle_completion(cycle_id)
