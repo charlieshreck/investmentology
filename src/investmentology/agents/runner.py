@@ -30,6 +30,15 @@ class AgentRunner:
         self.skill = skill
         self.gateway = gateway
 
+    # Compatibility properties for DebateOrchestrator (expects BaseAgent interface)
+    @property
+    def name(self) -> str:
+        return self.skill.name
+
+    @property
+    def model(self) -> str:
+        return self.skill.default_model
+
     # ------------------------------------------------------------------
     # System prompt
     # ------------------------------------------------------------------

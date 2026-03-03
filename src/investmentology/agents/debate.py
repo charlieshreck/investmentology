@@ -133,8 +133,10 @@ class DebateOrchestrator:
         # Determine provider for this agent
         provider = getattr(agent, "_provider", None)
         if provider is None:
-            # Default provider resolution: check agent type
-            if hasattr(agent, "gateway"):
+            if hasattr(agent, "skill"):
+                # AgentRunner path — use skill's provider resolution
+                provider = agent._resolve_provider()
+            elif hasattr(agent, "gateway"):
                 provider = _resolve_provider(agent)
             else:
                 provider = "deepseek"

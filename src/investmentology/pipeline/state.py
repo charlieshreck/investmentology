@@ -6,6 +6,7 @@ tables created in migration 012.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -270,6 +271,75 @@ def get_cycle_summary(db: Database, cycle_id: UUID) -> dict:
         "failed": summary.get("failed", 0),
         "expired": summary.get("expired", 0),
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-cycle data cache
+# ---------------------------------------------------------------------------
+
+def store_data_cache(
+    db: Database, cycle_id: UUID, ticker: str, data_key: str, data_value: dict,
+) -> None:
+    """Cache data for a ticker within a pipeline cycle (upsert)."""
+    db.execute(
+        "INSERT INTO invest.pipeline_data_cache "
+        "(cycle_id, ticker, data_key, data_value) "
+        "VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT (cycle_id, ticker, data_key) "
+        "DO UPDATE SET data_value = EXCLUDED.data_value, created_at = NOW()",
+        (cycle_id, ticker, data_key, json.dumps(data_value, default=str)),
+    )
+
+
+def get_data_cache(
+    db: Database, cycle_id: UUID, ticker: str, data_key: str,
+) -> dict | None:
+    """Retrieve cached data for a ticker within a pipeline cycle."""
+    rows = db.execute(
+        "SELECT data_value FROM invest.pipeline_data_cache "
+        "WHERE cycle_id = %s AND ticker = %s AND data_key = %s",
+        (cycle_id, ticker, data_key),
+    )
+    if not rows:
+        return None
+    val = rows[0]["data_value"]
+    return val if isinstance(val, dict) else json.loads(val)
+
+
+def get_all_data_cache(
+    db: Database, cycle_id: UUID, ticker: str,
+) -> dict[str, dict]:
+    """Retrieve all cached data keys for a ticker within a pipeline cycle."""
+    rows = db.execute(
+        "SELECT data_key, data_value FROM invest.pipeline_data_cache "
+        "WHERE cycle_id = %s AND ticker = %s",
+        (cycle_id, ticker),
+    )
+    result: dict[str, dict] = {}
+    for r in rows:
+        val = r["data_value"]
+        result[r["data_key"]] = val if isinstance(val, dict) else json.loads(val)
+    return result
+
+
+def get_agent_signals_for_ticker(
+    db: Database, cycle_id: UUID, ticker: str,
+) -> list[dict]:
+    """Load all completed agent signal results for a ticker in this cycle.
+
+    Joins pipeline_state (for step tracking) with agent_signals (for signal data)
+    via the result_ref foreign key.
+    """
+    return db.execute(
+        "SELECT s.id, s.ticker, s.agent_name, s.model, s.signals, "
+        "s.confidence, s.reasoning, s.latency_ms "
+        "FROM invest.pipeline_state ps "
+        "JOIN invest.agent_signals s ON s.id = ps.result_ref "
+        "WHERE ps.cycle_id = %s AND ps.ticker = %s "
+        "AND ps.step LIKE 'agent:%%' AND ps.status = 'completed' "
+        "AND ps.result_ref IS NOT NULL",
+        (cycle_id, ticker),
+    )
 
 
 # ---------------------------------------------------------------------------
