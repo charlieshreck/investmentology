@@ -247,7 +247,7 @@ class AgentRunner:
             detail_parts.append(
                 f"{issue.get('field', '?')}: {issue.get('detail', '')}"
             )
-        detail = "; ".join(detail_parts) if detail_parts else status
+        detail_str = "; ".join(detail_parts) if detail_parts else status
 
         # DATA_VALIDATED etc. are not in SignalTag enum — use reasoning field
         return AgentSignalSet(
@@ -255,7 +255,7 @@ class AgentRunner:
             model=self.skill.default_model,
             signals=SignalSet(signals=[]),
             confidence=confidence,
-            reasoning=f"[{tag_str}] {summary}",
+            reasoning=f"[{tag_str}] {summary} — {detail_str}",
         )
 
     # ------------------------------------------------------------------
@@ -542,7 +542,7 @@ class AgentRunner:
                     parts.append(f"    P&L: {pnl:+.1f}%")
                     break
         else:
-            parts.append(f"  This would be a NEW position")
+            parts.append("  This would be a NEW position")
 
         # Sector exposure
         se = pc.get("sector_exposure", {})

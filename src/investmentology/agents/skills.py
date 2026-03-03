@@ -9,7 +9,7 @@ and parse responses — replacing the 8 individual agent classes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

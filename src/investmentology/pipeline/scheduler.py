@@ -15,7 +15,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from investmentology.agents.base import AnalysisRequest, AnalysisResponse
+from investmentology.agents.base import AnalysisRequest
 from investmentology.agents.runner import AgentRunner
 from investmentology.agents.skills import AgentSkill
 

@@ -24,10 +24,9 @@ from investmentology.agents.skills import (
     PRIMARY_SKILLS,
     SCOUT_SKILLS,
     SKILLS,
-    AgentSkill,
 )
 from investmentology.pipeline import state
-from investmentology.pipeline.convergence import should_debate, synthesis_ready
+from investmentology.pipeline.convergence import should_debate, synthesis_ready  # noqa: F401
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
 from investmentology.registry.db import Database
 from investmentology.registry.reentry import get_blocked_tickers
@@ -266,7 +265,7 @@ class PipelineController:
     ) -> None:
         """Wait for a CLI agent result and update pipeline state."""
         try:
-            response = await future
+            await future  # Result will be used for DB signal storage
             # TODO: Save signals to DB and get result_ref
             state.mark_completed(self.db, step_id)
         except Exception as e:
