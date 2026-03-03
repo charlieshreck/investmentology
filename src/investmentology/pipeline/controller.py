@@ -784,7 +784,6 @@ class PipelineController:
             fundamentals=fundamentals,
             sector=raw_fundamentals.get("sector", "Unknown"),
             industry=raw_fundamentals.get("industry", "Unknown"),
-            market_cap=raw_fundamentals.get("market_cap"),
             technical_indicators=tech,
             portfolio_context=portfolio_context,
             previous_verdict=previous_verdict,
