@@ -577,17 +577,18 @@ class TestResponseParsing:
         assert result.confidence > Decimal("0")
 
     def test_confidence_clamped_high(
-        self, runner: AgentRunner, basic_request: AnalysisRequest,
+        self, runner: AgentRunner, request_with_technicals: AnalysisRequest,
     ) -> None:
+        # Use request_with_technicals to bypass Simons data gate (caps at 0.15 without technicals)
         data = {"signals": [], "confidence": 1.5, "target_price": None, "summary": "test"}
-        result = runner.parse_response(json.dumps(data), basic_request)
+        result = runner.parse_response(json.dumps(data), request_with_technicals)
         assert result.confidence == Decimal("1")
 
     def test_confidence_clamped_low(
-        self, runner: AgentRunner, basic_request: AnalysisRequest,
+        self, runner: AgentRunner, request_with_technicals: AnalysisRequest,
     ) -> None:
         data = {"signals": [], "confidence": -0.5, "target_price": None, "summary": "test"}
-        result = runner.parse_response(json.dumps(data), basic_request)
+        result = runner.parse_response(json.dumps(data), request_with_technicals)
         assert result.confidence == Decimal("0")
 
 
@@ -608,8 +609,9 @@ class TestStrengthNormalization:
         return runner, self.AGENT_TAGS[name]
 
     def test_invalid_strength_normalized(
-        self, runner_and_tag, basic_request: AnalysisRequest,
+        self, runner_and_tag, request_with_technicals: AnalysisRequest,
     ) -> None:
+        # Use request_with_technicals to bypass Simons data gate (adds NO_ACTION without technicals)
         runner, tag = runner_and_tag
         data = {
             "signals": [{"tag": tag, "strength": "INVALID", "detail": "test"}],
@@ -617,7 +619,7 @@ class TestStrengthNormalization:
             "target_price": None,
             "summary": "test",
         }
-        result = runner.parse_response(json.dumps(data), basic_request)
+        result = runner.parse_response(json.dumps(data), request_with_technicals)
         assert len(result.signals.signals) == 1
         assert result.signals.signals[0].strength == "moderate"
 
