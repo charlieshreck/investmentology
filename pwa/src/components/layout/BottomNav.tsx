@@ -1,15 +1,15 @@
 import { NavLink } from "react-router-dom";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Search, Star, Lightbulb, GitBranch } from "lucide-react";
+import { Sunrise, Lightbulb, Star, LayoutDashboard, SlidersHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useIsDesktop } from "../../hooks/useMediaQuery";
 
 const navItems: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
-  { to: "/", label: "Portfolio", icon: LayoutDashboard, end: true },
-  { to: "/screener", label: "Screen", icon: Search },
+  { to: "/", label: "Today", icon: Sunrise, end: true },
+  { to: "/recommendations", label: "Picks", icon: Lightbulb },
   { to: "/watchlist", label: "Watch", icon: Star },
-  { to: "/recommendations", label: "Recs", icon: Lightbulb },
-  { to: "/pipeline", label: "Pipeline", icon: GitBranch },
+  { to: "/portfolio", label: "Portfolio", icon: LayoutDashboard },
+  { to: "/settings", label: "More", icon: SlidersHorizontal },
 ];
 
 export function BottomNav() {

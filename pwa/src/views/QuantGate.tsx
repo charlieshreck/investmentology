@@ -8,6 +8,7 @@ import { useQuantGate } from "../hooks/useQuantGate";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
 import { verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
+import { GlossaryTooltip } from "../components/shared/GlossaryTooltip";
 import type { QuantGateResult } from "../types/models";
 
 function zoneBadge(zone: string | null) {
@@ -359,12 +360,12 @@ export function QuantGate() {
               {analyzedCount}
             </div>
           </BentoCard>
-          <BentoCard title="Avg F-Score">
+          <BentoCard title={<>Avg F-Score<GlossaryTooltip term="piotroski f-score" /></>}>
             <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
               {avgF}
             </div>
           </BentoCard>
-          <BentoCard title="Z-Safe">
+          <BentoCard title={<>Z-Safe<GlossaryTooltip term="altman z-score" /></>}>
             <div
               style={{
                 fontSize: "var(--text-xl)",
@@ -394,10 +395,10 @@ export function QuantGate() {
                 <tr>
                   <Th align="center">#</Th>
                   <Th>Stock</Th>
-                  <Th>Composite</Th>
-                  <Th align="center">F-Score</Th>
-                  <Th align="center">Z-Zone</Th>
-                  <Th align="right">EY</Th>
+                  <Th>Composite<GlossaryTooltip term="composite score" /></Th>
+                  <Th align="center">F-Score<GlossaryTooltip term="piotroski f-score" /></Th>
+                  <Th align="center">Z-Zone<GlossaryTooltip term="altman z-score" /></Th>
+                  <Th align="right">EY<GlossaryTooltip term="earnings yield" /></Th>
                   <Th align="center">Verdict</Th>
                   <Th align="center">Action</Th>
                 </tr>

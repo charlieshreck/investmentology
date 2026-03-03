@@ -11,6 +11,7 @@ import {
   usePipelineFunnel,
   usePipelineHealth,
 } from "../hooks/usePipeline";
+import { PRE_FILTER_EXPLANATIONS, SCREENER_NAMES } from "../utils/glossary";
 import type {
   PipelineTickerSummary,
   PipelineStepDetail,
@@ -18,38 +19,6 @@ import type {
   PipelineFunnel,
   PipelineHealth,
 } from "../types/models";
-
-// ---------------------------------------------------------------------------
-// Plain-English helpers
-// ---------------------------------------------------------------------------
-
-const PRE_FILTER_EXPLANATIONS: Record<string, string> = {
-  altman_z_distress: "Shows signs of potential bankruptcy",
-  piotroski_catastrophic: "Fails nearly every financial health test",
-  triple_negative: "Losing money and shrinking at the same time",
-  extreme_pe_no_growth: "Stock price is extremely expensive with no growth to back it up",
-  losing_and_shrinking: "Unprofitable and getting smaller",
-  debt_implosion: "Debts are almost equal to everything the company owns",
-};
-
-const SCREENER_NAMES: Record<string, { label: string; description: string }> = {
-  financial_health_screener: {
-    label: "Financial Health",
-    description: "Can this company survive tough times?",
-  },
-  valuation_screener: {
-    label: "Valuation",
-    description: "Does the stock price make sense?",
-  },
-  growth_momentum_screener: {
-    label: "Growth & Momentum",
-    description: "Are things heading in the right direction?",
-  },
-  quality_position_screener: {
-    label: "Quality & Position",
-    description: "Does this company have a competitive edge?",
-  },
-};
 
 function formatStepName(step: string): string {
   if (step.startsWith("agent:")) {

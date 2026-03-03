@@ -6,6 +6,8 @@ import { Badge } from "../components/shared/Badge";
 import { RecommendationCardSkeleton } from "../components/shared/SkeletonCard";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
+import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
+import { SignalTagCloud } from "../components/shared/SignalTagCloud";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
@@ -191,25 +193,6 @@ function SuccessRing({ probability }: { probability: number | null }) {
   );
 }
 
-/* ── Agent Colors (signature per agent) ── */
-const agentColor: Record<string, string> = {
-  warren: "#34d399",   // green — fundamentals
-  soros: "#60a5fa",    // blue — macro
-  simons: "#c084fc",   // purple — quant
-  auditor: "#fbbf24",  // amber — risk
-};
-
-const agentIcon: Record<string, string> = {
-  warren: "W", soros: "S", simons: "Q", auditor: "A",
-};
-
-function stanceLabel(s: number): string {
-  if (s >= 0.5) return "BUY";
-  if (s >= 0.15) return "LEAN BUY";
-  if (s > -0.15) return "HOLD";
-  if (s > -0.5) return "LEAN SELL";
-  return "SELL";
-}
 
 /* ── Main Recommendation Card ── */
 function RecCard({
@@ -578,81 +561,61 @@ function RecCard({
               padding: "var(--space-md) var(--space-lg)",
               background: "var(--color-surface-1)",
               borderTop: "1px solid var(--glass-border)",
+              display: "flex", flexDirection: "column", gap: "var(--space-md)",
             }}>
-              {/* Main reasoning */}
-              {rec.reasoning && (
-                <p style={{
-                  fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
-                  lineHeight: 1.5, margin: 0,
-                }}>
-                  {rec.reasoning}
-                </p>
-              )}
-
-              {/* Agent summaries */}
+              {/* Agent consensus panel — ring + avatar tiles */}
               {stances.length > 0 && (
-                <div className="glass-ai" style={{
-                  display: "flex", flexDirection: "column", gap: "var(--space-md)",
-                  marginTop: "var(--space-md)", padding: "var(--space-md)",
-                }}>
-                  {stances.filter((a) => a.summary && a.summary !== "Failed to parse LLM response").map((a) => {
-                    const col = agentColor[a.name.toLowerCase()] || "var(--color-text-muted)";
-                    return (
-                      <div key={a.name}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{
-                            width: 22, height: 22, borderRadius: "50%",
-                            background: `${col}20`, border: `1px solid ${col}40`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 9, fontWeight: 800, color: col, flexShrink: 0,
-                          }}>
-                            {agentIcon[a.name.toLowerCase()] || a.name.charAt(0).toUpperCase()}
-                          </div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: col, textTransform: "capitalize" }}>
-                            {a.name}
-                          </span>
-                          <span style={{
-                            fontSize: 9, fontWeight: 700,
-                            color: a.sentiment >= 0.15 ? "var(--color-success)" : a.sentiment <= -0.15 ? "var(--color-error)" : "var(--color-text-muted)",
-                          }}>
-                            {stanceLabel(a.sentiment)}
-                          </span>
-                          <span style={{
-                            fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
-                            color: col, marginLeft: "auto",
-                          }}>
-                            {(a.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <p style={{
-                          fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5,
-                          margin: "4px 0 0 30px",
-                        }}>
-                          {a.summary}
-                        </p>
-                        {a.key_signals.length > 0 && (
-                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4, marginLeft: 30 }}>
-                            {a.key_signals.map((s, i) => (
-                              <span key={i} style={{
-                                fontSize: 9, padding: "1px 6px", borderRadius: 4,
-                                background: `${col}10`, color: col, fontWeight: 600,
-                                border: `1px solid ${col}15`,
-                              }}>
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <AgentConsensusPanel
+                  stances={stances}
+                  consensusScore={rec.consensusScore ?? null}
+                />
               )}
 
-              {/* Portfolio fit reasoning */}
+              {/* Signal tag cloud — frequency-weighted */}
+              {stances.length > 0 && (
+                <SignalTagCloud stances={stances} />
+              )}
+
+              {/* Advisory board compact votes */}
+              {rec.advisoryOpinions && rec.advisoryOpinions.length > 0 && (() => {
+                const opinions = rec.advisoryOpinions!;
+                const approves = opinions.filter((o) => o.vote === "APPROVE" || o.vote === "ENDORSE");
+                const vetoes = opinions.filter((o) => o.vote === "VETO");
+                return (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: "var(--space-sm)",
+                    flexWrap: "wrap",
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700,
+                      color: vetoes.length > 0 ? "var(--color-error)" : "var(--color-success)",
+                    }}>
+                      Board: {approves.length} approve{vetoes.length > 0 ? `, ${vetoes.length} veto` : ""}
+                    </span>
+                    {opinions.map((o) => (
+                      <span key={o.advisor_name} style={{
+                        fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                        fontWeight: 600,
+                        background: o.vote === "VETO"
+                          ? "rgba(248, 113, 113, 0.12)"
+                          : "rgba(52, 211, 153, 0.08)",
+                        color: o.vote === "VETO"
+                          ? "var(--color-error)"
+                          : "var(--color-text-muted)",
+                        border: `1px solid ${o.vote === "VETO" ? "rgba(248, 113, 113, 0.2)" : "var(--glass-border)"}`,
+                      }}>
+                        {o.display_name} {o.vote === "VETO" ? "\u2717" : "\u2713"}
+                        {o.key_concern ? ` \u2014 ${o.key_concern}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Portfolio fit — compact */}
               {rec.portfolioFit && (rec.portfolioFit as any).reasoning && (
                 <div style={{
-                  marginTop: "var(--space-md)", padding: "var(--space-sm) var(--space-md)",
+                  padding: "var(--space-sm) var(--space-md)",
                   background: "var(--color-surface-0)", borderRadius: "var(--radius-md)",
                   border: "1px solid var(--glass-border)",
                 }}>

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 type CardVariant = "default" | "hero" | "accent" | "success" | "error";
 
 interface BentoCardProps {
-  title?: string;
+  title?: ReactNode;
   children: ReactNode;
   className?: string;
   delay?: number;

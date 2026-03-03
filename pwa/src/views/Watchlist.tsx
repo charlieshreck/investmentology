@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
@@ -7,6 +8,7 @@ import { MarketStatus } from "../components/shared/MarketStatus";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
+import { ChevronDown } from "lucide-react";
 
 import type { WatchlistItem, AgentStance } from "../types/models";
 
@@ -118,6 +120,112 @@ function Sparkline({ data, changePct }: { data: { date: string; price: number }[
   );
 }
 
+/* ── Entry Trigger Checklist ── */
+function EntryTriggerChecklist({ item }: { item: WatchlistItem }) {
+  const v = item.verdict;
+  const verdict = v?.recommendation || "WATCHLIST";
+  const rank = item.combinedRank;
+  const buyVerdicts = ["STRONG_BUY", "BUY", "ACCUMULATE"];
+  const verdictMet = buyVerdicts.includes(verdict);
+  const rankMet = rank != null && rank <= 50;
+  const hasNote = !!item.notes;
+
+  // Since-added price movement
+  const changePct = item.changePct ?? 0;
+
+  const checks: { label: string; detail: string; met: boolean | null }[] = [
+    {
+      label: "Verdict gate",
+      detail: verdictMet ? `${verdict}` : `Current: ${verdict}, need BUY+`,
+      met: verdictMet,
+    },
+    {
+      label: "Quant rank",
+      detail: rank != null ? `#${rank}${rankMet ? "" : ", need top 50"}` : "Not ranked",
+      met: rank != null ? rankMet : null,
+    },
+    {
+      label: "Catalyst note",
+      detail: item.notes || "No catalyst set",
+      met: hasNote ? true : null,
+    },
+  ];
+
+  const metCount = checks.filter((c) => c.met === true).length;
+  const totalChecks = checks.length;
+
+  return (
+    <div style={{
+      padding: "var(--space-sm) var(--space-md)",
+      background: "var(--color-surface-1)",
+      borderTop: "1px solid var(--glass-border)",
+    }}>
+      {/* Progress indicator */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "var(--space-sm)",
+        marginBottom: "var(--space-sm)",
+      }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-secondary)" }}>
+          Entry readiness
+        </span>
+        <div style={{
+          flex: 1, height: 4, borderRadius: 2,
+          background: "var(--color-surface-2)", overflow: "hidden",
+        }}>
+          <div style={{
+            height: "100%", borderRadius: 2,
+            width: `${(metCount / totalChecks) * 100}%`,
+            background: metCount === totalChecks ? "var(--color-success)" :
+              metCount >= 1 ? "var(--color-warning)" : "var(--color-surface-2)",
+            transition: "width 0.3s ease",
+          }} />
+        </div>
+        <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--color-text-muted)" }}>
+          {metCount}/{totalChecks}
+        </span>
+      </div>
+
+      {/* Checklist rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {checks.map((c) => (
+          <div key={c.label} style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            <span style={{
+              fontSize: 11, width: 14, textAlign: "center",
+              color: c.met === true ? "var(--color-success)" : c.met === false ? "var(--color-error)" : "var(--color-text-muted)",
+            }}>
+              {c.met === true ? "\u2713" : c.met === false ? "\u2717" : "\u25CB"}
+            </span>
+            <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-secondary)", minWidth: 70 }}>
+              {c.label}
+            </span>
+            <span style={{
+              fontSize: 10, color: "var(--color-text-muted)", flex: 1,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {c.detail}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Since added */}
+      {item.priceAtAdd > 0 && (
+        <div style={{
+          marginTop: "var(--space-sm)", fontSize: 10,
+          color: "var(--color-text-muted)",
+        }}>
+          Since added: <span style={{
+            fontFamily: "var(--font-mono)", fontWeight: 600,
+            color: pnlColor(changePct),
+          }}>
+            {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ItemCard({
   item,
   onClick,
@@ -133,139 +241,175 @@ function ItemCard({
   const stances = (v?.agentStances || []) as AgentStance[];
   const riskFlags = v?.riskFlags as string[] | null | undefined;
   const changePct = item.changePct ?? 0;
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "auto 1fr auto auto auto",
-        alignItems: "center",
-        gap: "var(--space-md)",
-        padding: "var(--space-md)",
-        borderRadius: "var(--radius-sm)",
-        cursor: "pointer",
-        transition: `background var(--duration-fast) var(--ease-out)`,
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-1)"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-    >
-      {/* Success probability ring */}
-      {successRing(item.successProbability)}
+    <div style={{
+      borderRadius: "var(--radius-sm)",
+      overflow: "hidden",
+      transition: `background var(--duration-fast) var(--ease-out)`,
+    }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto auto",
+          alignItems: "center",
+          gap: "var(--space-md)",
+          padding: "var(--space-md)",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--color-surface-1)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+      >
+        {/* Success probability ring */}
+        <div onClick={onClick}>{successRing(item.successProbability)}</div>
 
-      {/* Ticker / name / agent stances */}
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-          <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
-            {item.ticker}
-          </span>
-          {item.addedAt && (
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-              {relativeDate(item.addedAt)}
+        {/* Ticker / name / agent stances */}
+        <div style={{ minWidth: 0 }} onClick={onClick}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
+              {item.ticker}
             </span>
+            {item.addedAt && (
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                {relativeDate(item.addedAt)}
+              </span>
+            )}
+          </div>
+          <div style={{
+            fontSize: "var(--text-xs)", color: "var(--color-text-muted)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {item.name}
+            {item.marketCap > 0 && ` · ${formatCap(item.marketCap)}`}
+          </div>
+          {/* Agent stances */}
+          {stances.length > 0 && (
+            <div style={{ display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-xs)" }}>
+              {stances.map((a) => {
+                const bar = sentimentBar(a.sentiment);
+                return (
+                  <div key={a.name} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span style={{ fontSize: 9, color: "var(--color-text-muted)", textTransform: "capitalize" }}>
+                      {a.name.slice(0, 3)}
+                    </span>
+                    <div style={{
+                      width: 32, height: 4, borderRadius: 2,
+                      background: "var(--color-surface-2)", overflow: "hidden",
+                    }}>
+                      <div style={{ height: "100%", width: bar.width, background: bar.color, borderRadius: 2 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {riskFlags && riskFlags.length > 0 && (
+            <div style={{ fontSize: 9, color: "var(--color-warning)", marginTop: 2 }}>
+              {riskFlags.length} risk flag{riskFlags.length > 1 ? "s" : ""}
+            </div>
+          )}
+          {(() => {
+            const opinions = v?.advisoryOpinions || [];
+            if (opinions.length === 0) return null;
+            const approveCount = opinions.filter((o: any) => o.vote === "APPROVE" || o.vote === "ENDORSE").length;
+            const vetoCount = opinions.filter((o: any) => o.vote === "VETO").length;
+            const total = opinions.length;
+            let bg = "rgba(148, 163, 184, 0.12)";
+            let fg = "var(--color-text-muted)";
+            if (vetoCount > 0) { bg = "rgba(248, 113, 113, 0.12)"; fg = "var(--color-error)"; }
+            else if (approveCount >= total * 0.75) { bg = "rgba(52, 211, 153, 0.12)"; fg = "var(--color-success)"; }
+            else { bg = "rgba(251, 191, 36, 0.12)"; fg = "var(--color-warning)"; }
+            const label = vetoCount > 0 ? `Board: ${vetoCount} Veto` : `Board: ${approveCount}/${total}`;
+            return (
+              <span style={{
+                display: "inline-flex", alignItems: "center",
+                padding: "1px 6px", borderRadius: 99, fontSize: 9, fontWeight: 600,
+                background: bg, color: fg, marginTop: 2, whiteSpace: "nowrap",
+              }}>
+                {label}
+              </span>
+            );
+          })()}
+        </div>
+
+        {/* Sparkline */}
+        <div style={{ flexShrink: 0 }} onClick={onClick}>
+          <Sparkline data={item.priceHistory || []} changePct={changePct} />
+        </div>
+
+        {/* Price column: entry → current + change % */}
+        <div style={{ textAlign: "right", minWidth: 70 }} onClick={onClick}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontWeight: 600 }}>
+            {formatPrice(item.currentPrice)}
+          </div>
+          {item.priceAtAdd > 0 && (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
+              from {formatPrice(item.priceAtAdd)}
+            </div>
+          )}
+          {item.priceAtAdd > 0 && (
+            <div style={{
+              fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", fontWeight: 600,
+              color: pnlColor(changePct),
+            }}>
+              {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
+            </div>
           )}
         </div>
-        <div style={{
-          fontSize: "var(--text-xs)", color: "var(--color-text-muted)",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {item.name}
-          {item.marketCap > 0 && ` · ${formatCap(item.marketCap)}`}
+
+        {/* Expand + Analyze buttons */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            style={{
+              padding: 4, background: "none", border: "none", cursor: "pointer",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <ChevronDown
+              size={14}
+              style={{
+                transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s ease",
+              }}
+            />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onAnalyze(); }}
+            disabled={isAnalyzing}
+            style={{
+              padding: "var(--space-xs) var(--space-md)",
+              fontSize: "var(--text-xs)",
+              fontWeight: 600,
+              background: isAnalyzing ? "var(--color-surface-2)" : "var(--color-accent-ghost)",
+              color: isAnalyzing ? "var(--color-text-muted)" : "var(--color-accent-bright)",
+              border: "none",
+              borderRadius: "var(--radius-full)",
+              cursor: isAnalyzing ? "wait" : "pointer",
+              whiteSpace: "nowrap",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            {isAnalyzing ? "..." : "Re-analyze"}
+          </button>
         </div>
-        {/* Agent stances */}
-        {stances.length > 0 && (
-          <div style={{ display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-xs)" }}>
-            {stances.map((a) => {
-              const bar = sentimentBar(a.sentiment);
-              return (
-                <div key={a.name} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                  <span style={{ fontSize: 9, color: "var(--color-text-muted)", textTransform: "capitalize" }}>
-                    {a.name.slice(0, 3)}
-                  </span>
-                  <div style={{
-                    width: 32, height: 4, borderRadius: 2,
-                    background: "var(--color-surface-2)", overflow: "hidden",
-                  }}>
-                    <div style={{ height: "100%", width: bar.width, background: bar.color, borderRadius: 2 }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {riskFlags && riskFlags.length > 0 && (
-          <div style={{ fontSize: 9, color: "var(--color-warning)", marginTop: 2 }}>
-            {riskFlags.length} risk flag{riskFlags.length > 1 ? "s" : ""}
-          </div>
-        )}
-        {(() => {
-          const opinions = v?.advisoryOpinions || [];
-          if (opinions.length === 0) return null;
-          const approveCount = opinions.filter((o: any) => o.vote === "APPROVE" || o.vote === "ENDORSE").length;
-          const vetoCount = opinions.filter((o: any) => o.vote === "VETO").length;
-          const total = opinions.length;
-          let bg = "rgba(148, 163, 184, 0.12)";
-          let fg = "var(--color-text-muted)";
-          if (vetoCount > 0) { bg = "rgba(248, 113, 113, 0.12)"; fg = "var(--color-error)"; }
-          else if (approveCount >= total * 0.75) { bg = "rgba(52, 211, 153, 0.12)"; fg = "var(--color-success)"; }
-          else { bg = "rgba(251, 191, 36, 0.12)"; fg = "var(--color-warning)"; }
-          const label = vetoCount > 0 ? `Board: ${vetoCount} Veto` : `Board: ${approveCount}/${total}`;
-          return (
-            <span style={{
-              display: "inline-flex", alignItems: "center",
-              padding: "1px 6px", borderRadius: 99, fontSize: 9, fontWeight: 600,
-              background: bg, color: fg, marginTop: 2, whiteSpace: "nowrap",
-            }}>
-              {label}
-            </span>
-          );
-        })()}
       </div>
 
-      {/* Sparkline */}
-      <div style={{ flexShrink: 0 }}>
-        <Sparkline data={item.priceHistory || []} changePct={changePct} />
-      </div>
-
-      {/* Price column: entry → current + change % */}
-      <div style={{ textAlign: "right", minWidth: 70 }}>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", fontWeight: 600 }}>
-          {formatPrice(item.currentPrice)}
-        </div>
-        {item.priceAtAdd > 0 && (
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
-            from {formatPrice(item.priceAtAdd)}
-          </div>
+      {/* Entry trigger checklist — expandable */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            style={{ overflow: "hidden" }}
+          >
+            <EntryTriggerChecklist item={item} />
+          </motion.div>
         )}
-        {item.priceAtAdd > 0 && (
-          <div style={{
-            fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", fontWeight: 600,
-            color: pnlColor(changePct),
-          }}>
-            {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
-          </div>
-        )}
-      </div>
-
-      {/* Re-analyze button */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onAnalyze(); }}
-        disabled={isAnalyzing}
-        style={{
-          padding: "var(--space-xs) var(--space-md)",
-          fontSize: "var(--text-xs)",
-          fontWeight: 600,
-          background: isAnalyzing ? "var(--color-surface-2)" : "var(--color-accent-ghost)",
-          color: isAnalyzing ? "var(--color-text-muted)" : "var(--color-accent-bright)",
-          border: "none",
-          borderRadius: "var(--radius-full)",
-          cursor: isAnalyzing ? "wait" : "pointer",
-          whiteSpace: "nowrap",
-          fontFamily: "var(--font-sans)",
-        }}
-      >
-        {isAnalyzing ? "..." : "Re-analyze"}
-      </button>
+      </AnimatePresence>
     </div>
   );
 }

@@ -58,6 +58,8 @@ def _build_agent_profiles() -> dict[str, dict]:
                 "philosophy": skill.display_name,
                 "focus": skill.philosophy[:80],
                 "category": skill.role.title(),
+                "critical_rules": skill.critical_rules,
+                "allowed_tags": skill.allowed_tags,
             }
         return profiles
     except ImportError:

@@ -14,6 +14,7 @@ import { useCorrelations } from "../hooks/useCorrelations";
 import { useConfetti } from "../hooks/useConfetti";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAnalysis } from "../contexts/AnalysisContext";
+import { useThesisSummary, usePortfolioRisk } from "../hooks/useToday";
 import type { Position, Alert, ClosedPosition } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
@@ -1040,6 +1041,9 @@ export function Portfolio() {
   const [briefing, setBriefing] = useState<BriefingSummary | null>(null);
   const [_corrOpen, _setCorrOpen] = useState(false);
   const [posFilter, setPosFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState("positions");
+  const { positions: thesisPositions, loading: thesisLoading } = useThesisSummary();
+  const { data: riskData, loading: riskLoading } = usePortfolioRisk();
   const balance = usePortfolioBalance(positions.length);
   const scrollRef = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
@@ -1193,9 +1197,17 @@ export function Portfolio() {
 
       <ViewHeader
         subtitle={`${positions.length} positions`}
+        tabs={[
+          { key: "positions", label: "Positions" },
+          { key: "thesis", label: "Thesis" },
+          { key: "risk", label: "Risk" },
+          { key: "history", label: "History" },
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         right={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
-            {positions.length > 0 && (
+            {positions.length > 0 && activeTab === "positions" && (
               <button
                 onClick={() => { if (!analysisRunning) startAnalysis(positions.map((p) => p.ticker)); }}
                 disabled={analysisRunning}
@@ -1221,6 +1233,9 @@ export function Portfolio() {
       />
 
       <div style={{ padding: "var(--space-xl)", display: "flex", flexDirection: "column", gap: "var(--space-xl)" }}>
+
+        {/* ═══════ Positions Tab ═══════ */}
+        {activeTab === "positions" && <>
 
         {/* ═══════ HERO: Total Value ═══════ */}
         <motion.div
@@ -2098,30 +2113,324 @@ export function Portfolio() {
           </Section>
         )}
 
-        {/* ═══════ Closed Positions ═══════ */}
-        {closedPositions.length > 0 && (
-          <Section title="Closed Trades" defaultOpen={false} count={closedPositions.length}>
-            {/* Total realized banner */}
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "var(--space-md) var(--space-lg)", marginBottom: "var(--space-sm)",
-              background: "var(--color-surface-0)", borderRadius: "var(--radius-md)",
-              border: "1px solid var(--glass-border)",
-            }}>
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                {closedPositions.length} trade{closedPositions.length !== 1 ? "s" : ""} realized
-              </span>
-              <span style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-mono)", fontWeight: 700, color: pnlColor(totalRealizedPnl) }}>
-                {formatCurrency(totalRealizedPnl)}
-              </span>
-            </div>
-            {/* Individual closed trade cards */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+        </>}
+
+        {/* ═══════ Thesis Tab ═══════ */}
+        {activeTab === "thesis" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+            {thesisLoading ? (
+              <div style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+                Loading thesis data...
+              </div>
+            ) : thesisPositions.length === 0 ? (
+              <div style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+                No positions with thesis data yet
+              </div>
+            ) : thesisPositions.map((tp) => {
+              const healthColors: Record<string, string> = {
+                INTACT: "var(--color-success)",
+                UNDER_REVIEW: "var(--color-warning)",
+                CHALLENGED: "var(--color-error)",
+                BROKEN: "var(--color-error)",
+              };
+              const healthCol = healthColors[tp.thesis_health] || "var(--color-text-muted)";
+              const convictionPct = Math.max(0, Math.min(100, Math.round(tp.conviction_trend * 100)));
+              return (
+                <motion.div
+                  key={tp.ticker}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    borderRadius: "var(--radius-lg)",
+                    background: "var(--color-surface-0)",
+                    border: "1px solid var(--glass-border)",
+                    overflow: "hidden",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setOverlayTicker(tp.ticker)}
+                >
+                  {/* Top accent */}
+                  <div style={{ height: 2, background: healthCol, opacity: 0.5 }} />
+
+                  <div style={{ padding: "var(--space-md) var(--space-lg)" }}>
+                    {/* Row 1: Ticker + type + health badge */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: 6 }}>
+                      <span style={{ fontWeight: 800, fontFamily: "var(--font-mono)", fontSize: "var(--text-base)" }}>
+                        {tp.ticker}
+                      </span>
+                      <span style={{
+                        fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+                        padding: "1px 6px", borderRadius: 4,
+                        background: "rgba(99,102,241,0.12)", color: "var(--color-accent-bright)",
+                      }}>
+                        {tp.position_type}
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, marginLeft: "auto",
+                        color: healthCol,
+                      }}>
+                        {"\u25CF"} {tp.thesis_health.replace("_", " ")}
+                      </span>
+                    </div>
+
+                    {/* Entry thesis */}
+                    <div style={{
+                      fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+                      fontStyle: "italic", lineHeight: 1.4, marginBottom: 8,
+                    }}>
+                      &ldquo;{tp.entry_thesis}&rdquo;
+                    </div>
+
+                    {/* Conviction bar + stats row */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+                      {/* Conviction bar */}
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          fontSize: 9, color: "var(--color-text-muted)", fontWeight: 600,
+                          marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em",
+                        }}>
+                          Conviction
+                        </div>
+                        <div style={{
+                          height: 6, borderRadius: 3, background: "var(--color-surface-2)",
+                          overflow: "hidden",
+                        }}>
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${convictionPct}%` }}
+                            transition={{ duration: 0.6, ease: "easeOut" }}
+                            style={{
+                              height: "100%", borderRadius: 3,
+                              background: convictionPct >= 70 ? "var(--color-success)" :
+                                convictionPct >= 40 ? "var(--color-warning)" : "var(--color-error)",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--color-text-muted)" }}>
+                        {tp.days_held}d
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
+                        color: tp.pnl_pct >= 0 ? "var(--color-success)" : "var(--color-error)",
+                      }}>
+                        {tp.pnl_pct >= 0 ? "+" : ""}{tp.pnl_pct.toFixed(1)}%
+                      </span>
+                    </div>
+
+                    {/* Reasoning */}
+                    {tp.reasoning && (
+                      <div style={{
+                        fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.4,
+                        marginTop: 8,
+                      }}>
+                        {tp.reasoning}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ═══════ Risk Tab ═══════ */}
+        {activeTab === "risk" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+            {riskLoading ? (
+              <div style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+                Loading risk data...
+              </div>
+            ) : !riskData ? (
+              <div style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+                No risk data available
+              </div>
+            ) : (<>
+              {/* Risk level badge */}
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "var(--space-xl)",
+                background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)",
+                border: "1px solid var(--glass-border)",
+              }}>
+                <div style={{ textAlign: "center" }}>
+                  <ShieldAlert
+                    size={32}
+                    color={
+                      riskData.risk_level === "NORMAL" ? "var(--color-success)" :
+                      riskData.risk_level === "ELEVATED" ? "var(--color-warning)" :
+                      "var(--color-error)"
+                    }
+                  />
+                  <div style={{
+                    fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 8,
+                    color: riskData.risk_level === "NORMAL" ? "var(--color-success)" :
+                      riskData.risk_level === "ELEVATED" ? "var(--color-warning)" :
+                      "var(--color-error)",
+                  }}>
+                    {riskData.risk_level}
+                  </div>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: 4 }}>
+                    Overall Risk Level
+                  </div>
+                </div>
+              </div>
+
+              {/* Key metrics row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-sm)" }}>
+                {[
+                  { label: "Top Weight", value: `${riskData.top_position_weight.toFixed(1)}%`, warn: riskData.top_position_weight > 20 },
+                  { label: "Health Score", value: `${(riskData.avg_thesis_health_score * 100).toFixed(0)}%`, warn: riskData.avg_thesis_health_score < 0.7 },
+                  { label: "Positions", value: `${riskData.position_count}`, warn: false },
+                ].map((m) => (
+                  <div key={m.label} style={{
+                    padding: "var(--space-md)",
+                    background: "var(--color-surface-0)", borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--glass-border)", textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: 9, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600, marginBottom: 4 }}>
+                      {m.label}
+                    </div>
+                    <div style={{
+                      fontSize: "var(--text-lg)", fontWeight: 800, fontFamily: "var(--font-mono)",
+                      color: m.warn ? "var(--color-warning)" : "var(--color-text)",
+                    }}>
+                      {m.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Sector concentration bars */}
+              {Object.keys(riskData.sector_concentration).length > 0 && (
+                <div style={{
+                  padding: "var(--space-lg)",
+                  background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--glass-border)",
+                }}>
+                  <div style={{
+                    fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-text-secondary)",
+                    textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "var(--space-md)",
+                  }}>
+                    Sector Concentration
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {Object.entries(riskData.sector_concentration)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([sector, pct]) => (
+                        <div key={sector}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                            <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{sector}</span>
+                            <span style={{
+                              fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600,
+                              color: pct > 30 ? "var(--color-warning)" : "var(--color-text-muted)",
+                            }}>
+                              {pct.toFixed(1)}%
+                            </span>
+                          </div>
+                          <div style={{ height: 5, borderRadius: 3, background: "var(--color-surface-2)" }}>
+                            <div style={{
+                              height: "100%", borderRadius: 3,
+                              width: `${Math.min(pct, 100)}%`,
+                              background: pct > 30 ? "var(--color-warning)" :
+                                pct > 20 ? "var(--color-accent)" : "var(--color-success)",
+                              transition: "width 0.3s ease",
+                            }} />
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Position thesis health summary */}
+              {riskData.positions.length > 0 && (
+                <div style={{
+                  padding: "var(--space-lg)",
+                  background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--glass-border)",
+                }}>
+                  <div style={{
+                    fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-text-secondary)",
+                    textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "var(--space-md)",
+                  }}>
+                    Position Health
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {riskData.positions
+                      .sort((a, b) => b.weight_pct - a.weight_pct)
+                      .map((p) => {
+                        const hCol: Record<string, string> = {
+                          INTACT: "var(--color-success)", UNDER_REVIEW: "var(--color-warning)",
+                          CHALLENGED: "var(--color-error)", BROKEN: "var(--color-error)",
+                        };
+                        return (
+                          <div
+                            key={p.ticker}
+                            onClick={() => setOverlayTicker(p.ticker)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "var(--space-sm)",
+                              padding: "6px var(--space-sm)", borderRadius: "var(--radius-sm)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <span style={{
+                              width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                              background: hCol[p.thesis_health] || "var(--color-text-muted)",
+                            }} />
+                            <span style={{ fontWeight: 700, fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", minWidth: 44 }}>
+                              {p.ticker}
+                            </span>
+                            <span style={{
+                              fontSize: 10, color: "var(--color-text-muted)", flex: 1,
+                            }}>
+                              {p.weight_pct.toFixed(1)}% weight
+                            </span>
+                            <span style={{
+                              fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
+                              color: p.pnl_pct >= 0 ? "var(--color-success)" : "var(--color-error)",
+                            }}>
+                              {p.pnl_pct >= 0 ? "+" : ""}{p.pnl_pct.toFixed(1)}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </>)}
+          </div>
+        )}
+
+        {/* ═══════ History Tab ═══════ */}
+        {activeTab === "history" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+            {closedPositions.length === 0 ? (
+              <div style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+                No closed trades yet
+              </div>
+            ) : (<>
+              {/* Total realized banner */}
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "var(--space-md) var(--space-lg)",
+                background: "var(--color-surface-0)", borderRadius: "var(--radius-md)",
+                border: "1px solid var(--glass-border)",
+              }}>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                  {closedPositions.length} trade{closedPositions.length !== 1 ? "s" : ""} realized
+                </span>
+                <span style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-mono)", fontWeight: 700, color: pnlColor(totalRealizedPnl) }}>
+                  {formatCurrency(totalRealizedPnl)}
+                </span>
+              </div>
+              {/* Individual closed trade cards */}
               {closedPositions.map((cp) => (
                 <ClosedTradeCard key={cp.id} trade={cp} />
               ))}
-            </div>
-          </Section>
+            </>)}
+          </div>
         )}
 
         {/* Status toast */}

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BottomNav } from "./components/layout/BottomNav";
 import { LayerOverlay } from "./components/layout/LayerOverlay";
 import { PageTransition } from "./components/layout/PageTransition";
+import { Today } from "./views/Today";
 import { Portfolio } from "./views/Portfolio";
 import { QuantGate } from "./views/QuantGate";
 import { Watchlist } from "./views/Watchlist";
@@ -159,7 +160,8 @@ function AppShell({ offline }: { offline: boolean }) {
       >
         <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
-            <Route path="/" element={<PageTransition><Portfolio /></PageTransition>} />
+            <Route path="/" element={<PageTransition><Today /></PageTransition>} />
+            <Route path="/portfolio" element={<PageTransition><Portfolio /></PageTransition>} />
             <Route path="/screener" element={<PageTransition><QuantGate /></PageTransition>} />
             <Route path="/watchlist" element={<PageTransition><Watchlist /></PageTransition>} />
             <Route path="/log" element={<PageTransition><Decisions /></PageTransition>} />
