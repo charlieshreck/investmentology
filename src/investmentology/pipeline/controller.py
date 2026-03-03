@@ -78,9 +78,10 @@ class PipelineController:
             self._runners[name] = AgentRunner(skill, gateway)
 
         # API agent concurrency limits — prevents rate limit bombs
-        # Groq: 30 RPM → 5 concurrent; DeepSeek: 60 RPM → 10 concurrent
+        # Groq: 30 RPM free tier → 2 concurrent (each ~1-2s = ~60-120 RPM at 5)
+        # DeepSeek: 60 RPM → 10 concurrent
         self._api_semaphores: dict[str, asyncio.Semaphore] = {
-            "groq": asyncio.Semaphore(5),
+            "groq": asyncio.Semaphore(2),
             "deepseek": asyncio.Semaphore(10),
         }
 
