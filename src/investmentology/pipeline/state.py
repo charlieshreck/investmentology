@@ -168,6 +168,44 @@ def expire_stale_steps(db: Database) -> int:
     return len(rows)
 
 
+# Max time a step can stay in "running" before being reset (minutes)
+RUNNING_TIMEOUT_MINUTES = 10
+
+
+def reset_stale_running_steps(db: Database) -> int:
+    """Reset steps stuck in 'running' for too long back to 'pending'.
+
+    This handles cases where the controller OOMKills or crashes mid-tick,
+    leaving steps in 'running' that were never completed or failed.
+    Steps with retry_count >= 2 are marked 'failed' instead.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=RUNNING_TIMEOUT_MINUTES)
+    # Reset retriable steps back to pending
+    reset_rows = db.execute(
+        "UPDATE invest.pipeline_state "
+        "SET status = 'pending', started_at = NULL "
+        "WHERE status = 'running' AND started_at < %s AND retry_count < 2 "
+        "RETURNING id, ticker, step",
+        (cutoff,),
+    )
+    # Fail steps that have exceeded retries
+    fail_rows = db.execute(
+        "UPDATE invest.pipeline_state "
+        "SET status = 'failed', error = 'Stale running step (max retries exceeded)', "
+        "completed_at = NOW() "
+        "WHERE status = 'running' AND started_at < %s AND retry_count >= 2 "
+        "RETURNING id, ticker, step",
+        (cutoff,),
+    )
+    total = len(reset_rows) + len(fail_rows)
+    if total:
+        logger.info(
+            "Recovered %d stale running steps (%d reset, %d failed)",
+            total, len(reset_rows), len(fail_rows),
+        )
+    return total
+
+
 # ---------------------------------------------------------------------------
 # Readiness queries
 # ---------------------------------------------------------------------------

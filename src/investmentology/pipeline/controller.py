@@ -109,8 +109,9 @@ class PipelineController:
 
     async def _tick(self) -> None:
         """Process one iteration of the controller loop."""
-        # 1. Expire stale steps and cycles
+        # 1. Expire stale steps, recover stuck running steps, expire old cycles
         state.expire_stale_steps(self.db)
+        state.reset_stale_running_steps(self.db)
         state.expire_old_cycles(self.db)
 
         # 2. Get or create current cycle
