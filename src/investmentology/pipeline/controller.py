@@ -69,6 +69,13 @@ class PipelineController:
         for name, skill in SKILLS.items():
             self._runners[name] = AgentRunner(skill, gateway)
 
+        # API agent concurrency limits — prevents rate limit bombs
+        # Groq: 30 RPM → 5 concurrent; DeepSeek: 60 RPM → 10 concurrent
+        self._api_semaphores: dict[str, asyncio.Semaphore] = {
+            "groq": asyncio.Semaphore(5),
+            "deepseek": asyncio.Semaphore(10),
+        }
+
         # YFinance client — synchronous, used in run_in_executor
         from investmentology.data.yfinance_client import YFinanceClient
         self._yf_client = YFinanceClient(cache_ttl_hours=24)
@@ -559,13 +566,31 @@ class PipelineController:
     # Async result handlers
     # ------------------------------------------------------------------
 
+    # Map remote CLI providers to their underlying rate-limited API provider
+    _PROVIDER_RATE_GROUP: dict[str, str] = {
+        "remote-simons": "groq",
+        "remote-lynch": "deepseek",
+        "groq": "groq",
+        "deepseek": "deepseek",
+    }
+
     async def _run_api_agent(
         self, step_id: int, runner: AgentRunner, ticker: str,
     ) -> None:
-        """Run an API-only agent (Simons, Lynch) directly."""
+        """Run an API-only agent (Simons, Lynch) with rate limiting."""
         try:
-            request = self._build_request(ticker)
-            response = await runner.analyze(request)
+            provider = runner._resolve_provider()
+            rate_group = self._PROVIDER_RATE_GROUP.get(provider, provider)
+            sem = self._api_semaphores.get(rate_group)
+
+            if sem:
+                async with sem:
+                    request = self._build_request(ticker)
+                    response = await runner.analyze(request)
+            else:
+                request = self._build_request(ticker)
+                response = await runner.analyze(request)
+
             signal_id = self._save_agent_signals(ticker, response)
             state.mark_completed(self.db, step_id, result_ref=signal_id)
             logger.info(

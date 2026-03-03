@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import json
 import logging
-from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.dalio import _parse_agent_response
 from investmentology.agents.gateway import LLMGateway
+from investmentology.models.signal import AgentSignalSet
 
 logger = logging.getLogger(__name__)
 

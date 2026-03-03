@@ -29,7 +29,7 @@ from investmentology.advisory.models import (
     BoardVote,
 )
 from investmentology.agents.gateway import LLMGateway, LLMResponse
-from investmentology.verdict import AgentStance, Verdict, VerdictResult
+from investmentology.verdict import AgentStance, VerdictResult
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +564,7 @@ def _build_user_prompt(
     # Thesis context (if held position)
     pos_thesis = getattr(request, "position_thesis", None)
     if pos_thesis and isinstance(pos_thesis, str):
-        parts.append(f"\n## Position Context")
+        parts.append("\n## Position Context")
         parts.append(f"Original Thesis: {pos_thesis[:300]}")
         pos_type = getattr(request, "position_type", None)
         if pos_type and isinstance(pos_type, str):

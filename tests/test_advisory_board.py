@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -38,7 +38,6 @@ from investmentology.advisory.cio import (
 )
 from investmentology.advisory.models import (
     AdvisorOpinion,
-    AdvisorSpec,
     BoardNarrative,
     BoardResult,
     BoardVote,

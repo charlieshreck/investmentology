@@ -139,7 +139,6 @@ class TestStoreAnalysisMemory:
     async def test_sends_real_vector_not_none(self):
         """The upsert payload must contain a real vector, never None."""
         fake_vector = [0.1] * EMBED_DIM
-        captured_json = {}
 
         mock_response = MagicMock()
         mock_response.status_code = 200

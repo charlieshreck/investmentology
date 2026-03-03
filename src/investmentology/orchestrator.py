@@ -22,7 +22,7 @@ from investmentology.advisory.board import AdvisoryBoard
 from investmentology.advisory.cio import CIOSynthesizer
 from investmentology.advisory.models import BoardResult
 from investmentology.agents.auditor import AuditorAgent
-from investmentology.agents.base import AnalysisRequest, AnalysisResponse
+from investmentology.agents.base import AnalysisRequest, AnalysisResponse, BaseAgent
 from investmentology.agents.dalio import DalioAgent
 from investmentology.agents.debate import DebateOrchestrator
 from investmentology.agents.druckenmiller import DruckenmillerAgent

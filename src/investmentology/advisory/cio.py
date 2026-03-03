@@ -17,10 +17,8 @@ import json
 import logging
 import re
 import time
-from decimal import Decimal
 
 from investmentology.advisory.models import (
-    AdvisorOpinion,
     BoardNarrative,
     BoardResult,
     BoardVote,
@@ -129,7 +127,7 @@ def _build_cio_user_prompt(
 
     # Board vote outcome
     effective_verdict = board_result.adjusted_verdict or board_result.original_verdict
-    parts.append(f"## Board Decision")
+    parts.append("## Board Decision")
     parts.append(f"Original Verdict: {board_result.original_verdict}")
     if board_result.adjusted_verdict:
         parts.append(f"Board-Adjusted Verdict: {board_result.adjusted_verdict}")
