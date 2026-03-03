@@ -31,6 +31,7 @@ from investmentology.agents.skills import (
 )
 from investmentology.pipeline import state
 from investmentology.pipeline.convergence import should_debate  # noqa: F401
+from investmentology.pipeline.pre_filter import deterministic_pre_filter
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
 from investmentology.registry.db import Database
 from investmentology.registry.reentry import create_gate_blocks, get_blocked_tickers
@@ -53,6 +54,9 @@ ANALYSIS_AGENT_NAMES = [
 
 # Action tags that indicate a REJECT decision from screeners
 _REJECT_TAGS = {"REJECT", "REJECT_HARD"}
+
+# Supermajority: 3 of 4 screeners must pass for a ticker to proceed
+SCREENER_PASS_THRESHOLD = 3
 
 # Watchlist states eligible for analysis
 _ANALYSABLE_STATES = [
@@ -161,6 +165,9 @@ class PipelineController:
 
             elif step == state.STEP_DATA_VALIDATE:
                 await self._handle_data_validate(cycle_id, ticker, step_id)
+
+            elif step == state.STEP_PRE_FILTER:
+                await self._handle_pre_filter(cycle_id, ticker, step_id)
 
             elif step.startswith(state.STEP_SCREENER_PREFIX):
                 screener_name = step[len(state.STEP_SCREENER_PREFIX):]
@@ -281,13 +288,100 @@ class PipelineController:
         except Exception as e:
             state.mark_failed(self.db, step_id, str(e))
 
+    async def _handle_pre_filter(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+    ) -> None:
+        """Run deterministic pre-filter before LLM screeners."""
+        if not state.is_step_completed(
+            self.db, cycle_id, ticker, state.STEP_DATA_VALIDATE,
+        ):
+            return
+
+        state.mark_running(self.db, step_id)
+        try:
+            fundamentals = state.get_data_cache(
+                self.db, cycle_id, ticker, "fundamentals",
+            )
+            if not fundamentals:
+                state.mark_failed(self.db, step_id, "No cached fundamentals")
+                return
+
+            # Load quant gate data
+            quant_gate = None
+            try:
+                qg_rows = self.db.execute(
+                    "SELECT combined_rank, piotroski_score, altman_z_score "
+                    "FROM invest.quant_gate_results "
+                    "WHERE ticker = %s ORDER BY id DESC LIMIT 1",
+                    (ticker,),
+                )
+                if qg_rows:
+                    quant_gate = qg_rows[0]
+            except Exception:
+                pass
+
+            tech = state.get_data_cache(
+                self.db, cycle_id, ticker, "technical_indicators",
+            )
+
+            result = deterministic_pre_filter(fundamentals, quant_gate, tech)
+
+            state.store_data_cache(
+                self.db, cycle_id, ticker, "pre_filter_result", {
+                    "passed": result.passed,
+                    "rejection_reason": result.rejection_reason,
+                    "rules_checked": result.rules_checked,
+                    "rules_failed": result.rules_failed,
+                },
+            )
+
+            if not result.passed:
+                # Pre-filter rejection — skip screeners and gate entirely
+                for name in SCREENER_AGENT_NAMES:
+                    step_key = f"{state.STEP_SCREENER_PREFIX}{name}"
+                    s = state.get_step_status(self.db, cycle_id, ticker, step_key)
+                    if s and s["status"] == "pending":
+                        state.mark_completed(self.db, s["id"])
+
+                gate_step = state.get_step_status(
+                    self.db, cycle_id, ticker, state.STEP_GATE_DECISION,
+                )
+                if gate_step and gate_step["status"] == "pending":
+                    state.mark_completed(self.db, gate_step["id"])
+
+                state.mark_completed(self.db, step_id)
+                logger.info(
+                    "Pre-filter REJECT for %s: %s",
+                    ticker, result.rejection_reason,
+                )
+                return
+
+            state.mark_completed(self.db, step_id)
+            logger.info(
+                "Pre-filter PASS for %s (%d rules checked)",
+                ticker, result.rules_checked,
+            )
+        except Exception as e:
+            # On error, PASS by default (don't penalize for infra issues)
+            state.mark_completed(self.db, step_id)
+            logger.warning(
+                "Pre-filter error for %s, defaulting to PASS: %s", ticker, e,
+            )
+
     async def _handle_screener(
         self, cycle_id: UUID, ticker: str, step_id: int, screener_name: str,
     ) -> None:
         """Dispatch a screener agent (API-only, fast)."""
         if not state.is_step_completed(
-            self.db, cycle_id, ticker, state.STEP_DATA_VALIDATE,
+            self.db, cycle_id, ticker, state.STEP_PRE_FILTER,
         ):
+            return
+
+        # Check pre-filter didn't reject this ticker
+        pf_result = state.get_data_cache(
+            self.db, cycle_id, ticker, "pre_filter_result",
+        )
+        if pf_result and not pf_result.get("passed", True):
             return
 
         skill = SCREENER_SKILLS.get(screener_name)
@@ -309,14 +403,28 @@ class PipelineController:
     async def _handle_gate_decision(
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
-        """Deterministic gate decision: check screener consensus, pass or block."""
-        # Check all screeners completed
+        """Deterministic gate decision: supermajority vote (3/4 screeners must pass)."""
+        # Check if pre-filter already rejected (gate decision already completed)
+        pf_result = state.get_data_cache(
+            self.db, cycle_id, ticker, "pre_filter_result",
+        )
+        if pf_result and not pf_result.get("passed", True):
+            return  # Already handled by pre-filter
+
+        # Check all screeners are done (completed or failed)
         all_done = True
         for name in SCREENER_AGENT_NAMES:
             screener_step = f"{state.STEP_SCREENER_PREFIX}{name}"
-            if not state.is_step_completed(self.db, cycle_id, ticker, screener_step):
+            step_status = state.get_step_status(
+                self.db, cycle_id, ticker, screener_step,
+            )
+            if step_status is None:
                 all_done = False
                 break
+            if step_status["status"] in ("pending", "running"):
+                all_done = False
+                break
+            # "completed" or "failed" both count as done
 
         if not all_done:
             return
@@ -332,9 +440,12 @@ class PipelineController:
                 if r["agent_name"] in SCREENER_AGENT_NAMES
             ]
 
-            if not screener_results:
+            # Count screeners that failed to produce results (API errors)
+            failed_screener_count = len(SCREENER_AGENT_NAMES) - len(screener_results)
+
+            if not screener_results and failed_screener_count == len(SCREENER_AGENT_NAMES):
                 logger.warning(
-                    "No screener signals for %s, defaulting to PASS", ticker,
+                    "All screeners failed for %s, defaulting to PASS", ticker,
                 )
                 self._gate_pass(cycle_id, ticker, step_id)
                 return
@@ -355,12 +466,13 @@ class PipelineController:
                 if action_tags:
                     reject_count += 1
 
-            # Gate decision: FAIL if EITHER screener rejects
-            # Both screeners must see value to justify expensive analysis
-            if reject_count > 0:
-                self._gate_fail(cycle_id, ticker, step_id, screener_tags)
-            else:
+            # Supermajority: 3 of 4 must pass. Failed screeners count as PASS.
+            pass_count = (len(screener_results) - reject_count) + failed_screener_count
+
+            if pass_count >= SCREENER_PASS_THRESHOLD:
                 self._gate_pass(cycle_id, ticker, step_id)
+            else:
+                self._gate_fail(cycle_id, ticker, step_id, screener_tags)
 
         except Exception as e:
             state.mark_failed(self.db, step_id, str(e))

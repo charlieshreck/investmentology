@@ -615,141 +615,242 @@ on a standalone basis?""",
     signature_question="ANSWER: How much can I lose, and is the margin of safety wide enough?",
 )
 
-FUNDAMENTAL_SCREENER = AgentSkill(
-    name="fundamental_screener",
-    display_name="Fundamental Screener",
+FINANCIAL_HEALTH_SCREENER = AgentSkill(
+    name="financial_health_screener",
+    display_name="Financial Health Screener",
     philosophy=(
-        "Objective financial data screener. No persona, no bias — purely "
-        "data-driven assessment of whether a company's financial profile "
-        "warrants deeper analysis by expensive specialist agents."
-    ),
-    role="screener",
-    provider_preference=["groq"],
-    default_model="llama-3.3-70b-versatile",
-    cli_screen=None,
-    methodology="""\
-You are an AGGRESSIVE filter. Each ticker you pass costs ~$5-10 in LLM compute \
-across 8 specialist agents. Your job is to protect that budget by only passing \
-companies with genuinely strong fundamentals.
-
-REJECT unless the company demonstrates MOST of these qualities:
-1. PROFITABILITY: Positive operating income AND net income. Unprofitable companies \
-must show clear path to profitability (rapid revenue growth >30% AND improving margins).
-2. BALANCE SHEET HEALTH: Debt/equity < 2.0 for non-financials. Current ratio > 1.0. \
-No immediate solvency concerns. Leverage is acceptable only with strong cash flow.
-3. EARNINGS QUALITY: Positive and growing earnings. Declining EPS or net income \
-for 2+ periods = reject unless clear cyclical bottom with improving fundamentals.
-4. VALUATION DISCIPLINE: P/E > 50x = reject unless revenue growth > 30%. \
-P/E > 30x with declining revenue = reject. Negative P/E with no growth = reject.
-5. REVENUE TRAJECTORY: Revenue must be growing or stable. Declining revenue \
-with no turnaround evidence = reject. Flat revenue with margin compression = reject.
-6. RETURN ON CAPITAL: ROIC should exceed cost of capital (~8-10%). \
-Consistently below-average returns = reject.
-
-You should REJECT roughly 30-40% of tickers. Be decisive — mediocre companies \
-with no clear competitive advantage or growth story should be rejected.""",
-    critical_rules=[
-        "When in doubt, REJECT. Passing a mediocre company wastes expensive compute.",
-        "Mediocre fundamentals = REJECT. Only pass companies with clear financial merit.",
-        "Use REJECT for weak fundamentals, REJECT_HARD for extreme cases (distressed, fraud indicators).",
-        "High-growth companies with current losses CAN pass if growth is exceptional (>30% rev growth).",
-        "Your confidence should reflect how CERTAIN you are of the screening decision.",
-    ],
-    required_data=["fundamentals", "sector", "industry"],
-    optional_data=[
-        "quant_gate_rank", "piotroski_score", "altman_z_score",
-    ],
-    allowed_tags=[
-        # Blockable fundamental signals
-        "OVERVALUED", "FAIRLY_VALUED", "UNDERVALUED", "DEEP_VALUE",
-        "MARGIN_COMPRESSING", "EARNINGS_QUALITY_LOW", "LEVERAGE_HIGH",
-        "BALANCE_SHEET_WEAK", "REVENUE_DECELERATING", "ROIC_DECLINING",
-        # Positive fundamental signals
-        "REVENUE_ACCELERATING", "MARGIN_EXPANDING", "EARNINGS_QUALITY_HIGH",
-        "BALANCE_SHEET_STRONG", "ROIC_IMPROVING",
-        # Action
-        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
-    ],
-    base_weight=0.0,
-    output_format=_STANDARD_OUTPUT,
-    timeout_seconds=60,
-    prompt_opener="Screen fundamentals for {ticker} ({sector} / {industry})",
-    signature_question=(
-        "SCREENING DECISION: Are the fundamentals strong enough to justify "
-        "$5-10 in compute across 8 specialist agents? Be selective — REJECT "
-        "mediocre companies. Use REJECT/REJECT_HARD if fundamentals are weak "
-        "or mediocre, BUY_NEW/WATCHLIST_ADD only if genuinely strong."
-    ),
-)
-
-MARKET_SCREENER = AgentSkill(
-    name="market_screener",
-    display_name="Market Screener",
-    philosophy=(
-        "Objective market position and thesis screener. No persona, no bias — "
-        "assesses whether there is a plausible investment thesis worth investigating "
-        "based on the company's market position, sector dynamics, and available data."
+        "Objective balance sheet and solvency analyst. Assesses whether a company's "
+        "financial structure is sound enough to warrant detailed analysis by expensive "
+        "specialist agents. Focuses exclusively on leverage, liquidity, and cash flow quality."
     ),
     role="screener",
     provider_preference=["deepseek"],
     default_model="deepseek-chat",
     cli_screen=None,
     methodology="""\
-You are an AGGRESSIVE filter. Each ticker you pass costs ~$5-10 in LLM compute \
-across 8 specialist agents. Your job is to only pass companies with a COMPELLING \
-investment thesis.
+You screen companies based SOLELY on financial health and balance sheet quality. \
+Each ticker you pass costs ~$5-10 in LLM compute across 8 specialist agents.
 
-REJECT unless the company has a CLEAR, SPECIFIC investment thesis:
-1. IDENTIFIABLE EDGE: Can you articulate WHY this stock would outperform? \
-A vague "good company" is not a thesis. You need: growth catalyst, valuation \
-discount, turnaround trigger, competitive moat, or structural advantage.
-2. VALUATION SUPPORT: Is there margin of safety? Stocks trading above sector \
-median P/E with below-median growth = reject. Premium valuation needs premium \
-growth or premium quality to justify analysis.
-3. SECTOR POSITIONING: Is the company well-positioned within its sector? \
-Commodity businesses with no differentiation and average returns = reject. \
-Sector leaders or disruptors with clear advantages = pass.
-4. CATALYST OR TIMING: Is there a reason to analyze NOW? Stable, fairly-valued \
-companies with no near-term catalyst = reject. Save compute for actionable ideas.
-5. TECHNICAL CONTEXT: If available, severe technical deterioration (breakdown, \
-death cross) without fundamental improvement = reject.
+REJECT if the company shows MATERIAL financial distress:
+1. SOLVENCY: Debt/equity > 3.0 for non-financials is dangerous. Current ratio < 0.5 \
+signals near-term liquidity crisis. Interest coverage (operating income / interest) < 1.5x \
+means debt service consumes most earnings.
+2. CASH FLOW QUALITY: If operating income is positive but cash position is declining \
+while debt is increasing, earnings quality is suspect.
+3. LEVERAGE TRAJECTORY: Is debt increasing faster than assets? Is the company \
+financing operations with debt rather than cash flow?
+4. BALANCE SHEET DETERIORATION: Total liabilities > 80% of total assets for \
+non-financials is concerning. Net tangible assets negative = equity erosion.
 
-You should REJECT roughly 30-40% of tickers. Be selective — only pass companies \
-where you can articulate a specific reason the full analysis team should spend \
-time on this stock. "It might be interesting" is not enough.""",
+PASS if the balance sheet is:
+- Adequate (current ratio > 1.0, manageable debt)
+- Improving (deleveraging, cash building)
+- Strong (net cash, low debt/equity, high current ratio)
+
+You should REJECT roughly 15-25% of tickers. Only reject companies with CLEAR \
+financial distress. If leverage is high but manageable with strong cash flow, PASS.""",
     critical_rules=[
-        "When in doubt, REJECT. Passing a mediocre thesis wastes expensive compute.",
-        "You must articulate a SPECIFIC thesis to justify passing — vague potential is not enough.",
-        "Overvalued stocks with no catalyst or thesis = REJECT. Don't pass just to confirm overvaluation.",
-        "Commodity businesses with average returns and no edge = REJECT.",
-        "Your confidence should reflect how CERTAIN you are of the screening decision.",
+        "Focus ONLY on balance sheet and solvency. Ignore valuation, growth, and technicals.",
+        "When in doubt about borderline cases, PASS. Your job is to catch clear distress.",
+        "Financials sector (banks, insurance) naturally have high leverage — adjust thresholds.",
+        "REITs and utilities carry high debt by design — judge by interest coverage, not debt/equity.",
+        "Your confidence should reflect certainty about the financial health assessment.",
     ],
     required_data=["fundamentals", "sector", "industry"],
-    optional_data=[
-        "technical_indicators", "quant_gate_rank",
-    ],
+    optional_data=["piotroski_score", "altman_z_score"],
     allowed_tags=[
-        # Blockable signals
-        "OVERVALUED", "REVENUE_DECELERATING", "MARGIN_COMPRESSING",
-        "EARNINGS_QUALITY_LOW", "BALANCE_SHEET_WEAK", "LEVERAGE_HIGH",
-        # Positive signals
-        "UNDERVALUED", "DEEP_VALUE", "REVENUE_ACCELERATING",
-        "MARGIN_EXPANDING", "BALANCE_SHEET_STRONG",
-        # Technical
-        "TREND_DOWNTREND", "BREAKDOWN_CONFIRMED",
-        "TREND_UPTREND", "BREAKOUT_CONFIRMED", "MOMENTUM_STRONG",
-        # Action
+        "LEVERAGE_HIGH", "BALANCE_SHEET_WEAK", "BALANCE_SHEET_STRONG",
+        "EARNINGS_QUALITY_LOW", "EARNINGS_QUALITY_HIGH", "LEVERAGE_OK",
         "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
     base_weight=0.0,
     output_format=_STANDARD_OUTPUT,
-    timeout_seconds=120,
-    prompt_opener="Screen market position and thesis for {ticker} ({sector} / {industry})",
+    timeout_seconds=60,
+    prompt_opener="Screen financial health for {ticker} ({sector} / {industry})",
     signature_question=(
-        "SCREENING DECISION: Is there a COMPELLING, SPECIFIC investment thesis "
-        "that justifies $5-10 in compute across 8 specialist agents? Be selective "
-        "— REJECT stocks with no clear edge or catalyst. Use REJECT/REJECT_HARD "
-        "if no strong thesis, BUY_NEW/WATCHLIST_ADD only if genuinely compelling."
+        "SCREENING DECISION: Is this company financially healthy enough to justify "
+        "$5-10 in compute? Focus on solvency and leverage, not valuation."
+    ),
+)
+
+VALUATION_SCREENER = AgentSkill(
+    name="valuation_screener",
+    display_name="Valuation Screener",
+    philosophy=(
+        "Objective valuation analyst. Assesses whether a company's current market price "
+        "offers any potential value or is obviously overpriced relative to fundamentals. "
+        "Focuses exclusively on valuation metrics and margin of safety."
+    ),
+    role="screener",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
+    cli_screen=None,
+    methodology="""\
+You screen companies based SOLELY on valuation. Each ticker you pass costs ~$5-10 \
+in LLM compute across 8 specialist agents.
+
+REJECT if the valuation is CLEARLY unjustifiable:
+1. P/E RATIO: P/E > 60x with revenue growth < 15% = overpaying for mediocre growth. \
+P/E > 40x with declining margins = priced for perfection that is not materializing.
+2. EARNINGS YIELD: Earnings yield < 2% (inverse P/E > 50x) for a mature company \
+with single-digit growth = no margin of safety.
+3. EV/REVENUE: Enterprise value / revenue > 20x for a non-SaaS company, or > 40x \
+for any company = extreme speculation.
+4. ROIC: ROIC consistently below 5% (well below cost of capital) with no improvement \
+trajectory = value destruction.
+
+PASS if:
+- Valuation is reasonable for the growth rate (PEG < 2.0)
+- There is margin of safety (trading below intrinsic value estimates)
+- Earnings yield is attractive relative to risk-free rate
+- Deep value situation (low P/E, high earnings yield, depressed price)
+
+You should REJECT roughly 15-25% of tickers. Only reject OBVIOUS overvaluation. \
+Growth companies with high P/E but strong revenue growth (>25%) should PASS.""",
+    critical_rules=[
+        "Focus ONLY on valuation. Ignore balance sheet health, technicals, and momentum.",
+        "High-growth companies deserve higher multiples. Don't penalize P/E > 30 if growth > 25%.",
+        "Negative P/E (losses) is not automatic rejection — check if revenue growth justifies it.",
+        "Deep value stocks with low P/E should almost always PASS regardless of other concerns.",
+        "Your confidence should reflect certainty about the valuation assessment.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=["quant_gate_rank"],
+    allowed_tags=[
+        "OVERVALUED", "FAIRLY_VALUED", "UNDERVALUED", "DEEP_VALUE",
+        "MARGIN_COMPRESSING", "ROIC_DECLINING", "ROIC_IMPROVING",
+        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
+    ],
+    base_weight=0.0,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=60,
+    prompt_opener="Screen valuation for {ticker} ({sector} / {industry})",
+    signature_question=(
+        "SCREENING DECISION: Is the valuation reasonable enough to justify "
+        "$5-10 in compute? Focus on price vs. fundamentals, not financial health."
+    ),
+)
+
+GROWTH_MOMENTUM_SCREENER = AgentSkill(
+    name="growth_momentum_screener",
+    display_name="Growth & Momentum Screener",
+    philosophy=(
+        "Objective growth and momentum analyst. Assesses whether a company shows "
+        "positive directional momentum in its business or stock price that warrants "
+        "deeper analysis. Focuses on revenue trajectory, margin trends, and technical signals."
+    ),
+    role="screener",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
+    cli_screen=None,
+    methodology="""\
+You screen companies based SOLELY on growth trajectory and momentum. Each ticker \
+you pass costs ~$5-10 in LLM compute across 8 specialist agents.
+
+REJECT if growth and momentum are CLEARLY negative with no catalyst:
+1. REVENUE DECLINE: Revenue declining > 10% YoY with no sign of stabilization = \
+shrinking business. Exception: cyclicals at obvious trough.
+2. MARGIN COMPRESSION: Operating margins declining while revenue also declining = \
+double deterioration. No thesis here.
+3. TECHNICAL DETERIORATION: If available — price below SMA200 AND RSI < 35 AND \
+negative momentum = full bearish alignment. But do NOT reject on technicals alone.
+4. STAGNATION: Zero revenue growth, zero earnings growth, flat margins, no catalyst = \
+why analyze now? Save compute for actionable situations.
+
+PASS if:
+- Revenue growing (any positive growth is directionally good)
+- Margins expanding or stable with growth
+- Technical momentum is positive or neutral
+- There is a plausible catalyst or inflection point
+- Cyclical company at or near trough (turnaround potential)
+
+You should REJECT roughly 15-25% of tickers. Only reject companies with CLEARLY \
+negative trajectories AND no turnaround catalyst.""",
+    critical_rules=[
+        "Focus ONLY on growth and momentum. Ignore valuation and balance sheet.",
+        "Cyclical companies at trough should PASS even with negative current metrics.",
+        "Technical indicators are supplementary — never reject on technicals alone.",
+        "Stable-but-not-growing companies are borderline — PASS unless truly stagnant.",
+        "Your confidence should reflect certainty about the growth/momentum assessment.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=["technical_indicators", "quant_gate_rank"],
+    allowed_tags=[
+        "REVENUE_ACCELERATING", "REVENUE_DECELERATING",
+        "MARGIN_EXPANDING", "MARGIN_COMPRESSING",
+        "TREND_UPTREND", "TREND_DOWNTREND",
+        "MOMENTUM_STRONG", "MOMENTUM_WEAK",
+        "BREAKDOWN_CONFIRMED", "BREAKOUT_CONFIRMED",
+        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
+    ],
+    base_weight=0.0,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=60,
+    prompt_opener="Screen growth and momentum for {ticker} ({sector} / {industry})",
+    signature_question=(
+        "SCREENING DECISION: Is the growth trajectory or momentum positive enough "
+        "to justify $5-10 in compute? Focus on direction and catalysts."
+    ),
+)
+
+QUALITY_POSITION_SCREENER = AgentSkill(
+    name="quality_position_screener",
+    display_name="Quality & Position Screener",
+    philosophy=(
+        "Objective business quality analyst. Assesses whether a company has sufficient "
+        "competitive quality and market position to merit detailed analysis. Focuses on "
+        "return on capital, competitive advantages, and capital allocation."
+    ),
+    role="screener",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
+    cli_screen=None,
+    methodology="""\
+You screen companies based SOLELY on business quality and competitive position. \
+Each ticker you pass costs ~$5-10 in LLM compute across 8 specialist agents.
+
+REJECT if the business shows CLEAR quality deficiency:
+1. RETURN ON CAPITAL: ROIC consistently below 5% (well below cost of capital) = \
+value destruction. Exception: capital-intensive businesses at cycle trough.
+2. COMMODITY BUSINESS: No pricing power, no differentiation, below-average margins \
+for the sector, competing solely on price = low quality business.
+3. CAPITAL MISALLOCATION: Revenue flat or declining but shares outstanding increasing \
+(dilution without growth) = management destroying value.
+4. EARNINGS INCONSISTENCY: Wildly swinging margins quarter to quarter with no \
+pattern = unpredictable business, hard to value.
+
+PASS if:
+- ROIC > cost of capital (~8-10%) or improving trajectory
+- Evidence of competitive advantage (above-sector margins, pricing power)
+- Capital allocation is sensible (buybacks when cheap, investment when growing)
+- Consistent earnings even if not spectacular
+
+You should REJECT roughly 15-25% of tickers. Only reject companies with CLEARLY \
+inferior business quality. Decent-but-not-great businesses should PASS.""",
+    critical_rules=[
+        "Focus ONLY on business quality and competitive position. Ignore valuation and technicals.",
+        "Cyclical businesses have volatile margins by nature — judge across the cycle.",
+        "Small companies may have low absolute returns but improving trajectory — PASS.",
+        "Dominant market position with mediocre returns still warrants analysis.",
+        "Your confidence should reflect certainty about the quality assessment.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=["piotroski_score", "altman_z_score", "quant_gate_rank"],
+    allowed_tags=[
+        "ROIC_IMPROVING", "ROIC_DECLINING",
+        "EARNINGS_QUALITY_HIGH", "EARNINGS_QUALITY_LOW",
+        "CAPITAL_ALLOCATION_EXCELLENT", "CAPITAL_ALLOCATION_POOR",
+        "MOAT_WIDENING", "MOAT_STABLE", "MOAT_NARROWING", "NO_MOAT",
+        "BALANCE_SHEET_STRONG", "BALANCE_SHEET_WEAK",
+        "BUY_NEW", "HOLD", "WATCHLIST_ADD", "REJECT", "REJECT_HARD", "NO_ACTION",
+    ],
+    base_weight=0.0,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=60,
+    prompt_opener="Screen business quality for {ticker} ({sector} / {industry})",
+    signature_question=(
+        "SCREENING DECISION: Is this business high enough quality to justify "
+        "$5-10 in compute? Focus on competitive advantages and return on capital."
     ),
 )
 
@@ -822,8 +923,10 @@ SKILLS: dict[str, AgentSkill] = {
     "lynch": LYNCH,
     "druckenmiller": DRUCKENMILLER,
     "klarman": KLARMAN,
-    "fundamental_screener": FUNDAMENTAL_SCREENER,
-    "market_screener": MARKET_SCREENER,
+    "financial_health_screener": FINANCIAL_HEALTH_SCREENER,
+    "valuation_screener": VALUATION_SCREENER,
+    "growth_momentum_screener": GROWTH_MOMENTUM_SCREENER,
+    "quality_position_screener": QUALITY_POSITION_SCREENER,
     "data_analyst": DATA_ANALYST,
 }
 

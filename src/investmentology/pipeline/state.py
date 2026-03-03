@@ -21,6 +21,7 @@ STALENESS_HOURS = 24
 # Steps in dependency order
 STEP_DATA_FETCH = "data_fetch"
 STEP_DATA_VALIDATE = "data_validate"
+STEP_PRE_FILTER = "pre_filter"
 STEP_SCREENER_PREFIX = "screener:"
 STEP_GATE_DECISION = "gate_decision"
 STEP_AGENT_PREFIX = "agent:"
@@ -429,7 +430,7 @@ def create_screening_steps(
     (analysis agents, debate, synthesis) are only created for tickers that pass
     the gate decision.
     """
-    steps = [STEP_DATA_FETCH, STEP_DATA_VALIDATE]
+    steps = [STEP_DATA_FETCH, STEP_DATA_VALIDATE, STEP_PRE_FILTER]
     for name in screener_names:
         steps.append(f"{STEP_SCREENER_PREFIX}{name}")
     steps.append(STEP_GATE_DECISION)

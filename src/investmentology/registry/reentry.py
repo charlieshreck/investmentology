@@ -413,9 +413,8 @@ def create_gate_blocks(
 
     blocks_created = 0
     for tag_str, count in tag_counts.items():
-        # For gate blocks, require both screeners to agree (count >= 2)
-        # But also create blocks for tags only one screener flagged if they're strong
-        if count < 1:
+        # With 4 screeners, require at least 2 to agree on a blocking signal
+        if count < 2:
             continue
 
         block_type, condition_key, threshold = BLOCK_CONDITIONS[tag_str]

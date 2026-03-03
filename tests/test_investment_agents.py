@@ -537,7 +537,8 @@ class TestSkillsRegistry:
             "warren", "soros", "simons", "auditor",
             "dalio", "druckenmiller", "klarman", "lynch",
             "data_analyst",
-            "fundamental_screener", "market_screener",
+            "financial_health_screener", "valuation_screener",
+            "growth_momentum_screener", "quality_position_screener",
         }
         assert expected == set(SKILLS.keys())
 
