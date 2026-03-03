@@ -248,27 +248,10 @@ class PipelineController:
                 },
             )
 
-            # 2. LLM validation via Data Analyst agent
-            runner = self._runners.get("data_analyst")
-            if runner:
-                try:
-                    request = self._build_request(ticker)
-                    response = await runner.analyze(request)
-                    # Check for explicit rejection in Data Analyst reasoning
-                    reasoning = (response.signal_set.reasoning or "").upper()
-                    if "REJECTED" in reasoning or "DATA_REJECTED" in reasoning:
-                        state.mark_failed(
-                            self.db, step_id,
-                            f"Data Analyst rejected: {response.signal_set.reasoning[:200]}",
-                        )
-                        return
-                except Exception:
-                    # LLM validation is best-effort — don't block on it
-                    logger.warning(
-                        "Data Analyst LLM validation failed for %s, "
-                        "continuing with deterministic validation only",
-                        ticker,
-                    )
+            # NOTE: LLM validation via Data Analyst is available but disabled
+            # for batch processing (38s per ticker via CLI proxy is too slow
+            # for 200+ tickers). Deterministic validation catches the critical
+            # cases. Enable for targeted re-analysis via the web UI.
 
             state.mark_completed(self.db, step_id)
             logger.info("Data validation for %s passed", ticker)
