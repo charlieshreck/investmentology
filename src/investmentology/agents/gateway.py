@@ -23,6 +23,62 @@ class LLMResponse:
 
 
 @dataclass
+class ToolCallResponse:
+    """Response from an LLM that may include tool calls (function calling)."""
+
+    content: str | None
+    tool_calls: list[dict]  # [{"id": str, "name": str, "arguments": dict}, ...]
+
+    def to_assistant_message(self) -> dict:
+        """Convert to an OpenAI-compatible assistant message with tool_calls."""
+        msg: dict = {"role": "assistant"}
+        if self.content:
+            msg["content"] = self.content
+        if self.tool_calls:
+            msg["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": (
+                            json.dumps(tc["arguments"])
+                            if isinstance(tc["arguments"], dict)
+                            else tc["arguments"]
+                        ),
+                    },
+                }
+                for tc in self.tool_calls
+            ]
+        return msg
+
+    @classmethod
+    def from_openai(cls, data: dict) -> ToolCallResponse:
+        """Parse an OpenAI-compatible chat completion response."""
+        choice = data["choices"][0]
+        message = choice["message"]
+
+        content = message.get("content")
+        raw_calls = message.get("tool_calls") or []
+
+        tool_calls = []
+        for tc in raw_calls:
+            fn = tc.get("function", {})
+            args_str = fn.get("arguments", "{}")
+            try:
+                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append({
+                "id": tc.get("id", ""),
+                "name": fn.get("name", ""),
+                "arguments": args,
+            })
+
+        return cls(content=content, tool_calls=tool_calls)
+
+
+@dataclass
 class ProviderConfig:
     name: str
     base_url: str
@@ -259,6 +315,63 @@ class LLMGateway:
         raise RuntimeError(
             f"Provider {provider} failed after {config.max_retries} retries: {last_error}"
         )
+
+    async def call_with_tools(
+        self,
+        provider: str,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+    ) -> ToolCallResponse:
+        """OpenAI-compatible chat completion with function calling.
+
+        Only works with HTTP API providers (not CLI or remote CLI).
+        Returns a ToolCallResponse which may contain tool_calls or
+        a final text content.
+        """
+        if provider not in self._providers:
+            raise ValueError(
+                f"call_with_tools requires an HTTP API provider, got: {provider}"
+            )
+
+        config = self._providers[provider]
+        limiter = self._limiters[provider]
+
+        if not self._client:
+            await self.start()
+
+        await limiter.acquire()
+
+        url = f"{config.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
+        body: dict = {
+            "model": model or config.default_model,
+            "messages": messages,
+            "max_tokens": 4096,
+            "temperature": 0.3,
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+
+        start_time = time.monotonic()
+        response = await self._client.post(
+            url, json=body, headers=headers,
+            timeout=config.timeout_seconds,
+        )
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+        response.raise_for_status()
+
+        data = response.json()
+        logger.debug(
+            "call_with_tools %s: %dms, finish=%s",
+            provider, latency_ms,
+            data.get("choices", [{}])[0].get("finish_reason", "?"),
+        )
+        return ToolCallResponse.from_openai(data)
 
     async def _call_cli(
         self, provider: str, system_prompt: str, user_prompt: str

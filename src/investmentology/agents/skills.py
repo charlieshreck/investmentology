@@ -33,6 +33,7 @@ class AgentSkill:
     timeout_seconds: int = 600
     prompt_opener: str = ""  # First line of user prompt (e.g. "Analyze {ticker}...")
     signature_question: str = ""  # Closing line of user prompt
+    react_capable: bool = False  # True = use ReAct tool-use loop instead of single-shot
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +330,7 @@ data or extreme conflict. MUST include at least one cautionary signal.""",
         "ANSWER: What do the numbers say -- is the statistical edge real "
         "or random noise, and what is the probability-weighted expected move?"
     ),
+    react_capable=True,
 )
 
 AUDITOR = AgentSkill(

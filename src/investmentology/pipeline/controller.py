@@ -78,9 +78,21 @@ class PipelineController:
         self._running = False
         self._current_cycle_id: UUID | None = None
 
+        # YFinance client — synchronous, used in run_in_executor
+        from investmentology.data.yfinance_client import YFinanceClient
+        self._yf_client = YFinanceClient(cache_ttl_hours=24)
+
+        # ReAct tool catalog for tool-use-capable agents
+        tool_catalog = self._create_tool_catalog()
+
         # Pre-create runners for all skills
         for name, skill in SKILLS.items():
-            self._runners[name] = AgentRunner(skill, gateway)
+            if skill.react_capable and tool_catalog is not None:
+                from investmentology.agents.react.runner import ReActRunner
+                self._runners[name] = ReActRunner(skill, gateway, tool_catalog)
+                logger.info("ReAct runner created for %s", name)
+            else:
+                self._runners[name] = AgentRunner(skill, gateway)
 
         # API agent concurrency limits — prevents rate limit bombs
         # Groq: 30 RPM free tier → 2 concurrent
@@ -93,9 +105,46 @@ class PipelineController:
         # Track step IDs currently in CLI queues to prevent re-dispatch
         self._cli_queued_steps: set[int] = set()
 
-        # YFinance client — synchronous, used in run_in_executor
-        from investmentology.data.yfinance_client import YFinanceClient
-        self._yf_client = YFinanceClient(cache_ttl_hours=24)
+    def _create_tool_catalog(self):
+        """Create the ReAct tool catalog with available data sources."""
+        try:
+            from investmentology.agents.react.tools import ToolCatalog
+
+            # Optional: Finnhub provider (needs API key)
+            finnhub = None
+            try:
+                import os
+                finnhub_key = os.environ.get("FINNHUB_API_KEY")
+                if finnhub_key:
+                    from investmentology.data.finnhub_provider import FinnhubProvider
+                    finnhub = FinnhubProvider(finnhub_key)
+            except Exception:
+                logger.debug("Finnhub provider not available for ReAct tools")
+
+            # Optional: FRED provider (needs API key)
+            fred = None
+            try:
+                import os
+                fred_key = os.environ.get("FRED_API_KEY")
+                if fred_key:
+                    from investmentology.data.fred_provider import FredProvider
+                    fred = FredProvider(fred_key)
+            except Exception:
+                logger.debug("FRED provider not available for ReAct tools")
+
+            catalog = ToolCatalog(
+                yf_client=self._yf_client,
+                finnhub=finnhub,
+                fred=fred,
+            )
+            logger.info(
+                "ReAct tool catalog created with %d tools",
+                len(catalog.openai_schema()),
+            )
+            return catalog
+        except Exception:
+            logger.warning("Failed to create ReAct tool catalog", exc_info=True)
+            return None
 
     async def start(self) -> None:
         """Start the controller and its workers."""
