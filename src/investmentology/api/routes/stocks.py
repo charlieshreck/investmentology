@@ -268,9 +268,9 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
     # Decisions (with outcome from decision_outcomes table)
     decision_rows = registry._db.execute(
         "SELECT d.id, d.decision_type, d.layer_source, d.confidence, "
-        "d.reasoning, d.created_at, do.outcome, do.settled_at "
+        "d.reasoning, d.created_at, dout.outcome, dout.settled_at "
         "FROM invest.decisions d "
-        "LEFT JOIN invest.decision_outcomes do ON do.decision_id = d.id "
+        "LEFT JOIN invest.decision_outcomes dout ON dout.decision_id = d.id "
         "WHERE d.ticker = %s ORDER BY d.created_at DESC LIMIT 20",
         (ticker,),
     )
