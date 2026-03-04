@@ -145,13 +145,10 @@ class EdgarToolsProvider:
             return None
 
     def get_institutional_holders(self, ticker: str) -> dict | None:
-        """Get institutional holders via SEC EDGAR full-text search of 13F filings.
-
-        This performs a REVERSE lookup: searches 13F-HR filings that mention
-        the ticker to find which institutional investors hold this stock.
+        """Get institutional holders via yfinance (sourced from SEC 13F filings).
 
         Returns dict with:
-            holders: list of {name, shares, value_usd, report_date}
+            holders: list of {name, shares, value_usd, report_date, pct_held}
             total_institutional_shares: int
         """
         cache_key = f"holders:{ticker}"
@@ -160,68 +157,45 @@ class EdgarToolsProvider:
             return cached  # type: ignore[return-value]
 
         try:
-            now = datetime.now(timezone.utc)
-            six_months_ago = now - timedelta(days=180)
+            import yfinance as yf
 
-            # Search EDGAR full-text search for 13F filings mentioning this ticker
-            search_url = "https://efts.sec.gov/LATEST/search-index"
-            params = {
-                "q": f'"{ticker}"',
-                "dateRange": "custom",
-                "startdt": six_months_ago.strftime("%Y-%m-%d"),
-                "enddt": now.strftime("%Y-%m-%d"),
-                "forms": "13F-HR",
-            }
+            stock = yf.Ticker(ticker)
+            df = stock.institutional_holders
 
-            resp = httpx.get(
-                search_url,
-                params=params,
-                headers={"User-Agent": SEC_USER_AGENT},
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                logger.debug("EDGAR search returned %s for %s", resp.status_code, ticker)
-                return None
-
-            data = resp.json()
-            hits = data.get("hits", {}).get("hits", [])
-            if not hits:
+            if df is None or df.empty:
                 return None
 
             holders: list[dict] = []
-            seen_filers: set[str] = set()
+            total_shares = 0
 
-            for hit in hits[:30]:  # Check top 30 results
-                source = hit.get("_source", {})
-                filer_name = source.get("display_names", [""])[0] if source.get("display_names") else ""
-                if not filer_name:
-                    filer_name = source.get("entity_name", "")
-                if not filer_name or filer_name.lower() in seen_filers:
-                    continue
-                seen_filers.add(filer_name.lower())
-
-                report_date = source.get("period_of_report", source.get("file_date", ""))
+            for _, row in df.iterrows():
+                shares = int(row.get("Shares", 0) or 0)
+                value = int(row.get("Value", 0) or 0)
+                pct = float(row.get("% Out", 0) or 0)
+                date_reported = row.get("Date Reported")
+                date_str = str(date_reported)[:10] if date_reported is not None else ""
 
                 holders.append({
-                    "name": filer_name[:60],
-                    "shares": 0,  # EDGAR search doesn't include share counts
-                    "value_usd": 0,
-                    "report_date": report_date,
+                    "name": str(row.get("Holder", "Unknown"))[:60],
+                    "shares": shares,
+                    "value_usd": value,
+                    "pct_held": round(pct, 2),
+                    "report_date": date_str,
                 })
-                time.sleep(0.12)  # SEC rate limit
+                total_shares += shares
 
             if not holders:
                 return None
 
             result = {
                 "holders": holders[:20],
-                "total_institutional_shares": 0,  # Not available from search
+                "total_institutional_shares": total_shares,
             }
             self._set_cached(cache_key, result)
             return result
 
         except Exception:
-            logger.debug("EDGAR 13F reverse lookup failed for %s", ticker, exc_info=True)
+            logger.debug("Institutional holders fetch failed for %s", ticker, exc_info=True)
             return None
 
     def get_insider_summary(self, ticker: str) -> dict | None:

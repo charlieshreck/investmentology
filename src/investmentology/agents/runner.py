@@ -337,14 +337,20 @@ class AgentRunner:
 
     @staticmethod
     def _extract_json(raw: str) -> dict | None:
-        """Extract JSON from raw LLM output, handling code fences."""
+        """Extract JSON from raw LLM output, handling code fences and wrapper text.
+
+        Gemini sometimes wraps JSON in conversational text or markdown.
+        This method tries multiple extraction strategies.
+        """
+        # 1. Direct parse
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
             pass
 
-        # Try extracting from code fences
         stripped = raw.strip()
+
+        # 2. Try extracting from code fences
         if "```" in stripped:
             lines = stripped.split("\n")
             json_lines: list[str] = []
@@ -359,6 +365,38 @@ class AgentRunner:
                 return json.loads("\n".join(json_lines))
             except json.JSONDecodeError:
                 pass
+
+        # 3. Find the first top-level JSON object in the text (handles
+        #    conversational wrapper text that Gemini sometimes adds)
+        first_brace = stripped.find("{")
+        if first_brace >= 0:
+            # Walk from the first { and find its matching }
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(first_brace, len(stripped)):
+                c = stripped[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if c == "\\":
+                    escape_next = True
+                    continue
+                if c == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = stripped[first_brace: i + 1]
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            break  # Malformed even with matched braces
 
         return None
 

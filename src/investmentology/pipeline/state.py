@@ -27,6 +27,7 @@ STEP_GATE_DECISION = "gate_decision"
 STEP_RESEARCH = "research"
 STEP_AGENT_PREFIX = "agent:"
 STEP_DEBATE = "debate"
+STEP_ADVERSARIAL = "adversarial"
 STEP_SYNTHESIS = "synthesis"
 
 
@@ -474,8 +475,9 @@ def create_analysis_steps(
     include_debate: bool = True,
     include_synthesis: bool = True,
     include_research: bool = True,
+    include_adversarial: bool = True,
 ) -> int:
-    """Create Phase 2 steps: research, analysis agents, debate, synthesis.
+    """Create Phase 2 steps: research, analysis agents, debate, adversarial, synthesis.
 
     Called only for tickers that pass the scout gate. Data fetch/validate
     and screener steps already exist from Phase 1.
@@ -487,6 +489,8 @@ def create_analysis_steps(
         steps.append(f"{STEP_AGENT_PREFIX}{name}")
     if include_debate:
         steps.append(STEP_DEBATE)
+    if include_adversarial:
+        steps.append(STEP_ADVERSARIAL)
     if include_synthesis:
         steps.append(STEP_SYNTHESIS)
 

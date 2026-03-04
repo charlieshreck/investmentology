@@ -197,6 +197,9 @@ class PipelineController:
             elif step == state.STEP_DEBATE:
                 await self._handle_debate(cycle_id, ticker, step_id)
 
+            elif step == state.STEP_ADVERSARIAL:
+                await self._handle_adversarial(cycle_id, ticker, step_id)
+
             elif step == state.STEP_SYNTHESIS:
                 await self._handle_synthesis(cycle_id, ticker, step_id)
 
@@ -740,12 +743,122 @@ class PipelineController:
             state.mark_failed(self.db, step_id, str(e))
             logger.exception("Debate failed for %s", ticker)
 
+    async def _handle_adversarial(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+    ) -> None:
+        """Run Munger adversarial review if warranted.
+
+        Checks if adversarial review triggers (unanimous bullishness,
+        dangerous disagreement, or conviction buy patterns). If triggered,
+        runs bias check, Kill the Company, and pre-mortem via DeepSeek.
+        """
+        if not state.is_step_completed(
+            self.db, cycle_id, ticker, state.STEP_DEBATE,
+        ):
+            return
+
+        state.mark_running(self.db, step_id)
+        try:
+            # Load agent signals
+            signal_rows = state.get_agent_signals_for_ticker(
+                self.db, cycle_id, ticker,
+            )
+            if not signal_rows:
+                state.mark_completed(self.db, step_id)
+                return
+
+            agent_signal_sets = self._reconstruct_signal_sets(signal_rows)
+            primary_signals = [
+                ss for ss in agent_signal_sets
+                if ss.agent_name in PRIMARY_AGENT_NAMES
+            ]
+
+            if not primary_signals:
+                state.mark_completed(self.db, step_id)
+                return
+
+            # Check if adversarial review is warranted
+            from investmentology.adversarial.munger import MungerOrchestrator
+
+            munger = MungerOrchestrator(self.gateway)
+            if not munger.should_trigger(primary_signals):
+                logger.info("Adversarial check for %s: not triggered (no red patterns)", ticker)
+                state.mark_completed(self.db, step_id)
+                return
+
+            # Build inputs for the review
+            fundamentals = state.get_data_cache(
+                self.db, cycle_id, ticker, "fundamentals",
+            )
+            fundamentals_summary = ""
+            if fundamentals:
+                fundamentals_summary = (
+                    f"Market cap: ${fundamentals.get('market_cap', 0):,.0f}, "
+                    f"Revenue: ${fundamentals.get('revenue', 0):,.0f}, "
+                    f"Net income: ${fundamentals.get('net_income', 0):,.0f}, "
+                    f"Debt: ${fundamentals.get('total_debt', 0):,.0f}, "
+                    f"Cash: ${fundamentals.get('cash', 0):,.0f}"
+                )
+
+            # Combine agent reasoning as the thesis
+            thesis_parts = [
+                f"{ss.agent_name}: {ss.reasoning[:200]}"
+                for ss in primary_signals if ss.reasoning
+            ]
+            thesis = "\n".join(thesis_parts)
+
+            sector = (fundamentals or {}).get("sector", "")
+
+            # Run the adversarial review
+            result = await munger.review(
+                ticker=ticker,
+                fundamentals_summary=fundamentals_summary,
+                thesis=thesis,
+                agent_signals=primary_signals,
+                sector=sector,
+            )
+
+            # Cache the result for synthesis/board
+            adversarial_data = {
+                "verdict": result.verdict.value,
+                "reasoning": result.reasoning,
+                "bias_count": len([b for b in result.bias_flags if b.is_flagged]),
+                "kill_scenario_count": len(result.kill_scenarios),
+                "fatal_scenarios": [
+                    {"scenario": s.scenario, "impact": s.impact, "likelihood": s.likelihood}
+                    for s in result.kill_scenarios if s.impact == "fatal"
+                ],
+                "premortem_probability": (
+                    result.premortem.probability_estimate if result.premortem else None
+                ),
+            }
+            state.store_data_cache(
+                self.db, cycle_id, ticker, "adversarial_result", adversarial_data,
+            )
+
+            state.mark_completed(self.db, step_id)
+            logger.info(
+                "Adversarial for %s: %s (%d biases, %d kill scenarios, premortem=%s)",
+                ticker,
+                result.verdict.value,
+                adversarial_data["bias_count"],
+                adversarial_data["kill_scenario_count"],
+                adversarial_data.get("premortem_probability"),
+            )
+        except Exception as e:
+            # Adversarial failure should NOT block synthesis
+            state.mark_completed(self.db, step_id)
+            logger.warning(
+                "Adversarial review failed for %s, proceeding without: %s",
+                ticker, e,
+            )
+
     async def _handle_synthesis(
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
         """Run verdict synthesis + advisory board + CIO narrative."""
         if not state.is_step_completed(
-            self.db, cycle_id, ticker, state.STEP_DEBATE,
+            self.db, cycle_id, ticker, state.STEP_ADVERSARIAL,
         ):
             return
 
@@ -783,6 +896,19 @@ class PipelineController:
                 verdict_result.confidence, verdict_result.consensus_score,
             )
 
+            # 3b. Load adversarial result if available
+            adversarial_result = None
+            if cycle_id:
+                adversarial_result = state.get_data_cache(
+                    self.db, cycle_id, ticker, "adversarial_result",
+                )
+
+            # Apply Munger override if VETO
+            if adversarial_result and adversarial_result.get("verdict") == "VETO":
+                verdict_result.munger_override = (
+                    f"VETO: {adversarial_result.get('reasoning', 'Adversarial review vetoed')}"
+                )
+
             # 4. Advisory Board (LLM — 4 concurrent calls)
             board_result = None
             try:
@@ -792,7 +918,7 @@ class PipelineController:
                 board_result = await board.convene(
                     verdict=verdict_result,
                     stances=verdict_result.agent_stances,
-                    adversarial=None,
+                    adversarial=adversarial_result,
                     request=request,
                     fundamentals=request.fundamentals,
                 )

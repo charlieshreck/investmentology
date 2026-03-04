@@ -51,6 +51,7 @@ class ResearchGatherer:
             "articles": [],
             "reddit_posts": [],
             "price_events": [],
+            "catalysts": [],
             "gathered_at": datetime.now().isoformat(),
         }
 
@@ -58,18 +59,21 @@ class ResearchGatherer:
         await self._gather_news(ticker, company_name, result)
         await self._gather_reddit(ticker, company_name, result)
         await self._gather_price_events(ticker, result)
+        await self._gather_catalysts(ticker, company_name, result)
 
         total_sources = (
             len(result["articles"])
             + len(result["reddit_posts"])
             + len(result["price_events"])
+            + len(result["catalysts"])
         )
         logger.info(
-            "Research gathered for %s: %d articles, %d reddit, %d price events",
+            "Research gathered for %s: %d articles, %d reddit, %d price events, %d catalysts",
             ticker,
             len(result["articles"]),
             len(result["reddit_posts"]),
             len(result["price_events"]),
+            len(result["catalysts"]),
         )
         return result if total_sources > 0 else {}
 
@@ -177,6 +181,107 @@ class ResearchGatherer:
         except Exception:
             logger.warning("Price event detection failed for %s", ticker, exc_info=True)
 
+    async def _gather_catalysts(
+        self, ticker: str, company_name: str, result: dict,
+    ) -> None:
+        """Gather upcoming catalysts: earnings, dividends, scheduled events."""
+        catalysts: list[dict] = []
+        today = datetime.now().date()
+
+        # 1. yfinance calendar (earnings date, ex-dividend, dividend date)
+        try:
+            import yfinance as yf
+
+            stock = yf.Ticker(ticker)
+            cal = stock.calendar
+            if cal is not None:
+                # yfinance returns a dict with keys like 'Earnings Date', 'Ex-Dividend Date', etc.
+                cal_dict = cal if isinstance(cal, dict) else {}
+
+                # Earnings date(s)
+                earnings_dates = cal_dict.get("Earnings Date")
+                if earnings_dates:
+                    if not isinstance(earnings_dates, list):
+                        earnings_dates = [earnings_dates]
+                    for ed in earnings_dates:
+                        date_str = str(ed)[:10]
+                        try:
+                            ed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                            days_away = (ed_date - today).days
+                            if -7 <= days_away <= 90:
+                                catalysts.append({
+                                    "type": "earnings",
+                                    "date": date_str,
+                                    "days_away": days_away,
+                                    "urgency": "high" if days_away <= 7 else "medium" if days_away <= 30 else "low",
+                                    "description": f"Earnings report {'(PAST — just reported)' if days_away < 0 else ''}",
+                                    "eps_estimate": cal_dict.get("Earnings Average"),
+                                    "revenue_estimate": cal_dict.get("Revenue Average"),
+                                })
+                        except (ValueError, TypeError):
+                            pass
+
+                # Ex-dividend date
+                ex_div = cal_dict.get("Ex-Dividend Date")
+                if ex_div:
+                    date_str = str(ex_div)[:10]
+                    try:
+                        ex_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                        days_away = (ex_date - today).days
+                        if -3 <= days_away <= 90:
+                            div_amount = cal_dict.get("Dividend Rate")
+                            catalysts.append({
+                                "type": "dividend",
+                                "date": date_str,
+                                "days_away": days_away,
+                                "urgency": "medium" if days_away <= 7 else "low",
+                                "description": f"Ex-dividend date (${div_amount}/share)" if div_amount else "Ex-dividend date",
+                            })
+                    except (ValueError, TypeError):
+                        pass
+
+        except Exception:
+            logger.warning("yfinance calendar failed for %s", ticker, exc_info=True)
+
+        # 2. SearXNG search for upcoming events/catalysts
+        try:
+            client = await self._get_client()
+            search_results = await self._searxng_search(
+                client,
+                f'"{ticker}" OR "{company_name}" upcoming catalyst OR FDA OR approval OR conference OR guidance 2026',
+                category="news",
+                num_results=5,
+            )
+
+            for item in search_results:
+                title = item.get("title", "")
+                snippet = item.get("content", "")[:300]
+                published = item.get("publishedDate", "")
+
+                # Only include if it mentions future/upcoming events
+                text_lower = (title + " " + snippet).lower()
+                future_keywords = {
+                    "upcoming", "scheduled", "expected", "announce", "guidance",
+                    "fda", "approval", "conference", "launch", "release",
+                    "ipo", "spin-off", "merger", "acquisition", "trial",
+                }
+                if any(kw in text_lower for kw in future_keywords):
+                    catalysts.append({
+                        "type": "event",
+                        "date": published[:10] if published else "",
+                        "days_away": None,
+                        "urgency": "medium",
+                        "description": title[:120],
+                        "source_snippet": snippet[:200],
+                    })
+        except Exception:
+            logger.warning("Catalyst search failed for %s", ticker, exc_info=True)
+
+        # Sort: urgent first, then by date
+        urgency_order = {"high": 0, "medium": 1, "low": 2}
+        catalysts.sort(key=lambda c: (urgency_order.get(c.get("urgency", "low"), 2), c.get("date", "z")))
+        result["catalysts"] = catalysts[:15]
+
     async def _searxng_search(
         self,
         client: httpx.AsyncClient,
@@ -273,6 +378,25 @@ class ResearchGatherer:
                 )
             parts.append("")
 
+        # Upcoming catalysts
+        if raw.get("catalysts"):
+            parts.append("## Upcoming Catalysts & Scheduled Events")
+            for cat in raw["catalysts"]:
+                urgency_tag = f"[{cat.get('urgency', 'low').upper()}]" if cat.get("urgency") else ""
+                date_str = cat.get("date", "TBD")
+                days = cat.get("days_away")
+                days_str = f" ({days}d away)" if days is not None else ""
+                parts.append(
+                    f"- {urgency_tag} {cat['type'].upper()}: {date_str}{days_str} — {cat.get('description', '')}"
+                )
+                if cat.get("eps_estimate"):
+                    parts.append(f"  EPS estimate: {cat['eps_estimate']}")
+                if cat.get("revenue_estimate"):
+                    parts.append(f"  Revenue estimate: ${cat['revenue_estimate']:,.0f}" if isinstance(cat["revenue_estimate"], (int, float)) else f"  Revenue estimate: {cat['revenue_estimate']}")
+                if cat.get("source_snippet"):
+                    parts.append(f"  Context: {cat['source_snippet']}")
+            parts.append("")
+
         parts.extend([
             "## Instructions",
             "Produce a research briefing with these sections:",
@@ -311,5 +435,11 @@ class ResearchGatherer:
             parts.append("\nReddit discussions:")
             for post in raw["reddit_posts"][:3]:
                 parts.append(f"- {post['title']}")
+
+        if raw.get("catalysts"):
+            parts.append("\nUpcoming catalysts:")
+            for cat in raw["catalysts"][:5]:
+                date_str = cat.get("date", "TBD")
+                parts.append(f"- {cat['type'].upper()} {date_str}: {cat.get('description', '')}")
 
         return "\n".join(parts)
