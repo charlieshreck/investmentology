@@ -369,6 +369,60 @@ class Registry:
             (actual_exit_date, exit_price, exit_price, position_id),
         )
 
+    def create_position_atomic(
+        self,
+        ticker: str,
+        entry_date: date,
+        entry_price: Decimal,
+        shares: Decimal,
+        position_type: str,
+        weight: Decimal,
+        purchase_cost: Decimal,
+        stop_loss: Decimal | None = None,
+        fair_value_estimate: Decimal | None = None,
+        thesis: str = "",
+    ) -> int:
+        """Create a position and deduct cash reserve in a single transaction."""
+        with self._db.transaction() as tx:
+            rows = tx.execute(
+                "INSERT INTO invest.portfolio_positions "
+                "(ticker, entry_date, entry_price, current_price, shares, position_type, "
+                "weight, stop_loss, fair_value_estimate, thesis, is_closed) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING id",
+                (
+                    ticker, entry_date, entry_price, entry_price, shares,
+                    position_type, weight, stop_loss, fair_value_estimate, thesis,
+                ),
+            )
+            tx.execute(
+                "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve - %s",
+                (purchase_cost,),
+            )
+            return rows[0]["id"]
+
+    def close_position_atomic(
+        self,
+        position_id: int,
+        exit_price: Decimal,
+        proceeds: Decimal,
+        exit_date: date | None = None,
+    ) -> None:
+        """Close a position and credit cash reserve in a single transaction."""
+        actual_exit_date = exit_date or date.today()
+        with self._db.transaction() as tx:
+            tx.execute(
+                "UPDATE invest.portfolio_positions SET "
+                "exit_date = %s, exit_price = %s, is_closed = TRUE, "
+                "realized_pnl = ((%s - entry_price) * shares), "
+                "updated_at = NOW() "
+                "WHERE id = %s AND is_closed = FALSE",
+                (actual_exit_date, exit_price, exit_price, position_id),
+            )
+            tx.execute(
+                "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve + %s",
+                (proceeds,),
+            )
+
     def update_position_analysis(
         self, ticker: str, fair_value_estimate: Decimal | None = None,
         stop_loss: Decimal | None = None, thesis: str | None = None,

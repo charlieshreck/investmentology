@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
+from typing import Iterator
 
 import psycopg
 from psycopg.rows import dict_row
@@ -99,6 +101,23 @@ class Database:
         finally:
             self._put_connection(conn)
 
+    @contextmanager
+    def transaction(self) -> Iterator[_TransactionProxy]:
+        """Yield a proxy that executes multiple statements in a single transaction.
+
+        Commits on clean exit; rolls back on exception.
+        """
+        conn = self._get_connection()
+        proxy = _TransactionProxy(conn)
+        try:
+            yield proxy
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._put_connection(conn)
+
     def run_migrations(self, migrations_dir: str) -> None:
         """Run SQL migration files in order, tracking applied migrations."""
         conn = self._get_connection()
@@ -157,3 +176,21 @@ class Database:
         exc_tb: TracebackType | None,
     ) -> None:
         self.close()
+
+
+class _TransactionProxy:
+    """Wraps a single connection for use inside Database.transaction().
+
+    Exposes only execute() — intentionally no execute_many() to keep
+    transaction scope narrow and reviewable.
+    """
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self._conn = conn
+
+    def execute(self, query: str, params: tuple | None = None) -> list[dict]:
+        with self._conn.cursor() as cur:
+            cur.execute(query, params)
+            if cur.description is not None:
+                return [dict(row) for row in cur.fetchall()]
+            return []

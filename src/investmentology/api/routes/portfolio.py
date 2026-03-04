@@ -438,37 +438,35 @@ def create_position(
         total_shares = existing_pos.shares + new_shares
         avg_price = (old_cost + new_cost) / total_shares
 
-        registry._db.execute(
-            "UPDATE invest.portfolio_positions "
-            "SET shares = %s, entry_price = %s, current_price = %s, updated_at = NOW() "
-            "WHERE id = %s AND is_closed = FALSE",
-            (total_shares, avg_price, new_price, existing_pos.id),
-        )
+        with registry._db.transaction() as tx:
+            tx.execute(
+                "UPDATE invest.portfolio_positions "
+                "SET shares = %s, entry_price = %s, current_price = %s, updated_at = NOW() "
+                "WHERE id = %s AND is_closed = FALSE",
+                (total_shares, avg_price, new_price, existing_pos.id),
+            )
+            tx.execute(
+                "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve - %s",
+                (purchase_cost,),
+            )
+        logger.info("Added to position + deducted $%.2f for %s (atomic)", float(purchase_cost), ticker)
         result = {"id": existing_pos.id, "ticker": ticker, "status": "added",
                   "totalShares": float(total_shares), "avgCost": float(avg_price)}
     else:
-        position_id = registry.create_position(
+        position_id = registry.create_position_atomic(
             ticker=ticker,
             entry_date=date.today(),
             entry_price=new_price,
             shares=new_shares,
             position_type=body.position_type,
             weight=Decimal(str(body.weight)),
+            purchase_cost=purchase_cost,
             stop_loss=Decimal(str(body.stop_loss)) if body.stop_loss else None,
             fair_value_estimate=Decimal(str(body.fair_value_estimate)) if body.fair_value_estimate else None,
             thesis=body.thesis,
         )
+        logger.info("Created position + deducted $%.2f for %s (atomic)", float(purchase_cost), ticker)
         result = {"id": position_id, "ticker": ticker, "status": "created"}
-
-    # Deduct purchase cost from cash reserve
-    try:
-        registry._db.execute(
-            "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve - %s",
-            (purchase_cost,),
-        )
-        logger.info("Deducted $%.2f from cash reserve for %s purchase", float(purchase_cost), ticker)
-    except Exception:
-        logger.warning("Failed to deduct cash reserve after buying %s", ticker, exc_info=True)
 
     return result
 
@@ -487,18 +485,9 @@ def close_position(
         raise HTTPException(status_code=400, detail="Position already closed")
 
     exit_d = date.fromisoformat(body.exit_date) if body.exit_date else date.today()
-    registry.close_position(position_id, Decimal(str(body.exit_price)), exit_d)
-
-    # Return sale proceeds to cash reserve
     proceeds = position.shares * Decimal(str(body.exit_price))
-    try:
-        registry._db.execute(
-            "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve + %s",
-            (proceeds,),
-        )
-        logger.info("Added $%.2f proceeds from %s to cash reserve", float(proceeds), position.ticker)
-    except Exception:
-        logger.warning("Failed to update cash reserve after closing %s", position.ticker, exc_info=True)
+    registry.close_position_atomic(position_id, Decimal(str(body.exit_price)), proceeds, exit_d)
+    logger.info("Closed %s + credited $%.2f proceeds (atomic)", position.ticker, float(proceeds))
 
     return {"id": position_id, "status": "closed", "exit_price": body.exit_price, "proceeds": float(proceeds)}
 
