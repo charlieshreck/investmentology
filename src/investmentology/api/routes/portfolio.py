@@ -116,6 +116,29 @@ def create_position(
         except Exception:
             logger.debug("Sector check failed for %s", ticker)
 
+    # Correlation gate: block high-correlation additions (soft — fails open)
+    if len(existing) >= 3:
+        try:
+            corr_data = PortfolioService(registry).get_correlations()
+            if corr_data.get("correlations"):
+                ticker_corrs = [
+                    c["value"]
+                    for c in corr_data["correlations"]
+                    if ticker in (c["ticker1"], c["ticker2"])
+                ]
+                if ticker_corrs:
+                    avg_corr = sum(ticker_corrs) / len(ticker_corrs)
+                    if avg_corr > 0.75:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"{ticker} has {avg_corr:.2f} avg correlation "
+                            f"with portfolio. Adds concentration risk (threshold: 0.75).",
+                        )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.debug("Correlation gate skipped for %s (data unavailable)", ticker)
+
     existing_pos = next((p for p in existing if p.ticker == ticker), None)
     purchase_cost = new_price * new_shares
 
@@ -189,6 +212,12 @@ def get_closed_positions(registry: Registry = Depends(get_registry)) -> dict:
 def get_portfolio_balance(registry: Registry = Depends(get_registry)) -> dict:
     """Portfolio balance: sector allocation, risk spectrum, and soft-band health."""
     return PortfolioService(registry).get_balance()
+
+
+@router.get("/portfolio/risk")
+def get_portfolio_risk(registry: Registry = Depends(get_registry)) -> dict:
+    """Portfolio risk snapshot: drawdown from HWM, concentration, risk level."""
+    return PortfolioService(registry).get_risk()
 
 
 @router.get("/portfolio/correlations")

@@ -1288,3 +1288,52 @@ class PortfolioService:
                 "capitalNeeded": round(capital_needed, 0),
             } if target_monthly > 0 else None,
         }
+
+    def get_risk(self) -> dict:
+        """Portfolio risk snapshot: drawdown from HWM, sector concentration, risk level."""
+        from investmentology.risk.drawdown import DrawdownEngine
+
+        positions = self._reg.get_open_positions()
+        if not positions:
+            return {
+                "drawdownPct": 0,
+                "highWaterMark": 0,
+                "totalValue": 0,
+                "riskLevel": "NORMAL",
+                "positionCount": 0,
+                "sectorConcentration": {},
+                "topPositionWeight": 0,
+                "maxDrawdown252d": 0,
+                "history": [],
+            }
+
+        try:
+            budget_rows = self._reg._db.execute(
+                "SELECT cash_reserve FROM invest.portfolio_budget LIMIT 1"
+            )
+            cash = Decimal(str(budget_rows[0]["cash_reserve"])) if budget_rows else Decimal(0)
+        except Exception:
+            cash = Decimal(0)
+
+        engine = DrawdownEngine(self._reg._db)
+        snapshot = engine.compute_snapshot(positions, cash)
+
+        try:
+            engine.save_snapshot(snapshot)
+        except Exception:
+            logger.warning("Failed to save risk snapshot", exc_info=True)
+
+        max_dd = engine.get_max_drawdown(days=252)
+        history = engine.get_history(days=90)
+
+        return {
+            "drawdownPct": round(float(snapshot.drawdown_pct), 2),
+            "highWaterMark": round(float(snapshot.high_water_mark), 2),
+            "totalValue": round(float(snapshot.total_value), 2),
+            "riskLevel": snapshot.risk_level,
+            "positionCount": snapshot.position_count,
+            "sectorConcentration": snapshot.sector_concentration,
+            "topPositionWeight": round(float(snapshot.top_position_weight), 1),
+            "maxDrawdown252d": round(float(max_dd), 2),
+            "history": history,
+        }
