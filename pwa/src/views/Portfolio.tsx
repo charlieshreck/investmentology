@@ -25,7 +25,7 @@ import { useConfetti } from "../hooks/useConfetti";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useThesisSummary, usePortfolioRisk } from "../hooks/useToday";
-import type { Position, Alert, ClosedPosition } from "../types/models";
+import type { Position } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
