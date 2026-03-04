@@ -1358,3 +1358,85 @@ class PortfolioService:
             "var": var_data,
             "history": history,
         }
+
+    def get_sparklines(self) -> dict:
+        """Batch sparkline data for all open positions from fundamentals_cache."""
+        positions = self._reg.get_open_positions()
+        tickers = list({p.ticker for p in positions})
+        if not tickers:
+            return {"sparklines": {}}
+
+        rows = self._reg._db.execute("""
+            SELECT ticker, fetched_at::date AS dt, price
+            FROM invest.fundamentals_cache
+            WHERE ticker = ANY(%s) AND price > 0
+            ORDER BY ticker, fetched_at::date
+        """, [tickers])
+
+        sparklines: dict[str, list[dict]] = {}
+        for row in rows:
+            ticker = row["ticker"]
+            if ticker not in sparklines:
+                sparklines[ticker] = []
+            sparklines[ticker].append({
+                "date": str(row["dt"]),
+                "close": round(float(row["price"]), 2),
+            })
+
+        # Fallback for tickers with insufficient cache data
+        missing = [t for t in tickers if len(sparklines.get(t, [])) < 10]
+        if missing:
+            try:
+                import yfinance as yf
+                data = yf.download(missing, period="3mo", progress=False, threads=True)
+                if not data.empty:
+                    close = data["Close"] if len(missing) > 1 else data[["Close"]]
+                    for ticker in missing:
+                        col = ticker if len(missing) > 1 else "Close"
+                        if col in close.columns:
+                            series = close[col].dropna()
+                            sparklines[ticker] = [
+                                {"date": str(idx.date()), "close": round(float(val), 2)}
+                                for idx, val in series.items()
+                            ]
+            except Exception:
+                logger.warning("yfinance sparkline fallback failed", exc_info=True)
+
+        return {"sparklines": sparklines}
+
+    def get_performance(self, period: str = "3mo") -> dict:
+        """Portfolio value time series from risk snapshots."""
+        from datetime import datetime, timedelta
+
+        period_days = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "all": 9999}
+        days = period_days.get(period, 90)
+        since = datetime.now() - timedelta(days=days)
+
+        rows = self._reg._db.execute("""
+            SELECT snapshot_date, total_value, drawdown_pct, high_water_mark
+            FROM invest.portfolio_risk_snapshots
+            WHERE snapshot_date >= %s
+            ORDER BY snapshot_date
+        """, [since.date()])
+
+        if not rows:
+            return {"dataPoints": [], "cumReturn": 0, "maxDrawdown": 0}
+
+        data_points = []
+        for r in rows:
+            data_points.append({
+                "date": str(r["snapshot_date"]),
+                "value": round(float(r["total_value"]), 2),
+                "drawdownPct": round(float(r["drawdown_pct"]), 2),
+            })
+
+        first_val = float(rows[0]["total_value"])
+        last_val = float(rows[-1]["total_value"])
+        cum_return = ((last_val - first_val) / first_val * 100) if first_val > 0 else 0
+        max_dd = max((float(r["drawdown_pct"]) for r in rows), default=0)
+
+        return {
+            "dataPoints": data_points,
+            "cumReturn": round(cum_return, 2),
+            "maxDrawdown": round(max_dd, 2),
+        }

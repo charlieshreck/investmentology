@@ -12,6 +12,7 @@ import { GlossaryTooltip } from "../components/shared/GlossaryTooltip";
 import { CorrelationHeatmap } from "../components/charts/CorrelationHeatmap";
 import { Section } from "../components/shared/Section";
 import { AllocationDonut } from "../components/charts/AllocationDonut";
+import { PortfolioPerformanceChart } from "../components/charts/PortfolioPerformanceChart";
 import { PositionCard } from "../components/portfolio/PositionCard";
 import { DividendCard } from "../components/portfolio/DividendCard";
 import { ClosedTradeCard } from "../components/portfolio/ClosedTradeCard";
@@ -648,6 +649,20 @@ export function Portfolio() {
             </div>
 
           </motion.div>
+        )}
+
+        {/* ═══════ Performance Chart ═══════ */}
+        {positions.length > 0 && (
+          <Section title="Performance" icon={TrendingUp} defaultOpen={false}>
+            <div style={{
+              padding: "var(--space-md) var(--space-lg)",
+              background: "var(--color-surface-0)",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--glass-border)",
+            }}>
+              <PortfolioPerformanceChart />
+            </div>
+          </Section>
         )}
 
         {/* ═══════ Positions (with Dividends tab) ═══════ */}

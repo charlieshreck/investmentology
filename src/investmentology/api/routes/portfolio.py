@@ -6,7 +6,7 @@ import logging
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from investmentology.api.deps import get_registry
@@ -295,6 +295,21 @@ def get_portfolio_balance(registry: Registry = Depends(get_registry)) -> dict:
 def get_portfolio_risk(registry: Registry = Depends(get_registry)) -> dict:
     """Portfolio risk snapshot: drawdown from HWM, concentration, risk level."""
     return PortfolioService(registry).get_risk()
+
+
+@router.get("/portfolio/sparklines")
+def get_portfolio_sparklines(registry: Registry = Depends(get_registry)) -> dict:
+    """Batch sparkline data for all portfolio positions."""
+    return PortfolioService(registry).get_sparklines()
+
+
+@router.get("/portfolio/performance")
+def get_portfolio_performance(
+    period: str = Query("3mo", pattern="^(1mo|3mo|6mo|1y|all)$"),
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Portfolio value time series from risk snapshots."""
+    return PortfolioService(registry).get_performance(period=period)
 
 
 @router.get("/portfolio/correlations")
