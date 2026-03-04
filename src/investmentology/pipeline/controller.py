@@ -33,6 +33,7 @@ from investmentology.pipeline import state
 from investmentology.pipeline.convergence import should_debate, synthesis_ready
 from investmentology.pipeline.pre_filter import deterministic_pre_filter
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
+from investmentology.pipeline.selection import select_tickers
 from investmentology.registry.db import Database
 from investmentology.registry.reentry import create_gate_blocks, get_blocked_tickers
 
@@ -1352,6 +1353,50 @@ class PipelineController:
         except Exception:
             pass
 
+        # 5c. Qdrant similar situations (sync httpx — _build_request is sync)
+        similar_situations = None
+        try:
+            from investmentology.memory.semantic import (
+                COLLECTION_NAME, QDRANT_DIRECT_URL, SimilarSituation,
+                _build_embedding_text, _compute_embedding, _get_embed_model,
+            )
+            model = _get_embed_model()
+            if model is not None:
+                text = _build_embedding_text(
+                    ticker,
+                    previous_verdict.get("verdict", "") if previous_verdict else "",
+                    "",
+                    portfolio_context.get("position_type") if portfolio_context else None,
+                    portfolio_context.get("thesis_health") if portfolio_context else None,
+                    None, None,
+                )
+                query_vec = model.encode(
+                    f"search_query: {text}", normalize_embeddings=True,
+                ).tolist()
+                import httpx as _httpx
+                resp = _httpx.post(
+                    f"{QDRANT_DIRECT_URL}/collections/{COLLECTION_NAME}/points/search",
+                    json={"vector": query_vec, "limit": 3, "with_payload": True},
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    hits = resp.json().get("result", [])
+                    if hits:
+                        similar_situations = [
+                            {
+                                "ticker": h["payload"].get("ticker", "?"),
+                                "verdict": h["payload"].get("verdict", "?"),
+                                "confidence": h["payload"].get("confidence", 0),
+                                "outcome": h["payload"].get("outcome"),
+                                "reasoning": h["payload"].get("reasoning", "")[:200],
+                                "similarity": h.get("score", 0),
+                                "date": h["payload"].get("timestamp", ""),
+                            }
+                            for h in hits
+                        ]
+        except Exception:
+            logger.debug("Qdrant similar situations lookup failed for %s", ticker)
+
         # 6. Quant gate context
         qg_rank = None
         piotroski = None
@@ -1379,6 +1424,7 @@ class PipelineController:
             technical_indicators=tech,
             portfolio_context=portfolio_context,
             previous_verdict=previous_verdict,
+            similar_situations=similar_situations,
             quant_gate_rank=qg_rank,
             piotroski_score=piotroski,
             altman_z_score=altman_z,
@@ -1431,13 +1477,17 @@ class PipelineController:
         except Exception:
             logger.debug("Positions query failed", exc_info=True)
 
-        result = sorted(t for t in candidates if t not in blocked)
-        if result:
-            logger.info(
-                "Analysis tickers: %d candidates (%d blocked)",
-                len(result), len(candidates) - len(result),
-            )
-        return result
+        unblocked = sorted(t for t in candidates if t not in blocked)
+        if not unblocked:
+            return []
+
+        # L2 Selection Desk: score and prioritize candidates
+        selected = select_tickers(self.db, unblocked)
+        logger.info(
+            "Analysis tickers: %d selected from %d candidates (%d blocked)",
+            len(selected), len(unblocked), len(candidates) - len(unblocked),
+        )
+        return selected
 
     def _get_portfolio_context(self, ticker: str) -> dict | None:
         """Get portfolio context for a ticker if it's a held position."""

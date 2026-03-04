@@ -42,6 +42,8 @@ class AnalysisRequest:
     research_briefing: str | None = None
     # Sector ETF performance (1-month % change by ETF ticker)
     sector_performance: dict | None = None
+    # Similar past situations from Qdrant semantic memory
+    similar_situations: list[dict] | None = None
     # Previous analysis context for history-aware re-analysis
     previous_verdict: dict | None = None
     previous_signals: list[dict] | None = None

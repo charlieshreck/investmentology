@@ -146,6 +146,10 @@ class AgentRunner:
         if "position_thesis" in opt and request.position_thesis:
             parts.extend(self._fmt_thesis(request))
 
+        # Similar past situations (Qdrant semantic memory)
+        if request.similar_situations:
+            parts.extend(self._fmt_similar_situations(request.similar_situations))
+
         # Previous verdict
         if "previous_verdict" in opt and request.previous_verdict:
             parts.extend(self._fmt_previous_verdict(request.previous_verdict))
@@ -729,4 +733,27 @@ class AgentRunner:
                 d = entry.get("date", "?")
                 parts.append(f"    {d}: {v} (conf: {c})")
         parts.append("  Consider: Has anything materially changed since the last analysis?")
+        return parts
+
+    @staticmethod
+    def _fmt_similar_situations(situations: list[dict]) -> list[str]:
+        """Format similar past situations from Qdrant semantic memory."""
+        parts = ["", "SIMILAR PAST SITUATIONS (from institutional memory):"]
+        for i, s in enumerate(situations[:3], 1):
+            sim_pct = int(s.get("similarity", 0) * 100)
+            verdict = s.get("verdict", "?")
+            ticker = s.get("ticker", "?")
+            conf = s.get("confidence", 0)
+            date = s.get("date", "?")[:10] if s.get("date") else "?"
+            outcome = s.get("outcome")
+            reasoning = s.get("reasoning", "")[:150]
+
+            parts.append(f"  {i}. {ticker} ({date}, {sim_pct}% similar): {verdict} conf={conf:.0%}")
+            if reasoning:
+                parts.append(f"     Context: {reasoning}")
+            if outcome:
+                parts.append(f"     OUTCOME: {outcome}")
+            else:
+                parts.append("     Outcome: pending")
+        parts.append("  Use these patterns to inform — but do not blindly follow — your verdict.")
         return parts
