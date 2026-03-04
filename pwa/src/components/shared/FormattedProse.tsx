@@ -1,6 +1,9 @@
+import { AnnotatedText } from "./AnnotatedText";
+
 /**
  * Splits flat API prose into scannable bullet-point layout.
  * First sentence is bold lead; remaining sentences become compact bullets.
+ * Financial terms are auto-annotated with glossary tooltips.
  */
 export function FormattedProse({
   text,
@@ -24,9 +27,9 @@ export function FormattedProse({
     return (
       <div style={{ fontSize, color, lineHeight: 1.6 }}>
         <span style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>
-          {sentences[0]}
+          <AnnotatedText text={sentences[0]} />
         </span>
-        {sentences[1] && <> {sentences[1]}</>}
+        {sentences[1] && <> <AnnotatedText text={sentences[1]} /></>}
       </div>
     );
   }
@@ -37,13 +40,13 @@ export function FormattedProse({
   return (
     <div style={{ fontSize, color, lineHeight: 1.6 }}>
       <div style={{ fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "var(--space-xs)" }}>
-        {lead}
+        <AnnotatedText text={lead} />
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {rest.map((s, i) => (
           <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
             <span style={{ color: "var(--color-text-muted)", flexShrink: 0, fontSize: "0.7em" }}>·</span>
-            <span>{s}</span>
+            <span><AnnotatedText text={s} /></span>
           </div>
         ))}
       </div>
