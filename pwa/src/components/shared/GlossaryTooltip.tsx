@@ -1,20 +1,31 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { lookupTerm } from "../../utils/glossary";
 
 /**
  * Inline ? icon that shows a glossary definition.
  * Hover on desktop, tap on mobile.
- * Use next to any financial term label: <GlossaryTooltip term="altman z-score" />
+ * Renders tooltip via portal so it escapes overflow:hidden containers.
  */
 export function GlossaryTooltip({ term }: { term: string }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const btnRef = useRef<HTMLButtonElement>(null!);
   const popRef = useRef<HTMLDivElement>(null!);
   const definition = lookupTerm(term);
   if (!definition) return null;
 
+  const updatePos = () => {
+    if (btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ x: r.left + r.width / 2, y: r.top });
+    }
+  };
+
   const show = useCallback(() => {
     clearTimeout(timeoutRef.current);
+    updatePos();
     setOpen(true);
   }, []);
 
@@ -26,7 +37,8 @@ export function GlossaryTooltip({ term }: { term: string }) {
   useEffect(() => {
     if (!open) return;
     const handler = (e: PointerEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) {
+      if (popRef.current && !popRef.current.contains(e.target as Node) &&
+          btnRef.current && !btnRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
@@ -41,7 +53,8 @@ export function GlossaryTooltip({ term }: { term: string }) {
       onMouseLeave={hide}
     >
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        ref={btnRef}
+        onClick={(e) => { e.stopPropagation(); updatePos(); setOpen((v) => !v); }}
         aria-label={`What is ${term}?`}
         style={{
           background: "none", border: "none", cursor: "help",
@@ -55,23 +68,23 @@ export function GlossaryTooltip({ term }: { term: string }) {
       >
         ?
       </button>
-      {open && (
+      {open && pos && createPortal(
         <div
           ref={popRef}
-          onMouseEnter={show}
+          onMouseEnter={() => clearTimeout(timeoutRef.current)}
           onMouseLeave={hide}
           style={{
-            position: "absolute",
-            bottom: "calc(100% + 6px)",
-            left: "50%",
-            transform: "translateX(-50%)",
+            position: "fixed",
+            left: pos.x,
+            top: pos.y,
+            transform: "translate(-50%, calc(-100% - 6px))",
             width: 220,
             padding: "var(--space-sm) var(--space-md)",
             background: "var(--color-surface-0)",
             border: "1px solid var(--glass-border)",
             borderRadius: "var(--radius-md)",
             boxShadow: "var(--shadow-elevated)",
-            zIndex: 100,
+            zIndex: 10000,
           }}
         >
           <div style={{
@@ -86,7 +99,8 @@ export function GlossaryTooltip({ term }: { term: string }) {
           }}>
             {definition}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );

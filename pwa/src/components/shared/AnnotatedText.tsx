@@ -1,16 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { findGlossaryTerms } from "../../utils/glossary";
 
 /**
  * Renders text with inline glossary annotations.
- * Financial terms are underlined — hover on desktop or tap on mobile
+ * Financial terms get a dotted underline — hover (desktop) or tap (mobile)
  * shows a tooltip with the plain-English definition.
+ * Tooltip renders via portal so it escapes overflow:hidden containers.
  */
 export function AnnotatedText({ text }: { text: string }) {
   const [activeTerm, setActiveTerm] = useState<string | null>(null);
   const [tooltipDef, setTooltipDef] = useState<string>("");
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
-  const containerRef = useRef<HTMLSpanElement>(null!);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const matches = findGlossaryTerms(text);
@@ -31,7 +32,7 @@ export function AnnotatedText({ text }: { text: string }) {
   }
 
   return (
-    <span ref={containerRef} style={{ position: "relative" }}>
+    <>
       {segments.map((seg) =>
         seg.definition ? (
           <GlossarySpan
@@ -40,15 +41,10 @@ export function AnnotatedText({ text }: { text: string }) {
             definition={seg.definition}
             isActive={activeTerm === seg.key}
             onActivate={(def, rect) => {
+              clearTimeout(timeoutRef.current);
               setActiveTerm(seg.key);
               setTooltipDef(def);
-              const containerRect = containerRef.current?.getBoundingClientRect();
-              if (containerRect) {
-                setTooltipPos({
-                  x: rect.left - containerRect.left + rect.width / 2,
-                  y: rect.top - containerRect.top,
-                });
-              }
+              setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top });
             }}
             onDeactivate={() => {
               timeoutRef.current = setTimeout(() => {
@@ -61,7 +57,7 @@ export function AnnotatedText({ text }: { text: string }) {
           <span key={seg.key}>{seg.text}</span>
         )
       )}
-      {activeTerm && tooltipPos && (
+      {activeTerm && tooltipPos && createPortal(
         <GlossaryPopover
           definition={tooltipDef}
           x={tooltipPos.x}
@@ -69,9 +65,10 @@ export function AnnotatedText({ text }: { text: string }) {
           onClose={() => { setActiveTerm(null); setTooltipPos(null); }}
           onMouseEnter={() => clearTimeout(timeoutRef.current)}
           onMouseLeave={() => { setActiveTerm(null); setTooltipPos(null); }}
-        />
+        />,
+        document.body,
       )}
-    </span>
+    </>
   );
 }
 
@@ -137,17 +134,17 @@ function GlossaryPopover({ definition, x, y, onClose, onMouseEnter, onMouseLeave
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
-        position: "absolute",
-        bottom: `calc(100% - ${y}px + 6px)`,
+        position: "fixed",
         left: x,
-        transform: "translateX(-50%)",
+        top: y,
+        transform: "translate(-50%, calc(-100% - 6px))",
         width: 240,
         padding: "8px 12px",
         background: "var(--color-surface-0)",
         border: "1px solid var(--glass-border)",
         borderRadius: "var(--radius-md)",
         boxShadow: "var(--shadow-elevated)",
-        zIndex: 100,
+        zIndex: 10000,
         pointerEvents: "auto",
       }}
     >
