@@ -19,3 +19,4 @@ class Prediction:
     settled_at: datetime | None = None
     id: int | None = None
     created_at: datetime | None = None
+    price_at_prediction: Decimal | None = None

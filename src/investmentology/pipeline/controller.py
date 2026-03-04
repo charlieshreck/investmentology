@@ -876,12 +876,13 @@ class PipelineController:
 
             agent_signal_sets = self._reconstruct_signal_sets(signal_rows)
 
-            # 2. Build weights from skills
+            # 2. Build weights from skills, adjusted by calibration accuracy
             weights = {
                 name: Decimal(str(skill.base_weight))
                 for name, skill in SKILLS.items()
                 if skill.base_weight > 0
             }
+            weights = self._apply_calibration_weights(weights)
 
             # 3. Verdict synthesis (deterministic vote aggregation)
             from investmentology.verdict import VotingMethod, synthesize
@@ -1155,6 +1156,64 @@ class PipelineController:
             token_usage=response.token_usage,
             latency_ms=response.latency_ms,
         )
+
+    def _apply_calibration_weights(
+        self, weights: dict[str, Decimal],
+    ) -> dict[str, Decimal]:
+        """Adjust agent weights using calibration accuracy from settled predictions.
+
+        Agents with above-average accuracy get a boost (up to +20%),
+        those below average get a penalty (up to -20%). Requires at least
+        10 settled predictions per agent to adjust.
+        """
+        try:
+            from investmentology.learning.predictions import PredictionManager
+            from investmentology.registry.queries import Registry
+
+            registry = Registry(self.db)
+            pm = PredictionManager(registry)
+            cal = pm.get_calibration_data(window_days=90)
+            agent_acc = cal.get("agent_accuracy", {})
+
+            if not agent_acc:
+                return weights
+
+            # Filter to agents with enough data
+            qualified = {
+                k: v for k, v in agent_acc.items()
+                if v.get("total", 0) >= 10
+            }
+            if not qualified:
+                return weights
+
+            # Compute mean accuracy across qualified agents
+            mean_acc = sum(v["accuracy"] for v in qualified.values()) / len(qualified)
+
+            adjusted = dict(weights)
+            for agent_name, base_w in weights.items():
+                if agent_name not in qualified:
+                    continue
+                acc = qualified[agent_name]["accuracy"]
+                # Scale: +/-20% max adjustment, proportional to deviation from mean
+                deviation = acc - mean_acc
+                # Clamp to [-0.20, +0.20]
+                factor = Decimal(str(max(-0.20, min(0.20, deviation))))
+                adjusted[agent_name] = base_w * (1 + factor)
+
+            # Re-normalize so weights sum to 1.0
+            total = sum(adjusted.values())
+            if total > 0:
+                adjusted = {k: v / total for k, v in adjusted.items()}
+
+            logger.info(
+                "Calibration-adjusted weights (%d agents qualified, mean_acc=%.2f): %s",
+                len(qualified), mean_acc,
+                {k: f"{float(v):.3f}" for k, v in adjusted.items()},
+            )
+            return adjusted
+        except Exception:
+            logger.debug("Calibration weight adjustment failed, using base weights")
+            return weights
 
     def _reconstruct_signal_sets(self, signal_rows: list[dict]) -> list:
         """Reconstruct AgentSignalSet objects from DB rows."""

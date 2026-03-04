@@ -85,13 +85,22 @@ def _check_correctness(prediction, actual: Decimal) -> bool:
 
     ptype = getattr(prediction, "prediction_type", "price_target")
 
-    if ptype == "direction_up":
-        return actual > predicted
-    elif ptype == "direction_down":
-        return actual < predicted
-    else:
-        # Price target: correct if actual is within 10% of predicted
+    if "direction" in ptype:
+        # Direction predictions: compare actual settlement price against entry price
+        entry = getattr(prediction, "price_at_prediction", None)
+        if entry is None or entry <= 0:
+            return False
+        entry = Decimal(str(entry))
+        price_went_up = actual > entry
+        if "up" in ptype:
+            return price_went_up
+        else:
+            return not price_went_up
+    elif "target_price" in ptype:
+        # Target price: correct if actual is within 10% of predicted
         if predicted == 0:
             return False
         pct_diff = abs(float((actual - predicted) / predicted))
         return pct_diff <= 0.10
+    else:
+        return False

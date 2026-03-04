@@ -113,7 +113,8 @@ class PredictionManager:
 
         try:
             rows = self._registry._db.execute(
-                "SELECT confidence, predicted_value, actual_value, prediction_type "
+                "SELECT confidence, predicted_value, actual_value, prediction_type, "
+                "price_at_prediction, source "
                 "FROM invest.predictions "
                 "WHERE is_settled = TRUE AND actual_value IS NOT NULL "
                 "AND actual_value != 0 AND created_at >= %s",
@@ -127,18 +128,29 @@ class PredictionManager:
             return self._empty_calibration()
 
         settled_data: list[tuple[Decimal, bool]] = []
+        agent_data: dict[str, list[tuple[Decimal, bool]]] = {}
         for r in rows:
             conf = Decimal(str(r["confidence"])) if r["confidence"] else Decimal("0.5")
             predicted = Decimal(str(r["predicted_value"]))
             actual = Decimal(str(r["actual_value"]))
             pred_type = r["prediction_type"] or ""
+            entry_price = (
+                Decimal(str(r["price_at_prediction"]))
+                if r.get("price_at_prediction") is not None
+                else None
+            )
 
             if "direction" in pred_type:
                 # Direction prediction: correct if actual price moved in predicted direction
-                # predicted_value: 1=up, -1=down; actual_value = closing price
-                # We need the entry price to determine direction — use predictions table context
-                # For now, treat as correct if predicted direction matches (positive=up, negative=down)
-                was_correct = (predicted > 0 and actual > 0) or (predicted < 0 and actual < 0)
+                # predicted_value: 1=up, -1=down; actual_value = closing price at settlement
+                # price_at_prediction = stock price when prediction was made
+                if entry_price and entry_price > 0:
+                    price_went_up = actual > entry_price
+                    was_correct = (predicted > 0 and price_went_up) or (
+                        predicted < 0 and not price_went_up
+                    )
+                else:
+                    was_correct = False  # Can't determine without entry price
             elif "target_price" in pred_type:
                 # Target price prediction: correct if actual price is within 15% of target
                 if predicted > 0:
@@ -151,7 +163,26 @@ class PredictionManager:
 
             settled_data.append((conf, was_correct))
 
-        return self._compute_calibration(settled_data)
+            # Track per-agent accuracy from source field (e.g. "orchestrator:BUY" or "warren:claude-opus-4-6")
+            source = r.get("source") or ""
+            agent_name = source.split(":")[0] if ":" in source else source
+            if agent_name and agent_name != "orchestrator":
+                agent_data.setdefault(agent_name, []).append((conf, was_correct))
+
+        result = self._compute_calibration(settled_data)
+        # Add per-agent accuracy for weight adaptation
+        if agent_data:
+            agent_accuracy: dict[str, dict] = {}
+            for agent_name, pairs in agent_data.items():
+                total = len(pairs)
+                correct = sum(1 for _, c in pairs if c)
+                agent_accuracy[agent_name] = {
+                    "total": total,
+                    "correct": correct,
+                    "accuracy": correct / total if total > 0 else 0.0,
+                }
+            result["agent_accuracy"] = agent_accuracy
+        return result
 
     def _empty_calibration(self) -> dict:
         """Return empty calibration data structure."""

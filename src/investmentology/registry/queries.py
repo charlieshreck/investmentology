@@ -1086,4 +1086,9 @@ class Registry:
             is_settled=r["is_settled"],
             settled_at=r["settled_at"],
             created_at=r["created_at"],
+            price_at_prediction=(
+                Decimal(str(r["price_at_prediction"]))
+                if r.get("price_at_prediction") is not None
+                else None
+            ),
         )
