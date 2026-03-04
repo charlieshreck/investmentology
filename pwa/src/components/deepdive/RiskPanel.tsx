@@ -27,9 +27,14 @@ export function RiskPanel({ verdict, competence, adversarial }: {
   const killScenarios = adversarial?.kill_scenarios ?? [];
   const premortem = adversarial?.premortem;
 
+  const biasFlags = (adversarial?.bias_flags ?? []).filter(b => b.is_flagged);
+  const adversarialVerdict = adversarial?.verdict;
+  const adversarialReasoning = adversarial?.reasoning;
+
   const totalFlags = riskFlags.length + concerns.length +
     (narrative?.risk_summary ? 1 : 0) + (narrative?.pre_mortem ? 1 : 0) +
-    killScenarios.length + (premortem ? 1 : 0);
+    killScenarios.length + (premortem ? 1 : 0) +
+    (adversarialVerdict ? 1 : 0) + biasFlags.length;
 
   if (totalFlags === 0) return null;
 
@@ -40,6 +45,75 @@ export function RiskPanel({ verdict, competence, adversarial }: {
       preview={`${totalFlags} risk item${totalFlags !== 1 ? "s" : ""} identified`}
       badge={<Badge variant={totalFlags >= 3 ? "error" : "warning"}>{totalFlags}</Badge>}
     >
+      {/* Adversarial Verdict */}
+      {adversarialVerdict && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: "var(--space-md)",
+          padding: "var(--space-md)",
+          background: adversarialVerdict === "VETO" ? "rgba(248, 113, 113, 0.08)"
+            : adversarialVerdict === "CAUTION" ? "rgba(251, 146, 60, 0.08)"
+            : "rgba(74, 222, 128, 0.08)",
+          borderRadius: "var(--radius-sm)",
+          borderLeft: `3px solid ${
+            adversarialVerdict === "VETO" ? "var(--color-error)"
+            : adversarialVerdict === "CAUTION" ? "var(--color-warning)"
+            : "var(--color-success)"
+          }`,
+          marginBottom: "var(--space-lg)",
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-xs)", flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+              <span style={{
+                fontSize: "var(--text-xs)", fontWeight: 700, textTransform: "uppercase",
+                letterSpacing: "0.06em", color: "var(--color-text-muted)",
+              }}>
+                Adversarial Review
+              </span>
+              <Badge variant={
+                adversarialVerdict === "VETO" ? "error"
+                : adversarialVerdict === "CAUTION" ? "warning"
+                : "success"
+              }>
+                {adversarialVerdict}
+              </Badge>
+            </div>
+            {adversarialReasoning && (
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+                {adversarialReasoning}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cognitive Bias Flags */}
+      {biasFlags.length > 0 && (
+        <div style={{ marginBottom: "var(--space-lg)" }}>
+          <div style={{
+            fontSize: "var(--text-xs)", fontWeight: 700, textTransform: "uppercase",
+            letterSpacing: "0.06em", color: "var(--color-warning)",
+            marginBottom: "var(--space-sm)",
+          }}>
+            Cognitive Biases Detected ({biasFlags.length})
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-xs)" }}>
+            {biasFlags.map((b, i) => (
+              <div key={i} title={b.detail} style={{
+                padding: "2px var(--space-sm)",
+                fontSize: "var(--text-xs)",
+                background: "rgba(251, 146, 60, 0.1)",
+                border: "1px solid rgba(251, 146, 60, 0.3)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--color-warning)",
+                cursor: "help",
+              }}>
+                {b.bias_name.replace(/_/g, " ")}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Kill Scenarios (adversarial) */}
       {killScenarios.length > 0 && (
         <div style={{ marginBottom: "var(--space-lg)" }}>

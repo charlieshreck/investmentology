@@ -15,6 +15,16 @@ interface PortfolioPerformance {
   sortinoRatio: number | null;
   winRate: number;
   maxDrawdownPct: number;
+  portfolioReturnPct?: number;
+  spyReturnPct?: number;
+  avgWinPct?: number;
+  avgLossPct?: number;
+  totalTrades?: number;
+  expectancy?: number;
+  dispositionRatio?: number;
+  avgWinnerHoldDays?: number;
+  avgLoserHoldDays?: number;
+  measurementDays?: number;
 }
 
 interface PortfolioSlice {

@@ -562,6 +562,35 @@ export function Today() {
                         {pendulumLabelMap[briefing.pendulumLabel] ?? briefing.pendulumLabel}
                       </span>
                     </div>
+                    {briefing.pendulumComponents && (
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        {([
+                          ["VIX", briefing.pendulumComponents.vix],
+                          ["Credit", briefing.pendulumComponents.creditSpread],
+                          ["P/C", briefing.pendulumComponents.putCall],
+                          ["Mom", briefing.pendulumComponents.momentum],
+                        ] as [string, number | null][])
+                          .filter(([, v]) => v != null)
+                          .map(([label, val]) => (
+                            <span key={label} style={{
+                              fontSize: 9,
+                              fontFamily: "var(--font-mono)",
+                              color: pendulumColor(val!),
+                              opacity: 0.8,
+                            }}>
+                              {label}:{val}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                    {briefing.sizingMultiplier != null && briefing.sizingMultiplier !== 1.0 && (
+                      <span style={{
+                        fontSize: 9, fontFamily: "var(--font-mono)",
+                        color: briefing.sizingMultiplier < 1 ? "var(--color-warning)" : "var(--color-success)",
+                      }}>
+                        sizing: {(briefing.sizingMultiplier * 100).toFixed(0)}%
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

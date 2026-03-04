@@ -10,8 +10,22 @@ import type {
   WatchlistInfo,
 } from "../../views/StockDeepDive";
 
+function signalVerdictVariant(v: string): "success" | "error" | "warning" | "neutral" {
+  const upper = String(v).toUpperCase();
+  if (upper === "BUY" || upper === "STRONG_BUY") return "success";
+  if (upper === "SELL" || upper === "AVOID") return "error";
+  if (upper === "HOLD" || upper === "ACCUMULATE") return "warning";
+  return "neutral";
+}
+
 function SignalRow({ signal }: { signal: Signal }) {
   const [expanded, setExpanded] = useState(false);
+  const sigs = signal.signals ?? {};
+  const verdict = sigs.verdict as string | undefined;
+  const targetPrice = sigs.target_price as number | undefined;
+  const riskFlags = (sigs.risk_flags ?? sigs.risks) as string[] | undefined;
+  const confidenceFactors = (sigs.confidence_factors ?? sigs.catalysts) as string[] | undefined;
+
   return (
     <div style={{ background: "var(--color-surface-0)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
       <div
@@ -25,6 +39,14 @@ function SignalRow({ signal }: { signal: Signal }) {
           {signal.agentName.charAt(0).toUpperCase() + signal.agentName.slice(1)}
         </span>
         <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", minWidth: 60 }}>{signal.model}</span>
+        {verdict && (
+          <Badge variant={signalVerdictVariant(verdict)}>{verdict}</Badge>
+        )}
+        {targetPrice != null && targetPrice > 0 && (
+          <span style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-accent-bright)" }}>
+            ${targetPrice.toFixed(0)}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         {signal.confidence != null && (
           <Badge variant={signal.confidence >= 0.7 ? "success" : signal.confidence >= 0.4 ? "warning" : "error"}>
@@ -36,8 +58,33 @@ function SignalRow({ signal }: { signal: Signal }) {
         </span>
       </div>
       {expanded && (
-        <div style={{ padding: "0 var(--space-md) var(--space-md)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6, borderTop: "1px solid var(--glass-border)" }}>
-          {signal.reasoning}
+        <div style={{ padding: "0 var(--space-md) var(--space-md)", borderTop: "1px solid var(--glass-border)" }}>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+            {signal.reasoning}
+          </div>
+          {/* Signal tags */}
+          {(confidenceFactors?.length || riskFlags?.length) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-xs)", marginTop: "var(--space-sm)" }}>
+              {confidenceFactors?.map((f, i) => (
+                <span key={`cf-${i}`} style={{
+                  padding: "1px var(--space-sm)", fontSize: 10, fontFamily: "var(--font-mono)",
+                  background: "rgba(74, 222, 128, 0.1)", border: "1px solid rgba(74, 222, 128, 0.3)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-success)",
+                }}>
+                  {f}
+                </span>
+              ))}
+              {riskFlags?.map((f, i) => (
+                <span key={`rf-${i}`} style={{
+                  padding: "1px var(--space-sm)", fontSize: 10, fontFamily: "var(--font-mono)",
+                  background: "rgba(248, 113, 113, 0.1)", border: "1px solid rgba(248, 113, 113, 0.3)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-error)",
+                }}>
+                  {f}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -159,10 +206,20 @@ export function ArchiveSection({
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 padding: "var(--space-md)", borderBottom: "1px solid var(--glass-border)",
               }}>
-                <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", flexWrap: "wrap" }}>
                   <Badge variant="neutral">{d.decisionType}</Badge>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginLeft: "var(--space-md)" }}>
+                  {d.outcome && (
+                    <Badge variant={
+                      d.outcome === "correct" ? "success"
+                      : d.outcome === "incorrect" ? "error"
+                      : "neutral"
+                    }>
+                      {d.outcome}
+                    </Badge>
+                  )}
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
                     {d.layer} — {d.createdAt ? new Date(d.createdAt).toLocaleDateString() : ""}
+                    {d.settledAt && ` (settled ${new Date(d.settledAt).toLocaleDateString()})`}
                   </span>
                 </div>
                 {d.confidence != null && (

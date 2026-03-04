@@ -20,6 +20,7 @@ import { MetricsPanel } from "../components/deepdive/MetricsPanel";
 import { RiskPanel } from "../components/deepdive/RiskPanel";
 import { PositionPanel } from "../components/deepdive/PositionPanel";
 import { CompetencePanel } from "../components/deepdive/CompetencePanel";
+import { ResearchBriefingPanel } from "../components/deepdive/ResearchBriefingPanel";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
 
@@ -88,6 +89,8 @@ export interface Decision {
   confidence: number | null;
   reasoning: string;
   createdAt: string;
+  outcome?: string | null;
+  settledAt?: string | null;
 }
 
 export interface AgentStance {
@@ -205,6 +208,12 @@ export interface BriefingData {
   rationale: string;
 }
 
+export interface ResearchBriefing {
+  content: string;
+  sourceCount: number;
+  createdAt: string | null;
+}
+
 export interface StockResponse {
   ticker: string;
   name: string;
@@ -227,6 +236,7 @@ export interface StockResponse {
   stabilityLabel: string | null;
   consensusTier: string | null;
   targetPriceRange: TargetPriceRange | null;
+  researchBriefing: ResearchBriefing | null;
 }
 
 // ─── Orchestrator ───────────────────────────────────────────────────────────
@@ -549,6 +559,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         />
       )}
       {data.competence && <CompetencePanel competence={data.competence} />}
+      {data.researchBriefing && <ResearchBriefingPanel briefing={data.researchBriefing} />}
 
       {/* ═══════════════════════════════════════════════════════════════════
           LAYER 3 — THE ARCHIVES (full detail)

@@ -1297,6 +1297,41 @@ export function Portfolio() {
                 </div>
               ))}
             </div>
+            {/* Extended metrics (from PortfolioPerformanceExtended) */}
+            {(performance.expectancy != null || performance.avgWinPct != null || performance.portfolioReturnPct != null) && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "var(--space-sm)", marginTop: "var(--space-sm)" }}>
+                {([
+                  performance.portfolioReturnPct != null && { label: "Return", value: `${performance.portfolioReturnPct >= 0 ? "+" : ""}${performance.portfolioReturnPct.toFixed(1)}%`, color: pnlColor(performance.portfolioReturnPct) },
+                  performance.spyReturnPct != null && { label: "SPY Return", value: `${performance.spyReturnPct! >= 0 ? "+" : ""}${performance.spyReturnPct!.toFixed(1)}%`, color: pnlColor(performance.spyReturnPct!) },
+                  performance.expectancy != null && { label: "Expectancy", value: `${performance.expectancy >= 0 ? "+" : ""}${performance.expectancy.toFixed(2)}%`, color: pnlColor(performance.expectancy), glossary: "expectancy" },
+                  performance.avgWinPct != null && { label: "Avg Win", value: `+${performance.avgWinPct.toFixed(1)}%`, color: "var(--color-success)" },
+                  performance.avgLossPct != null && { label: "Avg Loss", value: `${performance.avgLossPct.toFixed(1)}%`, color: "var(--color-error)" },
+                  performance.dispositionRatio != null && { label: "Disposition", value: performance.dispositionRatio.toFixed(2), glossary: "disposition ratio" },
+                  performance.totalTrades != null && { label: "Trades", value: String(performance.totalTrades) },
+                  performance.measurementDays != null && { label: "Days", value: String(performance.measurementDays) },
+                ] as (false | { label: string; value: string; color?: string; glossary?: string })[])
+                  .filter(Boolean)
+                  .map((m) => {
+                    const item = m as { label: string; value: string; color?: string; glossary?: string };
+                    return (
+                      <div key={item.label} style={{
+                        padding: "var(--space-sm) var(--space-md)",
+                        background: "var(--color-surface-0)",
+                        borderRadius: "var(--radius-sm)",
+                        border: "1px solid var(--glass-border)",
+                      }}>
+                        <div style={{ fontSize: 9, color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2, display: "flex", alignItems: "center", gap: 2 }}>
+                          {item.label}
+                          {item.glossary && <GlossaryTooltip term={item.glossary} />}
+                        </div>
+                        <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, fontFamily: "var(--font-mono)", color: item.color }}>
+                          {item.value}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </Section>
         )}
 

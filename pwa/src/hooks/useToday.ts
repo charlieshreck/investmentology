@@ -3,10 +3,20 @@ import type { Recommendation } from "../types/models";
 
 // --- Daily Briefing Summary ---
 
+export interface PendulumComponents {
+  vix: number | null;
+  creditSpread: number | null;
+  putCall: number | null;
+  momentum: number | null;
+}
+
 export interface BriefingSummary {
   date: string;
   pendulumScore: number;
   pendulumLabel: string;
+  pendulumComponents?: PendulumComponents | null;
+  sizingMultiplier?: number | null;
+  macroSignals?: string[];
   positionCount: number;
   totalValue: number;
   totalUnrealizedPnl: number;

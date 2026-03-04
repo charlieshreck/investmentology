@@ -265,18 +265,27 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         (ticker,),
     )
 
-    # Decisions
-    decisions = registry.get_decisions(ticker=ticker, limit=20)
+    # Decisions (with outcome from decision_outcomes table)
+    decision_rows = registry._db.execute(
+        "SELECT d.id, d.decision_type, d.layer_source, d.confidence, "
+        "d.reasoning, d.created_at, do.outcome, do.settled_at "
+        "FROM invest.decisions d "
+        "LEFT JOIN invest.decision_outcomes do ON do.decision_id = d.id "
+        "WHERE d.ticker = %s ORDER BY d.created_at DESC LIMIT 20",
+        (ticker,),
+    )
     decision_data = [
         {
-            "id": str(d.id),
-            "decisionType": d.decision_type.value,
-            "layer": d.layer_source,
-            "confidence": float(d.confidence) if d.confidence else None,
-            "reasoning": d.reasoning,
-            "createdAt": str(d.created_at) if d.created_at else None,
+            "id": str(r["id"]),
+            "decisionType": r["decision_type"],
+            "layer": r["layer_source"],
+            "confidence": float(r["confidence"]) if r["confidence"] else None,
+            "reasoning": r["reasoning"],
+            "createdAt": str(r["created_at"]) if r["created_at"] else None,
+            "outcome": r.get("outcome"),
+            "settledAt": str(r["settled_at"]) if r.get("settled_at") else None,
         }
-        for d in decisions
+        for r in decision_rows
     ]
 
     # Watchlist state
@@ -343,18 +352,24 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
 
     # Competence & moat from latest L2 decision
     competence_data = None
-    for d in decisions:
-        if d.decision_type.value in ("COMPETENCE_PASS", "COMPETENCE_FAIL"):
-            competence_data = {
-                "passed": d.decision_type.value == "COMPETENCE_PASS",
-                "confidence": float(d.confidence) if d.confidence else None,
-                "reasoning": d.reasoning,
-            }
-            if d.signals:
-                competence_data["in_circle"] = d.signals.get("in_circle")
-                competence_data["sector_familiarity"] = d.signals.get("sector_familiarity")
-                competence_data["moat"] = d.signals.get("moat")
-            break
+    competence_rows = registry._db.execute(
+        "SELECT decision_type, confidence, reasoning, signals "
+        "FROM invest.decisions WHERE ticker = %s "
+        "AND decision_type IN ('COMPETENCE_PASS', 'COMPETENCE_FAIL') "
+        "ORDER BY created_at DESC LIMIT 1",
+        (ticker,),
+    )
+    if competence_rows:
+        cr = competence_rows[0]
+        competence_data = {
+            "passed": cr["decision_type"] == "COMPETENCE_PASS",
+            "confidence": float(cr["confidence"]) if cr["confidence"] else None,
+            "reasoning": cr["reasoning"],
+        }
+        if cr["signals"]:
+            competence_data["in_circle"] = cr["signals"].get("in_circle")
+            competence_data["sector_familiarity"] = cr["signals"].get("sector_familiarity")
+            competence_data["moat"] = cr["signals"].get("moat")
 
     # Stock name — prefer profile data, fall back to stocks table
     stock_name = ticker
@@ -462,6 +477,25 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         float(verdict_data["consensusScore"]) if verdict_data and verdict_data.get("consensusScore") else None
     )
 
+    # Research briefing from pipeline data cache (latest cycle)
+    research_briefing = None
+    try:
+        rb_rows = registry._db.execute(
+            "SELECT data_value, created_at FROM invest.pipeline_data_cache "
+            "WHERE ticker = %s AND data_key = 'research_briefing' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (ticker,),
+        )
+        if rb_rows and rb_rows[0].get("data_value"):
+            dv = rb_rows[0]["data_value"]
+            research_briefing = {
+                "content": dv.get("briefing") or "",
+                "sourceCount": dv.get("raw_sources", 0),
+                "createdAt": str(rb_rows[0]["created_at"]) if rb_rows[0].get("created_at") else None,
+            }
+    except Exception:
+        logger.debug("Could not fetch research briefing for %s", ticker)
+
     # Synthesized briefing — plain English, position-aware
     briefing = _build_briefing(
         ticker, stock_name, verdict_data, position_data, positions,
@@ -500,6 +534,7 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         "stabilityLabel": stab_label,
         "consensusTier": cons_tier,
         "targetPriceRange": target_price_range,
+        "researchBriefing": research_briefing,
     }
 
 

@@ -48,10 +48,19 @@ def get_briefing_summary(registry: Registry = Depends(get_registry)) -> dict:
     builder = BriefingBuilder(registry)
     briefing = builder.build()
 
+    components = briefing.market_overview.pendulum.get("components", {})
     return {
         "date": briefing.date,
         "pendulumScore": briefing.market_overview.pendulum.get("score"),
         "pendulumLabel": briefing.market_overview.pendulum.get("label"),
+        "pendulumComponents": {
+            "vix": components.get("vix"),
+            "creditSpread": components.get("hy_oas"),
+            "putCall": components.get("put_call"),
+            "momentum": components.get("momentum"),
+        } if components else None,
+        "sizingMultiplier": briefing.market_overview.pendulum.get("sizing_multiplier"),
+        "macroSignals": briefing.market_overview.macro_signals,
         "positionCount": briefing.portfolio_snapshot.position_count,
         "totalValue": round(briefing.portfolio_snapshot.total_value, 2),
         "totalUnrealizedPnl": round(briefing.portfolio_snapshot.total_unrealized_pnl, 2),
