@@ -20,8 +20,8 @@ import type { Position, Alert, ClosedPosition } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
-  ChevronDown, ChevronUp, Zap, AlertTriangle, BarChart3,
-  ShieldAlert, ArrowUpRight, ArrowDownRight, Sparkles, PieChart,
+  ChevronDown, ChevronUp, AlertTriangle, BarChart3,
+  ShieldAlert, Sparkles, PieChart,
 } from "lucide-react";
 
 function formatCurrency(n: number): string {
@@ -517,165 +517,6 @@ function DividendCard({ position: p }: { position: any }) {
   );
 }
 
-/* ── Action Item Row with expandable reasoning ── */
-function ActionItemRow({ action: a, index: i, color, bgColor, Icon, label, setOverlayTicker }: {
-  action: { ticker: string; action: string; category: string };
-  index: number; color: string; bgColor: string;
-  Icon: React.ComponentType<{ size: number; color: string }>;
-  label: string;
-  setOverlayTicker: (t: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [reasoning, setReasoning] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const fetchReasoning = () => {
-    if (reasoning !== null || loading) return;
-    setLoading(true);
-    fetch(`/api/invest/stock/${a.ticker}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data) {
-          const verdict = data.verdict;
-          const reason = verdict?.reasoning || verdict?.summary || verdict?.thesis || data.briefing?.summary || a.action;
-          setReasoning(reason);
-        } else {
-          setReasoning(a.action);
-        }
-      })
-      .catch(() => setReasoning(a.action))
-      .finally(() => setLoading(false));
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -12 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: 0.15 + i * 0.06 }}
-      style={{ borderRadius: "var(--radius-md)", overflow: "hidden" }}
-    >
-      {/* Main row */}
-      <div
-        onClick={() => { setExpanded((v) => !v); fetchReasoning(); }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-sm)",
-          padding: "10px var(--space-md)",
-          background: bgColor,
-          cursor: "pointer",
-          borderRadius: expanded ? "var(--radius-md) var(--radius-md) 0 0" : "var(--radius-md)",
-          transition: "border-radius 0.15s ease",
-        }}
-      >
-        {/* Left accent bar */}
-        <div style={{
-          width: 3, height: 28, borderRadius: 2,
-          background: color, flexShrink: 0, opacity: 0.8,
-        }} />
-
-        {/* Icon */}
-        <div style={{
-          width: 28, height: 28, borderRadius: "var(--radius-sm)",
-          background: "rgba(0,0,0,0.15)", display: "flex",
-          alignItems: "center", justifyContent: "center", flexShrink: 0,
-        }}>
-          <Icon size={14} color={color} />
-        </div>
-
-        {/* Ticker + label */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{
-              fontWeight: 800, fontSize: "var(--text-sm)",
-              fontFamily: "var(--font-mono)", color: "var(--color-text)",
-            }}>
-              {a.ticker}
-            </span>
-            <span style={{
-              fontSize: 9, fontWeight: 700,
-              color, textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}>
-              {label}
-            </span>
-          </div>
-          <div style={{
-            fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
-            lineHeight: 1.3, marginTop: 1,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          }}>
-            {a.action}
-          </div>
-        </div>
-
-        {/* Expand chevron */}
-        <div style={{
-          width: 22, height: 22, borderRadius: "var(--radius-full)",
-          background: "rgba(255,255,255,0.05)", display: "flex",
-          alignItems: "center", justifyContent: "center", flexShrink: 0,
-          transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-          transition: "transform 0.2s ease",
-        }}>
-          <ChevronDown size={12} color="var(--color-text-muted)" />
-        </div>
-      </div>
-
-      {/* Expanded reasoning panel */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            style={{ overflow: "hidden" }}
-          >
-            <div style={{
-              padding: "var(--space-md)",
-              background: "var(--color-surface-1)",
-              borderTop: `1px solid rgba(255,255,255,0.04)`,
-              borderRadius: "0 0 var(--radius-md) var(--radius-md)",
-            }}>
-              {loading ? (
-                <div className="skeleton" style={{ height: 40, borderRadius: "var(--radius-sm)" }} />
-              ) : (
-                <div style={{
-                  fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
-                  lineHeight: 1.6,
-                }}>
-                  {reasoning || a.action}
-                </div>
-              )}
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={(e) => { e.stopPropagation(); setOverlayTicker(a.ticker); }}
-                style={{
-                  marginTop: "var(--space-sm)",
-                  padding: "6px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: `1px solid ${color}`,
-                  background: "transparent",
-                  color,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: "var(--font-sans)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Deep Dive →
-              </motion.button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
 /* ── Closed Trade Card with "what could have been" ── */
 function ClosedTradeCard({ trade: cp }: { trade: ClosedPosition }) {
   const [expanded, setExpanded] = useState(false);
@@ -963,15 +804,6 @@ function ClosePositionModal({
   );
 }
 
-interface AdvisorCard {
-  type: string;
-  ticker: string;
-  title: string;
-  detail: string;
-  reasoning: string;
-  priority: string;
-}
-
 interface BriefingSummary {
   date: string;
   pendulumLabel: string;
@@ -1038,7 +870,6 @@ export function Portfolio() {
   const { startAnalysis, isRunning: analysisRunning } = useAnalysis();
   const [closeTarget, setCloseTarget] = useState<Position | null>(null);
   const [closeStatus, setCloseStatus] = useState<string | null>(null);
-  const [advisorCards, setAdvisorCards] = useState<AdvisorCard[]>([]);
   const [briefing, setBriefing] = useState<BriefingSummary | null>(null);
   const [_corrOpen, _setCorrOpen] = useState(false);
   const [posFilter, setPosFilter] = useState("all");
@@ -1049,14 +880,6 @@ export function Portfolio() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
   const [showFloatingBar, setShowFloatingBar] = useState(false);
-
-  useEffect(() => {
-    if (positions.length === 0) return;
-    fetch("/api/invest/portfolio/advisor")
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.actions) setAdvisorCards(data.actions); })
-      .catch(() => {});
-  }, [positions.length]);
 
   useEffect(() => {
     if (positions.length === 0) return;
@@ -1599,58 +1422,6 @@ export function Portfolio() {
               </div>
             </div>
 
-            {/* Action Items */}
-            {(() => {
-              // Merge advisor API actions + briefing topActions
-              const allActions = [
-                ...advisorCards.map((c) => ({ ticker: c.ticker, action: c.reasoning || c.detail || c.title, category: c.type.toLowerCase() })),
-                ...briefing.topActions.map((a) => ({ ticker: a.ticker, action: a.action, category: a.category })),
-              ];
-              const seen = new Set<string>();
-              const actions = allActions.filter((a) => { if (seen.has(a.ticker)) return false; seen.add(a.ticker); return true; });
-
-              if (actions.length === 0) return null;
-
-              return (
-                <div style={{ padding: "var(--space-md) var(--space-lg)", borderTop: "1px solid var(--glass-border)" }}>
-                  <div style={{
-                    fontSize: "var(--text-2xs)", color: "var(--color-text-secondary)", textTransform: "uppercase",
-                    letterSpacing: "0.08em", fontWeight: 700, marginBottom: "var(--space-sm)",
-                  }}>
-                    Action Items
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {actions.slice(0, 5).map((a, i) => {
-                      const isBuy = a.category === "buy" || a.category === "add_more" || a.category === "deploy_cash";
-                      const isSell = a.category === "sell" || a.category === "trim";
-                      const color = isBuy ? "var(--color-success)" : isSell ? "var(--color-error)" : "var(--color-accent-bright)";
-                      const bgColor = isBuy ? "rgba(52,211,153,0.10)" : isSell ? "rgba(248,113,113,0.10)" : "rgba(99,102,241,0.08)";
-                      const ActionIcon = isBuy ? ArrowUpRight : isSell ? ArrowDownRight : Zap;
-                      const label = isBuy ? "BUY" : isSell ? "SELL" : "ACTION";
-
-                      return <ActionItemRow key={a.ticker + i} action={a} index={i} color={color} bgColor={bgColor} Icon={ActionIcon} label={label} setOverlayTicker={setOverlayTicker} />;
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* New recs badge strip */}
-            {briefing.newRecommendationCount > 0 && (
-              <div style={{
-                padding: "8px var(--space-lg)",
-                borderTop: "1px solid var(--glass-border)",
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--space-sm)",
-                background: "rgba(99,102,241,0.04)",
-              }}>
-                <Sparkles size={12} color="var(--color-accent-bright)" />
-                <span style={{ fontSize: 10, color: "var(--color-accent-bright)", fontWeight: 600 }}>
-                  {briefing.newRecommendationCount} new recommendation{briefing.newRecommendationCount !== 1 ? "s" : ""} today
-                </span>
-              </div>
-            )}
           </motion.div>
         )}
 

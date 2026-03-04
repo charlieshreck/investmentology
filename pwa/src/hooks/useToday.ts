@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Recommendation } from "../types/models";
 
 // --- Daily Briefing Summary ---
 
@@ -226,4 +227,40 @@ export function useAttribution() {
   }, []);
 
   return { data, loading, error };
+}
+
+// --- Top Recommendations (for Today page) ---
+
+const POSITIVE_VERDICTS = new Set(["STRONG_BUY", "BUY", "ACCUMULATE"]);
+
+export function useTopRecommendations(limit = 3) {
+  const [items, setItems] = useState<Recommendation[]>([]);
+  const [totalNew, setTotalNew] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/invest/recommendations");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const all: Recommendation[] = data.items ?? [];
+        const positive = all.filter((r) => POSITIVE_VERDICTS.has(r.verdict));
+        positive.sort((a, b) => (b.successProbability ?? 0) - (a.successProbability ?? 0));
+        if (!cancelled) {
+          setItems(positive.slice(0, limit));
+          setTotalNew(positive.length);
+        }
+      } catch {
+        // silent — Today page still works without recs
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [limit]);
+
+  return { items, totalNew, loading };
 }
