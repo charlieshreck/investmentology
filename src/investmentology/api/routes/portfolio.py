@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from investmentology.api.deps import get_registry
 from investmentology.api.services.portfolio_service import PortfolioService
 from investmentology.registry.queries import Registry
+from investmentology.timing.sizing import PositionSizer, SizingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,31 @@ def create_position(
         logger.info("Created position + deducted $%.2f for %s (atomic)", float(purchase_cost), ticker)
         result = {"id": position_id, "ticker": ticker, "status": "created"}
 
+    # Advisory sizing suggestion (non-blocking)
+    try:
+        budget_rows = registry._db.execute(
+            "SELECT cash_reserve FROM invest.portfolio_budget LIMIT 1"
+        )
+        cash = float(budget_rows[0]["cash_reserve"]) if budget_rows else 0.0
+        pv = total_portfolio_value + cash
+        if pv > 0:
+            sizer = PositionSizer(SizingConfig())
+            suggestion = sizer.calculate_size(
+                portfolio_value=Decimal(str(pv)),
+                price=new_price,
+                current_position_count=len(existing),
+                ticker=ticker,
+            )
+            result["sizingSuggestion"] = {
+                "suggestedShares": suggestion.shares,
+                "suggestedDollarAmount": float(suggestion.dollar_amount),
+                "suggestedWeightPct": float(suggestion.weight_pct),
+                "method": suggestion.sizing_method,
+                "rationale": suggestion.rationale,
+            }
+    except Exception:
+        logger.debug("Sizing suggestion failed for %s", ticker)
+
     return result
 
 
@@ -200,6 +226,56 @@ def close_position(
     logger.info("Closed %s + credited $%.2f proceeds (atomic)", position.ticker, float(proceeds))
 
     return {"id": position_id, "status": "closed", "exit_price": body.exit_price, "proceeds": float(proceeds)}
+
+
+@router.get("/portfolio/sizing/{ticker}")
+def get_sizing_suggestion(
+    ticker: str,
+    price: float | None = None,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Pre-trade sizing suggestion for a ticker."""
+    ticker = ticker.upper()
+    positions = registry.get_open_positions()
+    budget_rows = registry._db.execute(
+        "SELECT cash_reserve FROM invest.portfolio_budget LIMIT 1"
+    )
+    cash = float(budget_rows[0]["cash_reserve"]) if budget_rows else 0.0
+    portfolio_value = sum(float(p.current_price * p.shares) for p in positions) + cash
+
+    if portfolio_value <= 0:
+        raise HTTPException(status_code=400, detail="Portfolio value must be positive")
+
+    # Use provided price or try to fetch current price
+    if price is None:
+        try:
+            import yfinance as yf
+            info = yf.Ticker(ticker).fast_info
+            price = float(info.get("lastPrice", 0) or info.get("last_price", 0))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Price required (could not fetch)")
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="Price must be positive")
+
+    sizer = PositionSizer(SizingConfig())
+    suggestion = sizer.calculate_size(
+        portfolio_value=Decimal(str(portfolio_value)),
+        price=Decimal(str(price)),
+        current_position_count=len(positions),
+        ticker=ticker,
+    )
+    return {
+        "ticker": ticker,
+        "price": price,
+        "portfolioValue": round(portfolio_value, 2),
+        "cashAvailable": round(cash, 2),
+        "positionCount": len(positions),
+        "suggestedShares": suggestion.shares,
+        "suggestedDollarAmount": float(suggestion.dollar_amount),
+        "suggestedWeightPct": float(suggestion.weight_pct),
+        "method": suggestion.sizing_method,
+        "rationale": suggestion.rationale,
+    }
 
 
 @router.get("/portfolio/closed")

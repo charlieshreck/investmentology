@@ -1326,6 +1326,26 @@ class PortfolioService:
         max_dd = engine.get_max_drawdown(days=252)
         history = engine.get_history(days=90)
 
+        # VaR computation (may be slow — yfinance fetch)
+        var_data = None
+        try:
+            from investmentology.risk.var import VaREngine
+
+            var_result = VaREngine().compute_var(
+                positions, float(snapshot.total_value)
+            )
+            if var_result:
+                var_data = {
+                    "var95": var_result.var_95,
+                    "var99": var_result.var_99,
+                    "cvar95": var_result.cvar_95,
+                    "dollarVar95": var_result.dollar_var_95,
+                    "horizonDays": var_result.horizon_days,
+                    "observationCount": var_result.observation_count,
+                }
+        except Exception:
+            logger.warning("VaR computation skipped", exc_info=True)
+
         return {
             "drawdownPct": round(float(snapshot.drawdown_pct), 2),
             "highWaterMark": round(float(snapshot.high_water_mark), 2),
@@ -1335,5 +1355,6 @@ class PortfolioService:
             "sectorConcentration": snapshot.sector_concentration,
             "topPositionWeight": round(float(snapshot.top_position_weight), 1),
             "maxDrawdown252d": round(float(max_dd), 2),
+            "var": var_data,
             "history": history,
         }
