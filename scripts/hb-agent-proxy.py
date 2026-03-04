@@ -28,6 +28,10 @@ PROXY_TOKEN = os.environ.get("HB_PROXY_TOKEN", "")
 if not PROXY_TOKEN:
     raise RuntimeError("HB_PROXY_TOKEN env var is required")
 
+MAX_CONCURRENT_AGENTS = int(os.environ.get("MAX_CONCURRENT_AGENTS", "4"))
+_agent_semaphore: asyncio.Semaphore | None = None
+_active_agents = 0
+
 AGENT_CONFIG = {
     # Claude CLI screen agents
     "warren":       {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
@@ -92,9 +96,21 @@ def _parse_gemini_output(output: str, model: str) -> tuple[str, dict]:
         return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
+@app.on_event("startup")
+async def _init_semaphore():
+    global _agent_semaphore
+    _agent_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENTS)
+    logger.info("Agent concurrency limit: %d", MAX_CONCURRENT_AGENTS)
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agents": list(AGENT_CONFIG.keys())}
+    return {
+        "status": "ok",
+        "agents": list(AGENT_CONFIG.keys()),
+        "max_concurrent": MAX_CONCURRENT_AGENTS,
+        "active_agents": _active_agents,
+    }
 
 
 @app.post("/agent/{agent_name}", response_model=AgentResponse)
@@ -115,25 +131,31 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
     else:
         raise HTTPException(status_code=500, detail=f"Bad CLI config: {cfg['cli']}")
 
-    logger.info("Running %s via %s CLI", agent_name, cfg["cli"])
+    global _active_agents
+    logger.info("Running %s via %s CLI (active: %d/%d)", agent_name, cfg["cli"], _active_agents, MAX_CONCURRENT_AGENTS)
     start = time.monotonic()
 
-    # Safe: create_subprocess_exec uses execvp (no shell), combined_prompt
-    # is a single argument — no injection risk
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    assert _agent_semaphore is not None
+    async with _agent_semaphore:
+        _active_agents += 1
+        try:
+            # Safe: uses execvp (no shell), combined_prompt is a single arg
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=cfg["timeout"]
-        )
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise HTTPException(status_code=504, detail=f"{agent_name} timed out after {cfg['timeout']}s")
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=cfg["timeout"]
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise HTTPException(status_code=504, detail=f"{agent_name} timed out after {cfg['timeout']}s")
+        finally:
+            _active_agents -= 1
 
     latency_ms = int((time.monotonic() - start) * 1000)
     logger.info("%s completed in %dms (exit=%d)", agent_name, latency_ms, proc.returncode)
