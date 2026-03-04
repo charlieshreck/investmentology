@@ -14,6 +14,7 @@ import { useStore } from "./stores/useStore";
 import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
 import { CommandPalette } from "./components/shared/CommandPalette";
 import { AnalysisProvider } from "./contexts/AnalysisContext";
+import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
 import { queryClient } from "./utils/apiClient";
 import "./stores/useThemeStore"; // Initialize theme on load
 
@@ -92,14 +93,22 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppErrorBoundary>
-        <BrowserRouter>
-          <AnalysisProvider>
-            <AppShell offline={offline} />
-          </AnalysisProvider>
-        </BrowserRouter>
+        <OnboardingGate>
+          <BrowserRouter>
+            <AnalysisProvider>
+              <AppShell offline={offline} />
+            </AnalysisProvider>
+          </BrowserRouter>
+        </OnboardingGate>
       </AppErrorBoundary>
     </QueryClientProvider>
   );
+}
+
+function OnboardingGate({ children }: { children: React.ReactNode }) {
+  const hasSeenOnboarding = useStore((s) => s.hasSeenOnboarding);
+  if (!hasSeenOnboarding) return <OnboardingFlow />;
+  return <>{children}</>;
 }
 
 function AppShell({ offline }: { offline: boolean }) {

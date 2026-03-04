@@ -84,11 +84,13 @@ interface UiSlice {
   analysisProgress: AnalysisProgress | null;
   screenerProgress: ScreenerProgress | null;
   recentAnalyses: CompletedAnalysis[];
+  hasSeenOnboarding: boolean;
   setActiveView: (view: string) => void;
   setOverlayTicker: (ticker: string | null) => void;
   setAnalysisProgress: (progress: AnalysisProgress | null | ((prev: AnalysisProgress | null) => AnalysisProgress | null)) => void;
   setScreenerProgress: (progress: ScreenerProgress | null) => void;
   pushRecentAnalysis: (analysis: CompletedAnalysis) => void;
+  setHasSeenOnboarding: (seen: boolean) => void;
 }
 
 type AppState = PortfolioSlice & WatchlistSlice & QuantGateSlice & UiSlice;
@@ -148,7 +150,12 @@ export const useStore = create<AppState>()(persist((set) => ({
         ...state.recentAnalyses.filter((a) => a.ticker !== analysis.ticker),
       ].slice(0, 20),
     })),
+  hasSeenOnboarding: false,
+  setHasSeenOnboarding: (seen) => set({ hasSeenOnboarding: seen }),
 }), {
   name: "investmentology-store",
-  partialize: (state) => ({ recentAnalyses: state.recentAnalyses }),
+  partialize: (state) => ({
+    recentAnalyses: state.recentAnalyses,
+    hasSeenOnboarding: state.hasSeenOnboarding,
+  }),
 }));

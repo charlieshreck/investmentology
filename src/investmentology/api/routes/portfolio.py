@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from investmentology.api.deps import get_registry
@@ -356,3 +359,26 @@ def set_income_target(
         (Decimal(str(body.monthly_target)),),
     )
     return {"monthlyTarget": body.monthly_target, "status": "updated"}
+
+
+@router.get("/portfolio/export")
+def export_portfolio(registry: Registry = Depends(get_registry)):
+    """Export portfolio positions as CSV."""
+    data = PortfolioService(registry).get_portfolio()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Ticker", "Shares", "Avg Cost", "Current Price", "Market Value",
+                      "P&L", "P&L %", "Weight", "Type", "Entry Date"])
+    for p in data.get("positions", []):
+        writer.writerow([
+            p["ticker"], p["shares"], p["avgCost"], p.get("currentPrice", ""),
+            p.get("marketValue", ""), p.get("unrealizedPnl", ""),
+            p.get("unrealizedPnlPct", ""), p.get("weight", ""),
+            p.get("positionType", ""), p.get("entryDate", ""),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=portfolio.csv"},
+    )

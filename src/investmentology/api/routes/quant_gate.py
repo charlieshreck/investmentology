@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import threading
 
 from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse
 
 from investmentology.api.deps import app_state, get_registry
 from investmentology.registry.queries import Registry
@@ -185,3 +188,34 @@ def trigger_screener_run(background_tasks: BackgroundTasks) -> dict:
     thread = threading.Thread(target=_run_screener_background, daemon=True)
     thread.start()
     return {"status": "started", "message": "Screener run started"}
+
+
+@router.get("/quant-gate/export")
+def export_quant_gate(registry: Registry = Depends(get_registry)):
+    """Export latest quant gate results as CSV."""
+    rows = registry._db.execute("""
+        SELECT r.ticker, r.earnings_yield, r.roic, r.combined_rank,
+               r.piotroski_score, r.altman_z_score, r.altman_zone,
+               r.momentum_score, r.composite_score
+        FROM invest.quant_gate_results r
+        INNER JOIN (SELECT MAX(id) AS id FROM invest.quant_gate_runs) latest ON r.run_id = latest.id
+        ORDER BY r.composite_score DESC NULLS LAST
+    """)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Ticker", "Earnings Yield", "ROIC", "Combined Rank",
+                      "Piotroski", "Altman Z", "Altman Zone",
+                      "Momentum", "Composite Score"])
+    for r in rows:
+        writer.writerow([
+            r["ticker"], r.get("earnings_yield", ""), r.get("roic", ""),
+            r.get("combined_rank", ""), r.get("piotroski_score", ""),
+            r.get("altman_z_score", ""), r.get("altman_zone", ""),
+            r.get("momentum_score", ""), r.get("composite_score", ""),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=quant-gate.csv"},
+    )

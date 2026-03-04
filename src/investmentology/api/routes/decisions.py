@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from investmentology.api.deps import get_registry
 from investmentology.models.decision import DecisionType
@@ -74,3 +78,30 @@ def get_decisions(
         "page": page,
         "pageSize": pageSize,
     }
+
+
+@router.get("/decisions/export")
+def export_decisions(registry: Registry = Depends(get_registry)):
+    """Export all decisions as CSV."""
+    rows = registry._db.execute(
+        "SELECT ticker, decision_type, verdict, confidence, reasoning, "
+        "entry_price, target_price, stop_loss, created_at "
+        "FROM invest.decisions ORDER BY created_at DESC"
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Ticker", "Type", "Verdict", "Confidence", "Reasoning",
+                      "Entry Price", "Target Price", "Stop Loss", "Date"])
+    for r in rows:
+        writer.writerow([
+            r["ticker"], r["decision_type"], r.get("verdict", ""),
+            r.get("confidence", ""), r.get("reasoning", "")[:200],
+            r.get("entry_price", ""), r.get("target_price", ""),
+            r.get("stop_loss", ""), str(r["created_at"]),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=decisions.csv"},
+    )
