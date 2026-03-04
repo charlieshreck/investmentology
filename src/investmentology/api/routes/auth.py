@@ -58,9 +58,10 @@ def logout(response: Response) -> dict:
 def check_auth(session: str | None = Cookie(None)) -> dict:
     """Check whether the caller has a valid session cookie."""
     config = app_state.config
-    if not config or not config.auth_secret_key:
-        # Auth not configured — treat as authenticated (dev mode)
+    if config and config.auth_disabled:
         return {"authenticated": True}
+    if not config or not config.auth_secret_key:
+        return {"authenticated": False}
 
     if not session or not verify_token(session, config.auth_secret_key):
         return {"authenticated": False}

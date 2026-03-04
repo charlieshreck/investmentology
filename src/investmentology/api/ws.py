@@ -55,7 +55,12 @@ async def ws_prices(websocket: WebSocket):
     """Push live price updates for portfolio tickers every 15 seconds."""
     # Validate JWT from query param or cookie before accepting
     config = app_state.config
-    if config and config.auth_secret_key:
+    if config and config.auth_disabled:
+        pass  # Auth explicitly disabled (dev mode)
+    elif not config or not config.auth_secret_key:
+        await websocket.close(code=4003, reason="Authentication not configured")
+        return
+    else:
         token = websocket.query_params.get("token") or websocket.cookies.get("session")
         if not token or not verify_token(token, config.auth_secret_key):
             await websocket.close(code=4001, reason="Not authenticated")

@@ -12,9 +12,9 @@ FROM python:3.13-slim
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m app
 WORKDIR /app
 
-COPY pyproject.toml .
+COPY requirements.lock pyproject.toml ./
 COPY src/ src/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -r requirements.lock && pip install --no-cache-dir --no-deps .
 COPY src/investmentology/registry/migrations/ migrations/
 COPY serve.py .
 COPY --from=pwa-builder /pwa/dist pwa/dist/

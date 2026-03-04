@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -42,7 +42,7 @@ async def _daily_settlement_loop(registry):
             if settled:
                 logger.info("Daily settlement: settled %d predictions", len(settled))
         except Exception:
-            logger.debug("Daily settlement task failed")
+            logger.exception("Daily settlement task failed")
         await asyncio.sleep(86400)  # 24 hours
 
 
@@ -135,14 +135,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in PUBLIC_PATHS:
             return await call_next(request)
 
-        # Skip auth entirely if no secret key is configured (dev mode)
+        # Auth disabled explicitly via AUTH_DISABLED=true env var (dev mode only)
         config = app_state.config
-        if not config or not config.auth_secret_key:
+        if config and config.auth_disabled:
             return await call_next(request)
+
+        # If auth is enabled but secret key is missing, reject (fail closed)
+        if not config or not config.auth_secret_key:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Authentication not configured"},
+            )
 
         # Internal token bypass (for trusted proxies like Tamar)
         internal_token = request.headers.get("x-internal-token")
-        if internal_token and config.internal_api_token and internal_token == config.internal_api_token:
+        if internal_token and config.internal_api_token and hmac.compare_digest(internal_token, config.internal_api_token):
             return await call_next(request)
 
         # Validate session cookie
