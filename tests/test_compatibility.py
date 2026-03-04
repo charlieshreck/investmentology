@@ -57,12 +57,12 @@ class TestCategoryGroupings:
         assert duplicates == [], f"Duplicate categorizations: {duplicates}"
 
     def test_category_sizes(self):
-        assert len(FUNDAMENTAL_TAGS) == 19
-        assert len(MACRO_TAGS) == 21
-        assert len(TECHNICAL_TAGS) == 19
-        assert len(RISK_TAGS) == 14
-        assert len(SPECIAL_TAGS) == 11
-        assert len(ACTION_TAGS) == 18
+        assert len(FUNDAMENTAL_TAGS) == 24
+        assert len(MACRO_TAGS) == 30
+        assert len(TECHNICAL_TAGS) == 23
+        assert len(RISK_TAGS) == 19
+        assert len(SPECIAL_TAGS) == 17
+        assert len(ACTION_TAGS) == 28
 
     def test_total_tag_count(self):
         total = sum(len(tags) for tags in CATEGORY_MAP.values())

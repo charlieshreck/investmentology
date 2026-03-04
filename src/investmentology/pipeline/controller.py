@@ -1406,8 +1406,7 @@ class PipelineController:
         similar_situations = None
         try:
             from investmentology.memory.semantic import (
-                COLLECTION_NAME, QDRANT_DIRECT_URL, SimilarSituation,
-                _build_embedding_text, _compute_embedding, _get_embed_model,
+                COLLECTION_NAME, QDRANT_DIRECT_URL, _build_embedding_text, _get_embed_model,
             )
             model = _get_embed_model()
             if model is not None:

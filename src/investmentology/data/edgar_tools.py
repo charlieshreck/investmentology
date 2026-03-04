@@ -15,7 +15,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-import httpx
 
 logger = logging.getLogger(__name__)
 

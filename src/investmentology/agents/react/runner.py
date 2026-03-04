@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse
 from investmentology.agents.gateway import LLMGateway
@@ -112,7 +111,7 @@ class ReActRunner(AgentRunner):
             parts.extend([
                 "",
                 "POSITION CONTEXT:",
-                f"  Currently held: YES",
+                "  Currently held: YES",
             ])
             if pc.get("avg_cost"):
                 parts.append(f"  Avg cost: ${pc['avg_cost']:.2f}")

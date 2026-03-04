@@ -102,6 +102,7 @@ def mock_gateway() -> MagicMock:
     ))
     # Agent constructors check these dicts to resolve their provider
     gw._cli_providers = {}
+    gw._remote_cli_providers = {}
     gw._providers = {
         "deepseek": ProviderConfig(name="deepseek", base_url="http://test", api_key="test", default_model="deepseek-reasoner"),
         "groq": ProviderConfig(name="groq", base_url="http://test", api_key="test", default_model="llama-3.3-70b-versatile"),
@@ -230,6 +231,15 @@ class TestAnalyzeSingle:
         mock_registry: MagicMock,
         mock_decision_logger: MagicMock,
     ) -> None:
+        # Replace agents with mocks
+        mock_agents = []
+        for name in ["warren", "soros", "simons", "auditor"]:
+            agent = MagicMock()
+            agent.name = name
+            agent.analyze = AsyncMock(return_value=_make_response(name))
+            mock_agents.append(agent)
+        orchestrator._agents = mock_agents
+
         # Competence fail should NOT stop the pipeline — agents still run
         with patch.object(
             orchestrator._competence, "assess",
@@ -243,18 +253,6 @@ class TestAnalyzeSingle:
                 moat_type="none", sources=[], trajectory="stable",
                 durability_years=0, confidence=Decimal("0.3"), reasoning="n/a",
             )),
-        ), patch.object(
-            orchestrator._warren, "analyze",
-            new=AsyncMock(return_value=_make_response("warren")),
-        ), patch.object(
-            orchestrator._soros, "analyze",
-            new=AsyncMock(return_value=_make_response("soros")),
-        ), patch.object(
-            orchestrator._simons, "analyze",
-            new=AsyncMock(return_value=_make_response("simons")),
-        ), patch.object(
-            orchestrator._auditor, "analyze",
-            new=AsyncMock(return_value=_make_response("auditor")),
         ):
             result = asyncio.run(orchestrator._analyze_single("AAPL", None, None, None))
 
@@ -275,6 +273,15 @@ class TestAnalyzeSingle:
         mock_registry: MagicMock,
         mock_decision_logger: MagicMock,
     ) -> None:
+        # Replace agents with mocks
+        mock_agents = []
+        for name in ["warren", "soros", "simons", "auditor"]:
+            agent = MagicMock()
+            agent.name = name
+            agent.analyze = AsyncMock(return_value=_make_response(name))
+            mock_agents.append(agent)
+        orchestrator._agents = mock_agents
+
         # Mock competence to pass
         with patch.object(
             orchestrator._competence, "assess",
@@ -289,18 +296,6 @@ class TestAnalyzeSingle:
                 trajectory="widening", durability_years=15,
                 confidence=Decimal("0.8"), reasoning="Strong moat",
             )),
-        ), patch.object(
-            orchestrator._warren, "analyze",
-            new=AsyncMock(return_value=_make_response("warren")),
-        ), patch.object(
-            orchestrator._soros, "analyze",
-            new=AsyncMock(return_value=_make_response("soros")),
-        ), patch.object(
-            orchestrator._simons, "analyze",
-            new=AsyncMock(return_value=_make_response("simons")),
-        ), patch.object(
-            orchestrator._auditor, "analyze",
-            new=AsyncMock(return_value=_make_response("auditor")),
         ):
             result = asyncio.run(orchestrator._analyze_single("AAPL", None, None, None))
 
@@ -319,6 +314,15 @@ class TestAnalyzeCandidates:
         orchestrator: AnalysisOrchestrator,
         mock_registry: MagicMock,
     ) -> None:
+        # Replace agents with mocks
+        mock_agents = []
+        for name in ["warren", "soros", "simons", "auditor"]:
+            agent = MagicMock()
+            agent.name = name
+            agent.analyze = AsyncMock(return_value=_make_response(name))
+            mock_agents.append(agent)
+        orchestrator._agents = mock_agents
+
         # Batch loop with competence fail — agents still run
         with patch.object(
             orchestrator._competence, "assess",
@@ -332,18 +336,6 @@ class TestAnalyzeCandidates:
                 moat_type="none", sources=[], trajectory="stable",
                 durability_years=0, confidence=Decimal("0.3"), reasoning="n/a",
             )),
-        ), patch.object(
-            orchestrator._warren, "analyze",
-            new=AsyncMock(return_value=_make_response("warren")),
-        ), patch.object(
-            orchestrator._soros, "analyze",
-            new=AsyncMock(return_value=_make_response("soros")),
-        ), patch.object(
-            orchestrator._simons, "analyze",
-            new=AsyncMock(return_value=_make_response("simons")),
-        ), patch.object(
-            orchestrator._auditor, "analyze",
-            new=AsyncMock(return_value=_make_response("auditor")),
         ):
             result = asyncio.run(
                 orchestrator.analyze_candidates(["AAPL", "MSFT"])
@@ -360,6 +352,25 @@ class TestAnalyzeCandidates:
         orchestrator: AnalysisOrchestrator,
         mock_registry: MagicMock,
     ) -> None:
+        # 2 agents succeed, 2 fail
+        warren_mock = MagicMock()
+        warren_mock.name = "warren"
+        warren_mock.analyze = AsyncMock(side_effect=RuntimeError("LLM timeout"))
+
+        soros_mock = MagicMock()
+        soros_mock.name = "soros"
+        soros_mock.analyze = AsyncMock(return_value=_make_response("soros"))
+
+        simons_mock = MagicMock()
+        simons_mock.name = "simons"
+        simons_mock.analyze = AsyncMock(side_effect=RuntimeError("Rate limited"))
+
+        auditor_mock = MagicMock()
+        auditor_mock.name = "auditor"
+        auditor_mock.analyze = AsyncMock(return_value=_make_response("auditor"))
+
+        orchestrator._agents = [warren_mock, soros_mock, simons_mock, auditor_mock]
+
         with patch.object(
             orchestrator._competence, "assess",
             new=AsyncMock(return_value=CompetenceResult(
@@ -373,18 +384,6 @@ class TestAnalyzeCandidates:
                 trajectory="stable", durability_years=10,
                 confidence=Decimal("0.7"), reasoning="ok",
             )),
-        ), patch.object(
-            orchestrator._warren, "analyze",
-            new=AsyncMock(side_effect=RuntimeError("LLM timeout")),
-        ), patch.object(
-            orchestrator._soros, "analyze",
-            new=AsyncMock(return_value=_make_response("soros")),
-        ), patch.object(
-            orchestrator._simons, "analyze",
-            new=AsyncMock(side_effect=RuntimeError("Rate limited")),
-        ), patch.object(
-            orchestrator._auditor, "analyze",
-            new=AsyncMock(return_value=_make_response("auditor")),
         ):
             result = asyncio.run(
                 orchestrator.analyze_candidates(["AAPL"])

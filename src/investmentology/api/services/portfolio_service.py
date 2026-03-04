@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from collections import OrderedDict
-from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from investmentology.advisory.performance import PerformanceCalculator

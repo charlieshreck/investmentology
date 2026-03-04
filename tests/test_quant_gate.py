@@ -501,7 +501,7 @@ class TestDictToSnapshot:
             "ticker": "TEST",
             "fetched_at": NOW.isoformat(),
             "operating_income": None,
-            "market_cap": None,
+            "market_cap": Decimal("1000000"),  # critical field — must be present
             "total_debt": None,
             "cash": None,
             "current_assets": None,
@@ -509,7 +509,7 @@ class TestDictToSnapshot:
             "net_tangible_assets": None,
             "revenue": None,
             "net_income": None,
-            "total_assets": None,
+            "total_assets": Decimal("500000"),  # critical field — must be present
             "total_liabilities": None,
             "shares_outstanding": None,
             "price": None,
@@ -518,6 +518,16 @@ class TestDictToSnapshot:
         assert snap is not None
         assert snap.operating_income == Decimal(0)
         assert snap.shares_outstanding == 0
+
+    def test_none_critical_fields_return_none(self) -> None:
+        d = {
+            "ticker": "TEST",
+            "fetched_at": NOW.isoformat(),
+            "market_cap": None,
+            "total_assets": None,
+        }
+        snap = _dict_to_snapshot(d)
+        assert snap is None
 
 
 class TestDictToStock:

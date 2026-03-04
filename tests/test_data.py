@@ -103,19 +103,26 @@ class TestCircuitBreaker:
 
 class TestYFinanceClient:
     def _make_info(self, **overrides: object) -> dict:
-        """Create a mock yfinance info dict."""
+        """Create a mock yfinance info dict.
+
+        Field mapping matches the current yfinance_client extraction:
+        - operating_income derives from operatingMargins * totalRevenue
+        - net_income derives from netIncomeToCommon
+        - total_assets derives from netIncomeToCommon / returnOnAssets
+        - current_liabilities derives from totalDebt * 0.3
+        - current_assets derives from currentRatio * current_liabilities
+        """
         base = {
             "quoteType": "EQUITY",
-            "operatingIncome": 1000000,
             "marketCap": 50000000000,
             "totalDebt": 10000000000,
             "totalCash": 5000000000,
-            "currentAssets": 20000000000,
-            "currentLiabilities": 15000000000,
-            "netTangibleAssets": 25000000000,
             "totalRevenue": 80000000000,
-            "netIncome": 5000000000,
-            "totalAssets": 100000000000,
+            "netIncomeToCommon": 5000000000,
+            "operatingMargins": 0.125,  # 0.125 * 80B = 10B operating income
+            "returnOnAssets": 0.05,  # 5B / 0.05 = 100B total assets
+            "currentRatio": 1.5,  # current_assets = 1.5 * current_liabilities
+            "bookValue": 25.0,  # 25 * 1B shares = 25B net tangible
             "sharesOutstanding": 1000000000,
             "currentPrice": 50.0,
             "sector": "Technology",
@@ -129,6 +136,8 @@ class TestYFinanceClient:
     def test_get_fundamentals_success(self, mock_ticker_cls: MagicMock) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = self._make_info()
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
@@ -146,6 +155,8 @@ class TestYFinanceClient:
     ) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = {}
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
@@ -166,13 +177,18 @@ class TestYFinanceClient:
     def test_cache_hit(self, mock_ticker_cls: MagicMock) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = self._make_info()
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
         result1 = client.get_fundamentals("AAPL")
         result2 = client.get_fundamentals("AAPL")
 
-        assert result1 == result2
+        assert result1 is not None
+        assert result2 is not None
+        # Both should return the same cached dict (same object)
+        assert result1 is result2
         # yf.Ticker should only be called once due to cache
         assert mock_ticker_cls.call_count == 1
 
@@ -180,13 +196,17 @@ class TestYFinanceClient:
     def test_cache_miss_after_clear(self, mock_ticker_cls: MagicMock) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = self._make_info()
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
-        client.get_fundamentals("AAPL")
+        r1 = client.get_fundamentals("AAPL")
         client.clear_cache()
-        client.get_fundamentals("AAPL")
+        r2 = client.get_fundamentals("AAPL")
 
+        assert r1 is not None and r2 is not None
+        # After clear, a fresh fetch should happen — 2 calls total
         assert mock_ticker_cls.call_count == 2
 
     @patch("investmentology.data.yfinance_client.yf.Ticker")
@@ -195,6 +215,8 @@ class TestYFinanceClient:
     ) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = {}  # triggers failure
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
@@ -219,6 +241,8 @@ class TestYFinanceClient:
     def test_get_fundamentals_batch(self, mock_ticker_cls: MagicMock) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = self._make_info()
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
@@ -229,6 +253,8 @@ class TestYFinanceClient:
     def test_get_price(self, mock_ticker_cls: MagicMock) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = {"currentPrice": 150.25}
+        mock_ticker.balance_sheet = pd.DataFrame()
+        mock_ticker.cashflow = pd.DataFrame()
         mock_ticker_cls.return_value = mock_ticker
 
         client = YFinanceClient()
@@ -268,13 +294,14 @@ class TestValidation:
         base = {
             "ticker": "TEST",
             "fetched_at": datetime.now(UTC).isoformat(),
-            "market_cap": Decimal("50000000000"),
+            "market_cap": Decimal("150000000000"),  # 150B = 1B shares * $150
             "operating_income": Decimal("10000000000"),
             "price": Decimal("150.0"),
             "shares_outstanding": Decimal("1000000000"),
             "revenue": Decimal("80000000000"),
             "total_debt": Decimal("20000000000"),
             "total_assets": Decimal("100000000000"),
+            "net_income": Decimal("8000000000"),
         }
         base.update(overrides)
         return base

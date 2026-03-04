@@ -68,7 +68,7 @@ async def detect_biases_llm(
         )
 
         # Parse JSON response
-        text = response.strip()
+        text = response.content.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
         items = json.loads(text)

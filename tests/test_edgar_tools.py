@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 
@@ -54,13 +54,13 @@ class TestEdgarToolsProvider:
     def test_cache_hit(self):
         provider = EdgarToolsProvider()
         cached = {"risk_factors": "test risk", "mda": "test mda", "filing_date": "2024-01-01", "filing_type": "10-K"}
-        provider._cache["filing:AAPL:10-K"] = (datetime.now(), cached)
+        provider._cache["filing:AAPL:10-K"] = (datetime.now(timezone.utc), cached)
         result = provider.get_filing_text("AAPL")
         assert result == cached
 
     def test_cache_expired(self):
         provider = EdgarToolsProvider()
-        old_time = datetime.now() - timedelta(hours=25)
+        old_time = datetime.now(timezone.utc) - timedelta(hours=25)
         provider._cache["filing:AAPL:10-K"] = (old_time, {"old": True})
         assert provider._get_cached("filing:AAPL:10-K") is None
 
@@ -115,7 +115,7 @@ class TestEdgarToolsProvider:
     def test_holders_cache_hit(self):
         provider = EdgarToolsProvider()
         holders = [{"name": "Vanguard", "shares": 1000000, "value": 5000000}]
-        provider._cache["holders:AAPL"] = (datetime.now(), holders)
+        provider._cache["holders:AAPL"] = (datetime.now(timezone.utc), holders)
         result = provider.get_institutional_holders("AAPL")
         assert result == holders
 
@@ -135,19 +135,16 @@ class TestEdgarToolsProvider:
 
     def test_get_institutional_holders_exception(self):
         provider = EdgarToolsProvider()
-        mock_edgar = MagicMock()
-        mock_edgar.Company.side_effect = Exception("Boom")
-
-        with patch.dict("sys.modules", {"edgar": mock_edgar}):
-            provider._identity_set = True
-            result = provider.get_institutional_holders("AAPL")
+        # get_institutional_holders uses yfinance, not edgar
+        with patch("yfinance.Ticker", side_effect=Exception("Boom")):
+            result = provider.get_institutional_holders("FAIL")
 
         assert result is None
 
     def test_insider_cache_hit(self):
         provider = EdgarToolsProvider()
         insider = {"total_filings": 5, "recent_count": 5, "recent_transactions": []}
-        provider._cache["insider:AAPL"] = (datetime.now(), insider)
+        provider._cache["insider:AAPL"] = (datetime.now(timezone.utc), insider)
         result = provider.get_insider_summary("AAPL")
         assert result == insider
 

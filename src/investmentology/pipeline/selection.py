@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 
 from investmentology.registry.db import Database
 
@@ -235,7 +234,6 @@ def _get_upcoming_earnings(
             "AND (data->>'earnings_date') IS NOT NULL",
             (tickers,),
         )
-        now = datetime.now().date()
         result = {}
         for r in rows:
             result[r["ticker"]] = True

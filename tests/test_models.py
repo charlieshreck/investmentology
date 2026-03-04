@@ -95,8 +95,7 @@ class TestFundamentalsSnapshot:
 
 class TestSignalTag:
     def test_signal_tag_count(self):
-        # 19 fundamental + 21 macro + 19 technical + 14 risk + 11 special + 18 decision = 102
-        assert len(SignalTag) == 102
+        assert len(SignalTag) == 141
 
     def test_signal_tag_values(self):
         assert SignalTag.UNDERVALUED == "UNDERVALUED"

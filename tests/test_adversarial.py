@@ -371,6 +371,7 @@ class TestMungerReview:
         })
 
         gw.call.side_effect = [
+            _mock_llm_response("[]"),           # LLM bias detection
             _mock_llm_response(kill_json),
             _mock_llm_response(premortem_json),
         ]
@@ -419,8 +420,8 @@ class TestMungerReview:
 
         assert isinstance(result, AdversarialResult)
         assert result.premortem is None
-        # Only 1 call (kill company), no premortem
-        assert gw.call.call_count == 1
+        # 2 calls: LLM bias detection + kill company (no premortem)
+        assert gw.call.call_count == 2
 
     @pytest.mark.asyncio
     async def test_review_veto_on_severe_findings(self):
@@ -436,6 +437,7 @@ class TestMungerReview:
         })
 
         gw.call.side_effect = [
+            _mock_llm_response("[]"),           # LLM bias detection
             _mock_llm_response(kill_json),
             _mock_llm_response(premortem_json),
         ]

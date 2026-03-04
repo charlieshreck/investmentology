@@ -211,7 +211,9 @@ class TestDataEnricher:
         request = _make_request()
         enricher.enrich(request)
 
-        assert request.macro_context == {"fed_funds_rate": 5.25}
+        # Macro context includes FRED data plus pendulum enrichment
+        assert request.macro_context is not None
+        assert request.macro_context["fed_funds_rate"] == 5.25
 
     def test_enrich_merges_existing_macro(self):
         mock_fred = MagicMock(spec=FredProvider)
@@ -281,8 +283,8 @@ class TestDataEnricher:
         request = _make_request()
         result = enricher.enrich(request)
 
-        # Should not crash, fields stay None
-        assert result.news_context is None
+        # Should not crash — news/insider set to empty list on failure
+        assert result.news_context == []
         assert result.earnings_context is None
 
 

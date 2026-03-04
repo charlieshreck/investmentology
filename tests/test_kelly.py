@@ -45,8 +45,8 @@ class TestKellyCalculator:
 
     def test_zero_loss_pct(self):
         kelly = KellyCalculator(win_rate=0.5, avg_win_pct=10.0, avg_loss_pct=0.0)
-        # Division by zero case
-        assert kelly.calculate() == 0.0
+        # No losses → full edge: (p*b - q*0) / b = p = 0.5
+        assert kelly.calculate() == 0.5
 
     def test_breakeven_edge(self):
         """50% win rate with equal win/loss → Kelly should be small or zero."""

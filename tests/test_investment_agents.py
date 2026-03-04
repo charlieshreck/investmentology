@@ -403,7 +403,7 @@ class TestSimonsRunner:
 
     def test_init(self, runner: AgentRunner) -> None:
         assert runner.name == "simons"
-        assert runner.model == "llama-3.3-70b-versatile"
+        assert runner.model == "deepseek-chat"
 
     def test_system_prompt_content(self, runner: AgentRunner) -> None:
         prompt = runner.build_system_prompt()
@@ -634,9 +634,9 @@ class TestProviderResolution:
         # remote-warren is registered, should be first choice
         assert runner._resolve_provider() == "remote-warren"
 
-    def test_simons_resolves_groq(self, mock_gateway: LLMGateway) -> None:
+    def test_simons_resolves_deepseek(self, mock_gateway: LLMGateway) -> None:
         runner = AgentRunner(SKILLS["simons"], mock_gateway)
-        assert runner._resolve_provider() == "groq"
+        assert runner._resolve_provider() == "deepseek"
 
     def test_lynch_resolves_deepseek(self, mock_gateway: LLMGateway) -> None:
         runner = AgentRunner(SKILLS["lynch"], mock_gateway)
