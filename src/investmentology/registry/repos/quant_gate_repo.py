@@ -25,8 +25,8 @@ class QuantGateRepo:
             INSERT INTO invest.quant_gate_results (
                 run_id, ticker, earnings_yield, roic, ey_rank, roic_rank,
                 combined_rank, piotroski_score, altman_z_score,
-                composite_score, altman_zone
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                composite_score, altman_zone, momentum_score
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         params = [
             (
@@ -34,6 +34,7 @@ class QuantGateRepo:
                 r.get("ey_rank"), r.get("roic_rank"), r.get("combined_rank"),
                 r.get("piotroski_score"), r.get("altman_z_score"),
                 r.get("composite_score"), r.get("altman_zone"),
+                r.get("momentum_score"),
             )
             for r in results
         ]

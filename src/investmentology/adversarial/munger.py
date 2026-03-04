@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from investmentology.adversarial.biases import BiasResult, check_biases_in_reasoning
+from investmentology.adversarial.llm_bias_detector import detect_biases_llm, merge_bias_flags
 from investmentology.adversarial.kill_company import (
     KillScenario,
     build_kill_company_prompt,
@@ -148,9 +149,11 @@ class MungerOrchestrator:
         3. Run Pre-Mortem if conviction is high
         4. Determine verdict: PROCEED / CAUTION / VETO
         """
-        # 1. Check biases across all agent reasoning
+        # 1. Check biases across all agent reasoning (keyword + LLM)
         combined_reasoning = " ".join(s.reasoning for s in agent_signals)
-        bias_flags = check_biases_in_reasoning(combined_reasoning, {})
+        keyword_flags = check_biases_in_reasoning(combined_reasoning, {})
+        llm_flags = await detect_biases_llm(self._gateway, agent_signals, ticker)
+        bias_flags = merge_bias_flags(keyword_flags, llm_flags)
 
         # 2. Kill the Company
         kill_prompt = build_kill_company_prompt(ticker, "Unknown", fundamentals_summary)

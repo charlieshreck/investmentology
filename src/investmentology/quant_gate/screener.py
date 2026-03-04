@@ -94,6 +94,45 @@ def _dict_to_stock(d: dict) -> Stock:
     )
 
 
+def _compute_momentum_scores(tickers: list[str]) -> dict[str, float]:
+    """Compute cross-sectional momentum scores for a batch of tickers.
+
+    Momentum = 12-month return minus 1-month return (Jegadeesh-Titman style).
+    Ranks tickers and normalizes to 0.0-1.0 (percentile).
+    """
+    if not tickers:
+        return {}
+    try:
+        import yfinance as yf
+        data = yf.download(tickers, period="1y", progress=False, threads=True)
+        if data.empty:
+            return {}
+
+        close = data["Close"]
+        momentum_raw: dict[str, float] = {}
+        for ticker in tickers:
+            col = ticker if len(tickers) > 1 else "Close"
+            if col not in close.columns:
+                continue
+            series = close[col].dropna()
+            if len(series) < 30:
+                continue
+            ret_12m = (series.iloc[-1] / series.iloc[0]) - 1
+            ret_1m = (series.iloc[-1] / series.iloc[-22]) - 1 if len(series) > 22 else 0
+            momentum_raw[ticker] = float(ret_12m - ret_1m)
+
+        if not momentum_raw:
+            return {}
+
+        # Cross-sectional rank → percentile (0.0 worst, 1.0 best)
+        sorted_tickers = sorted(momentum_raw, key=lambda t: momentum_raw[t])
+        n = len(sorted_tickers)
+        return {t: i / (n - 1) if n > 1 else 0.5 for i, t in enumerate(sorted_tickers)}
+    except Exception:
+        logger.warning("Momentum computation failed", exc_info=True)
+        return {}
+
+
 class QuantGateScreener:
     """Orchestrates the full Greenblatt Magic Formula screening pipeline."""
 
@@ -249,8 +288,14 @@ class QuantGateScreener:
 
         total_ranked = len(ranked)
 
-        # 6. Calculate Piotroski + Altman + Composite for top N
-        self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (Piotroski + Altman + Composite)...", 80)
+        # 5.5. Compute cross-sectional momentum for top-N
+        momentum_tickers = [gr.ticker for gr in top_ranked]
+        momentum_scores = _compute_momentum_scores(momentum_tickers)
+        if momentum_scores:
+            logger.info("Momentum scores computed for %d/%d tickers", len(momentum_scores), len(momentum_tickers))
+
+        # 6. Calculate Piotroski + Altman + Momentum + Composite for top N
+        self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (Piotroski + Altman + Momentum + Composite)...", 80)
         top_results: list[dict] = []
         for gr in top_ranked:
             snap = snap_by_ticker.get(gr.ticker)
@@ -260,6 +305,7 @@ class QuantGateScreener:
             prior_snap = prior_by_ticker.get(gr.ticker)
             piotroski = calculate_piotroski(snap, previous=prior_snap)
             altman = calculate_altman(snap)
+            mom = momentum_scores.get(gr.ticker)
 
             score = composite_score(
                 greenblatt_rank=gr.combined_rank,
@@ -267,6 +313,7 @@ class QuantGateScreener:
                 piotroski_score=piotroski.score,
                 has_prior_year=prior_snap is not None,
                 altman_zone=altman.zone if altman else None,
+                momentum_score=mom,
             )
 
             top_results.append({
@@ -279,6 +326,7 @@ class QuantGateScreener:
                 "piotroski_score": piotroski.score,
                 "altman_z_score": altman.z_score if altman else None,
                 "altman_zone": altman.zone if altman else None,
+                "momentum_score": mom,
                 "composite_score": score,
             })
 
