@@ -87,6 +87,7 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         "advisoryOpinions": row.get("advisory_opinions"),
         "boardNarrative": row.get("board_narrative"),
         "boardAdjustedVerdict": row.get("board_adjusted_verdict"),
+        "adversarialResult": row.get("adversarial_result"),
         "analysisDate": str(row["created_at"]) if row.get("created_at") else None,
         "successProbability": _success_probability(row),
         "changePct": round(change_pct, 2),

@@ -66,6 +66,34 @@ export const TERM_GLOSSARY: Record<string, string> = {
   "cost basis": "Average price you paid per share. Used to calculate profit/loss.",
   "unrealized p&l": "Profit or loss on positions you still hold — only 'real' when you sell.",
   "realized p&l": "Actual profit or loss from closed positions.",
+
+  // Performance metrics
+  "sharpe ratio": "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Shows return per unit of risk taken.",
+  "sortino ratio": "Like Sharpe but only penalises downside risk. Higher is better — ignores upside volatility.",
+  "alpha": "Return above what the market delivered. Positive alpha means beating the benchmark.",
+  "max drawdown": "Largest peak-to-trough portfolio drop. The worst loss you would have experienced.",
+  "win rate": "Percentage of trades that were profitable. Above 50% is decent, but size of wins matters more.",
+
+  // Valuation
+  "p/e ratio": "Price-to-earnings. How much you pay per $1 of profit. Lower is cheaper — compare within sector.",
+  "forward p/e": "P/E using next year's estimated earnings. Lower than trailing P/E suggests growth ahead.",
+  "price to book": "Stock price vs company's net assets. Below 1.0 means paying less than asset value.",
+  "price to sales": "Stock price relative to revenue. Useful for unprofitable growth companies.",
+  "enterprise value": "Total company value including debt minus cash. More accurate than market cap for comparisons.",
+
+  // Agent system
+  "consensus score": "Agreement among our AI analysts, from -1.0 (all bearish) to +1.0 (all bullish).",
+  "munger override": "Adversarial check (inspired by Charlie Munger) found critical flaws — recommendation downgraded.",
+  "auditor override": "Risk analyst flagged high-confidence concerns, capping the recommendation.",
+  "stability score": "How consistent the verdict has been across recent analyses. STABLE means no recent flips.",
+  "brier score": "Prediction accuracy metric. 0.0 is perfect, 0.25 is coin-flip. Lower is better.",
+
+  // Company fundamentals
+  "operating income": "Profit from core business operations, before interest and taxes.",
+  "net income": "Bottom-line profit after all expenses, taxes, and interest.",
+  revenue: "Total sales before any costs are subtracted. The 'top line' number.",
+  "free cash flow": "Cash left after running the business and investing. Available to shareholders.",
+  "payout ratio": "Percentage of earnings paid as dividends. Below 60% is sustainable, above 80% is risky.",
 };
 
 /** Look up a term in the glossary (case-insensitive). */

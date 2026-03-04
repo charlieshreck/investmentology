@@ -502,17 +502,19 @@ class Registry:
         advisory_opinions: list[dict] | None = None,
         board_narrative: dict | None = None,
         board_adjusted_verdict: str | None = None,
+        adversarial_result: dict | None = None,
     ) -> int:
         """Insert a computed verdict. Returns verdict id."""
-        # Try with advisory columns first; fall back if columns don't exist yet
-        if advisory_opinions is not None or board_narrative is not None:
+        # Try with all columns first; fall back if columns don't exist yet
+        if advisory_opinions is not None or board_narrative is not None or adversarial_result is not None:
             try:
                 rows = self._db.execute(
                     "INSERT INTO invest.verdicts "
                     "(ticker, verdict, confidence, consensus_score, reasoning, "
                     "agent_stances, risk_flags, auditor_override, munger_override, "
-                    "advisory_opinions, board_narrative, board_adjusted_verdict) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                    "advisory_opinions, board_narrative, board_adjusted_verdict, "
+                    "adversarial_result) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                     (
                         ticker, verdict, confidence, consensus_score, reasoning,
                         json.dumps(agent_stances), json.dumps(risk_flags),
@@ -520,6 +522,7 @@ class Registry:
                         json.dumps(advisory_opinions) if advisory_opinions else None,
                         json.dumps(board_narrative) if board_narrative else None,
                         board_adjusted_verdict,
+                        json.dumps(adversarial_result) if adversarial_result else None,
                     ),
                 )
                 return rows[0]["id"]
@@ -546,7 +549,7 @@ class Registry:
             "reasoning, agent_stances, risk_flags, "
             "auditor_override, munger_override, "
             "advisory_opinions, board_narrative, board_adjusted_verdict, "
-            "created_at "
+            "adversarial_result, created_at "
             "FROM invest.verdicts WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT 1",
             (ticker,),
@@ -560,7 +563,7 @@ class Registry:
             "reasoning, agent_stances, risk_flags, "
             "auditor_override, munger_override, "
             "advisory_opinions, board_narrative, board_adjusted_verdict, "
-            "created_at "
+            "adversarial_result, created_at "
             "FROM invest.verdicts WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT %s",
             (ticker, limit),
@@ -645,7 +648,7 @@ class Registry:
                     v.reasoning, v.agent_stances, v.risk_flags,
                     v.auditor_override, v.munger_override,
                     v.advisory_opinions, v.board_narrative, v.board_adjusted_verdict,
-                    v.created_at
+                    v.adversarial_result, v.created_at
                 FROM invest.verdicts v
                 WHERE v.verdict != 'DISCARD'
                 ORDER BY v.ticker, v.created_at DESC
@@ -655,7 +658,7 @@ class Registry:
                 lv.reasoning, lv.agent_stances, lv.risk_flags,
                 lv.auditor_override, lv.munger_override,
                 lv.advisory_opinions, lv.board_narrative, lv.board_adjusted_verdict,
-                lv.created_at,
+                lv.adversarial_result, lv.created_at,
                 s.name, s.sector, s.industry,
                 f.price AS current_price, f.market_cap,
                 w.state AS watchlist_state,

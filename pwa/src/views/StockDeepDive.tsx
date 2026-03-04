@@ -7,6 +7,7 @@ import { Badge } from "../components/shared/Badge";
 import { formatCap } from "../utils/deepdiveHelpers";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
+import type { AdversarialResult, TargetPriceRange } from "../types/models";
 
 // Layer 1
 import { OrbitBorder } from "../components/shared/OrbitBorder";
@@ -129,6 +130,7 @@ export interface VerdictData {
   advisoryOpinions: AdvisoryOpinion[] | null;
   boardNarrative: BoardNarrative | null;
   boardAdjustedVerdict: string | null;
+  adversarialResult?: AdversarialResult | null;
   createdAt: string | null;
 }
 
@@ -224,6 +226,7 @@ export interface StockResponse {
   stabilityScore: number | null;
   stabilityLabel: string | null;
   consensusTier: string | null;
+  targetPriceRange: TargetPriceRange | null;
 }
 
 // ─── Orchestrator ───────────────────────────────────────────────────────────
@@ -461,13 +464,81 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         earningsMomentum={data.earningsMomentum}
       />
 
+      {/* Target Price Range */}
+      {data.targetPriceRange && data.targetPriceRange.prices.length >= 2 && f && (
+        <div style={{
+          padding: "var(--space-md) var(--space-lg)",
+          background: "var(--color-surface-0)",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--glass-border)",
+        }}>
+          <div style={{
+            fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600,
+            textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "var(--space-sm)",
+          }}>
+            Agent Fair Value Range
+          </div>
+          <div style={{ position: "relative", height: 32, marginBottom: "var(--space-sm)" }}>
+            {/* Track */}
+            <div style={{
+              position: "absolute", top: 14, left: 0, right: 0, height: 4,
+              background: "var(--color-surface-2)", borderRadius: 2,
+            }} />
+            {/* Range fill */}
+            {(() => {
+              const { low, high } = data.targetPriceRange!;
+              const padding = (high - low) * 0.15 || high * 0.1;
+              const rangeMin = low - padding;
+              const rangeMax = high + padding;
+              const pct = (v: number) => ((v - rangeMin) / (rangeMax - rangeMin)) * 100;
+              return (
+                <>
+                  <div style={{
+                    position: "absolute", top: 14, height: 4, borderRadius: 2,
+                    left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%`,
+                    background: "var(--color-accent-bright)", opacity: 0.3,
+                  }} />
+                  {/* Current price marker */}
+                  <div style={{
+                    position: "absolute", top: 8, height: 16, width: 2,
+                    background: "var(--color-text-primary)",
+                    left: `${Math.min(100, Math.max(0, pct(f.price)))}%`,
+                  }} />
+                  {/* Agent dots */}
+                  {data.targetPriceRange!.prices.map((tp, i) => (
+                    <div key={i} title={`${tp.agent}: $${tp.price.toFixed(0)}`} style={{
+                      position: "absolute", top: 12, width: 8, height: 8,
+                      borderRadius: "50%", background: "var(--color-accent-bright)",
+                      border: "1px solid var(--color-surface-0)",
+                      left: `calc(${pct(tp.price)}% - 4px)`,
+                    }} />
+                  ))}
+                </>
+              );
+            })()}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+            <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.low.toFixed(0)}</span>
+            <span style={{ color: "var(--color-accent-bright)", fontWeight: 600 }}>median ${data.targetPriceRange.median.toFixed(0)}</span>
+            <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.high.toFixed(0)}</span>
+          </div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", marginTop: 2 }}>
+            Current: ${f.price.toFixed(2)}
+            {f.price < data.targetPriceRange.median
+              ? ` (${(((data.targetPriceRange.median - f.price) / f.price) * 100).toFixed(0)}% upside to median)`
+              : ` (${(((f.price - data.targetPriceRange.median) / data.targetPriceRange.median) * 100).toFixed(0)}% above median)`
+            }
+          </div>
+        </div>
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════
           LAYER 2 — THE WHY (collapsible panels)
          ═══════════════════════════════════════════════════════════════════ */}
 
-      {data.verdict && <AgentAnalysisPanel verdict={data.verdict} />}
+      {data.verdict && <AgentAnalysisPanel verdict={data.verdict} signalData={data.signals} />}
       <MetricsPanel profile={p} quantGate={data.quantGate} fundamentals={f} />
-      <RiskPanel verdict={data.verdict} competence={data.competence} />
+      <RiskPanel verdict={data.verdict} competence={data.competence} adversarial={data.verdict?.adversarialResult ?? null} />
       {data.position && (
         <PositionPanel
           position={data.position}

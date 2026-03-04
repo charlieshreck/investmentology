@@ -707,7 +707,7 @@ class AnalysisOrchestrator:
 
         # Persist verdict to DB
         await _emit("Persisting", 10)
-        verdict_id = self._save_verdict(ticker, analysis.verdict)
+        verdict_id = self._save_verdict(ticker, analysis.verdict, analysis.adversarial)
 
         # Re-entry qualification gate: create or clear block conditions
         if verdict_id is not None:
@@ -891,7 +891,10 @@ class AnalysisOrchestrator:
         except Exception:
             logger.debug("Attribution-based weights not available, using defaults")
 
-    def _save_verdict(self, ticker: str, verdict: VerdictResult) -> int | None:
+    def _save_verdict(
+        self, ticker: str, verdict: VerdictResult,
+        adversarial: AdversarialResult | None = None,
+    ) -> int | None:
         """Persist a verdict to the database. Returns verdict_id on success, None on failure."""
         try:
             # Serialize advisory opinions if present
@@ -926,6 +929,32 @@ class AnalysisOrchestrator:
                     "advisor_consensus": bn.advisor_consensus,
                 }
 
+            # Serialize adversarial result if present
+            adversarial_data = None
+            if adversarial:
+                adversarial_data = {
+                    "verdict": adversarial.verdict.value,
+                    "kill_scenarios": [
+                        {
+                            "scenario": k.scenario,
+                            "likelihood": k.likelihood,
+                            "impact": k.impact,
+                            "timeframe": k.timeframe,
+                        }
+                        for k in adversarial.kill_scenarios
+                    ],
+                    "premortem": {
+                        "narrative": adversarial.premortem.narrative,
+                        "key_risks": adversarial.premortem.key_risks,
+                        "probability_estimate": adversarial.premortem.probability_estimate,
+                    } if adversarial.premortem else None,
+                    "bias_flags": [
+                        {"bias_name": b.bias_name, "is_flagged": b.is_flagged, "detail": b.detail}
+                        for b in adversarial.bias_flags if b.is_flagged
+                    ],
+                    "reasoning": adversarial.reasoning,
+                }
+
             verdict_id = self._registry.insert_verdict(
                 ticker=ticker,
                 verdict=verdict.verdict.value,
@@ -948,6 +977,7 @@ class AnalysisOrchestrator:
                 advisory_opinions=advisory_data,
                 board_narrative=narrative_data,
                 board_adjusted_verdict=verdict.board_adjusted_verdict,
+                adversarial_result=adversarial_data,
             )
             return verdict_id
         except Exception:

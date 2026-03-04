@@ -334,6 +334,7 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
             "advisoryOpinions": vr.get("advisory_opinions"),
             "boardNarrative": vr.get("board_narrative"),
             "boardAdjustedVerdict": vr.get("board_adjusted_verdict"),
+            "adversarialResult": vr.get("adversarial_result"),
             "createdAt": str(vr["created_at"]) if vr["created_at"] else None,
         }
         verdict_history.append(entry)
@@ -437,6 +438,25 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         logger.debug("Could not fetch earnings momentum for %s", ticker)
 
+    # Extract per-agent target prices from signals JSONB
+    target_prices = []
+    for r in signal_rows:
+        sigs = r.get("signals")
+        if sigs and isinstance(sigs, dict):
+            tp = sigs.get("target_price")
+            if tp and isinstance(tp, (int, float)) and tp > 0:
+                target_prices.append({"agent": r["agent_name"], "price": float(tp)})
+    target_price_range = None
+    if target_prices:
+        prices = [p["price"] for p in target_prices]
+        sorted_prices = sorted(prices)
+        target_price_range = {
+            "prices": target_prices,
+            "low": sorted_prices[0],
+            "high": sorted_prices[-1],
+            "median": sorted_prices[len(sorted_prices) // 2],
+        }
+
     stab_score, stab_label = verdict_stability(ticker, registry)
     cons_tier = consensus_tier(
         float(verdict_data["consensusScore"]) if verdict_data and verdict_data.get("consensusScore") else None
@@ -479,6 +499,7 @@ def get_stock(ticker: str, registry: Registry = Depends(get_registry)) -> dict:
         "stabilityScore": stab_score,
         "stabilityLabel": stab_label,
         "consensusTier": cons_tier,
+        "targetPriceRange": target_price_range,
     }
 
 

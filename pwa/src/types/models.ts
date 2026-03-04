@@ -251,6 +251,34 @@ export interface BoardNarrative {
   advisor_consensus: Record<string, unknown>;
 }
 
+export interface KillScenario {
+  scenario: string;
+  likelihood: "low" | "medium" | "high";
+  impact: "moderate" | "severe" | "fatal";
+  timeframe: string;
+}
+
+export interface PreMortem {
+  narrative: string;
+  key_risks: string[];
+  probability_estimate: string;
+}
+
+export interface AdversarialResult {
+  verdict: "PROCEED" | "CAUTION" | "VETO";
+  kill_scenarios: KillScenario[];
+  premortem: PreMortem | null;
+  bias_flags: { bias_name: string; is_flagged: boolean; detail: string }[];
+  reasoning: string;
+}
+
+export interface TargetPriceRange {
+  prices: { agent: string; price: number }[];
+  low: number;
+  high: number;
+  median: number;
+}
+
 export interface AnalysisProgress {
   ticker: string;
   steps: PipelineStep[];

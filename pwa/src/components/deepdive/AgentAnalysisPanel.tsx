@@ -26,8 +26,12 @@ function VoteTallyPreview({ opinions }: { opinions: VerdictData["advisoryOpinion
   );
 }
 
-export function AgentAnalysisPanel({ verdict }: { verdict: VerdictData }) {
+export function AgentAnalysisPanel({ verdict, signalData }: {
+  verdict: VerdictData;
+  signalData?: { agentName: string; signals: Record<string, unknown>; confidence: number | null; reasoning: string }[];
+}) {
   const [cioExpanded, setCioExpanded] = useState(false);
+  const [expandedAdvisor, setExpandedAdvisor] = useState<string | null>(null);
   const stances = verdict.agentStances ?? [];
   const opinions = verdict.advisoryOpinions ?? [];
   const narrative = verdict.boardNarrative;
@@ -68,7 +72,10 @@ export function AgentAnalysisPanel({ verdict }: { verdict: VerdictData }) {
       {/* Signal Tag Cloud */}
       {stances.length > 0 && (
         <div style={{ marginBottom: "var(--space-md)" }}>
-          <SignalTagCloud stances={stances as unknown as import("../../types/models").AgentStance[]} />
+          <SignalTagCloud
+            stances={stances as unknown as import("../../types/models").AgentStance[]}
+            signalData={signalData as unknown as Parameters<typeof SignalTagCloud>[0]["signalData"]}
+          />
         </div>
       )}
 
@@ -139,16 +146,23 @@ export function AgentAnalysisPanel({ verdict }: { verdict: VerdictData }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "var(--space-sm)" }}>
             {opinions.map((op) => {
               const vc = voteColor(op.vote);
+              const isExpanded = expandedAdvisor === op.advisor_name;
               return (
-                <div key={op.advisor_name} style={{
-                  padding: "var(--space-md)",
-                  background: "var(--color-surface-0)",
-                  borderRadius: "var(--radius-sm)",
-                  borderLeft: `3px solid ${vc}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-xs)",
-                }}>
+                <div
+                  key={op.advisor_name}
+                  onClick={() => setExpandedAdvisor(isExpanded ? null : op.advisor_name)}
+                  style={{
+                    padding: "var(--space-md)",
+                    background: "var(--color-surface-0)",
+                    borderRadius: "var(--radius-sm)",
+                    borderLeft: `3px solid ${vc}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "var(--space-xs)",
+                    cursor: "pointer",
+                    transition: "background 0.15s",
+                  }}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{op.display_name}</span>
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}>
@@ -158,21 +172,48 @@ export function AgentAnalysisPanel({ verdict }: { verdict: VerdictData }) {
                       <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
                         {(op.confidence * 100).toFixed(0)}%
                       </span>
+                      <span style={{
+                        fontSize: 9,
+                        color: "var(--color-text-muted)",
+                        transform: isExpanded ? "rotate(180deg)" : "none",
+                        transition: "transform 0.2s",
+                      }}>
+                        ▼
+                      </span>
                     </div>
                   </div>
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                    {op.assessment.length > 140 ? op.assessment.slice(0, 140) + "…" : op.assessment}
+                    {isExpanded ? op.assessment : (op.assessment.length > 140 ? op.assessment.slice(0, 140) + "…" : op.assessment)}
                   </div>
                   {op.key_concern && (
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--color-error)", fontStyle: "italic" }}>
-                      Risk: {op.key_concern.length > 80 ? op.key_concern.slice(0, 80) + "…" : op.key_concern}
+                      Risk: {isExpanded ? op.key_concern : (op.key_concern.length > 80 ? op.key_concern.slice(0, 80) + "…" : op.key_concern)}
                     </div>
                   )}
                   {op.key_endorsement && (
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--color-success)", fontStyle: "italic" }}>
-                      Upside: {op.key_endorsement.length > 80 ? op.key_endorsement.slice(0, 80) + "…" : op.key_endorsement}
+                      Upside: {isExpanded ? op.key_endorsement : (op.key_endorsement.length > 80 ? op.key_endorsement.slice(0, 80) + "…" : op.key_endorsement)}
                     </div>
                   )}
+                  <AnimatePresence>
+                    {isExpanded && op.reasoning && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <div style={{
+                          borderTop: "1px solid var(--glass-border)",
+                          paddingTop: "var(--space-sm)",
+                          marginTop: "var(--space-xs)",
+                        }}>
+                          <FormattedProse text={op.reasoning} fontSize="var(--text-xs)" />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}

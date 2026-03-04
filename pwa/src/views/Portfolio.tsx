@@ -8,6 +8,7 @@ import { FloatingBar } from "../components/shared/FloatingBar";
 import { SegmentedControl } from "../components/shared/SegmentedControl";
 import { MetricCardSkeleton, PositionRowSkeleton } from "../components/shared/SkeletonCard";
 import { MarketStatus } from "../components/shared/MarketStatus";
+import { GlossaryTooltip } from "../components/shared/GlossaryTooltip";
 import { CorrelationHeatmap } from "../components/charts/CorrelationHeatmap";
 import { usePortfolio } from "../hooks/usePortfolio";
 import { useCorrelations } from "../hooks/useCorrelations";
@@ -1448,11 +1449,11 @@ export function Portfolio() {
           <Section title="Performance" icon={BarChart3}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "var(--space-sm)" }}>
               {[
-                { label: "Alpha", value: performance.alphaPct, fmt: (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`, color: performance.alphaPct != null ? pnlColor(performance.alphaPct) : undefined },
-                { label: "Sharpe", value: performance.sharpeRatio, fmt: (v: number) => v.toFixed(2) },
-                { label: "Sortino", value: performance.sortinoRatio, fmt: (v: number) => v.toFixed(2) },
-                { label: "Win Rate", value: performance.winRate, fmt: (v: number) => `${(v * 100).toFixed(0)}%` },
-                { label: "Max DD", value: performance.maxDrawdownPct, fmt: (v: number) => `${v.toFixed(1)}%`, color: "var(--color-error)" },
+                { label: "Alpha", value: performance.alphaPct, fmt: (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`, color: performance.alphaPct != null ? pnlColor(performance.alphaPct) : undefined, glossary: "alpha" },
+                { label: "Sharpe", value: performance.sharpeRatio, fmt: (v: number) => v.toFixed(2), glossary: "sharpe ratio" },
+                { label: "Sortino", value: performance.sortinoRatio, fmt: (v: number) => v.toFixed(2), glossary: "sortino ratio" },
+                { label: "Win Rate", value: performance.winRate, fmt: (v: number) => `${(v * 100).toFixed(0)}%`, glossary: "win rate" },
+                { label: "Max DD", value: performance.maxDrawdownPct, fmt: (v: number) => `${v.toFixed(1)}%`, color: "var(--color-error)", glossary: "max drawdown" },
               ].map((m) => (
                 <div
                   key={m.label}
@@ -1463,8 +1464,9 @@ export function Portfolio() {
                     border: "1px solid var(--glass-border)",
                   }}
                 >
-                  <div style={{ fontSize: "var(--text-2xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                  <div style={{ fontSize: "var(--text-2xs)", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, display: "flex", alignItems: "center", gap: 2 }}>
                     {m.label}
+                    {(m as { glossary?: string }).glossary && <GlossaryTooltip term={(m as { glossary?: string }).glossary!} />}
                   </div>
                   <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)", color: m.color }}>
                     {m.value != null ? m.fmt(m.value) : "—"}
