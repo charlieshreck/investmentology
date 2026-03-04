@@ -1,35 +1,47 @@
 import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "../utils/apiClient";
 import type { Decision } from "../types/models";
 import type { DecisionsResponse } from "../types/api";
 
 export function useDecisions(pageSize = 20) {
-  const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [allDecisions, setAllDecisions] = useState<Decision[]>([]);
+
+  const query = useQuery({
+    queryKey: ["decisions", page, pageSize],
+    queryFn: () => apiFetch<DecisionsResponse>(
+      `/api/invest/decisions?page=${page}&pageSize=${pageSize}`,
+    ),
+    placeholderData: (prev) => prev, // Keep previous data while fetching next page
+  });
 
   const fetchPage = useCallback(
     async (p: number) => {
-      try {
-        setLoading(true);
-        const res = await fetch(
-          `/api/invest/decisions?page=${p}&pageSize=${pageSize}`,
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: DecisionsResponse = await res.json();
-        setDecisions((prev) => p === 1 ? data.decisions : [...prev, ...data.decisions]);
-        setTotal(data.total);
-        setPage(p);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setLoading(false);
-      }
+      setPage(p);
+      // When fetching page 1, reset accumulated list
+      if (p === 1) setAllDecisions([]);
     },
-    [pageSize],
+    [],
   );
 
-  return { decisions, total, page, pageSize, loading, error, fetchPage };
+  // Accumulate decisions as pages load
+  const currentDecisions = query.data?.decisions ?? [];
+  const decisions = page === 1
+    ? currentDecisions
+    : [...allDecisions.slice(0, (page - 1) * pageSize), ...currentDecisions];
+
+  // Track accumulated decisions for append mode
+  if (query.data && decisions.length > allDecisions.length) {
+    setAllDecisions(decisions);
+  }
+
+  return {
+    decisions,
+    total: query.data?.total ?? 0,
+    page, pageSize,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    fetchPage,
+  };
 }

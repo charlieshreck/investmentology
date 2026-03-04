@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { BottomNav } from "./components/layout/BottomNav";
 import { LayerOverlay } from "./components/layout/LayerOverlay";
@@ -13,6 +14,7 @@ import { useStore } from "./stores/useStore";
 import { AnalysisStatusBar } from "./components/shared/AnalysisStatusBar";
 import { CommandPalette } from "./components/shared/CommandPalette";
 import { AnalysisProvider } from "./contexts/AnalysisContext";
+import { queryClient } from "./utils/apiClient";
 import "./stores/useThemeStore"; // Initialize theme on load
 
 // Lazy-loaded views (all named exports → wrap in default)
@@ -41,20 +43,6 @@ function ViewLoader() {
     </div>
   );
 }
-
-// Intercept all fetch calls — on 401 force reload to show login
-const originalFetch = window.fetch;
-window.fetch = async (...args) => {
-  const res = await originalFetch(...args);
-  if (res.status === 401) {
-    const url = typeof args[0] === "string" ? args[0] : (args[0] as Request).url;
-    // Don't intercept auth endpoints themselves
-    if (!url.includes("/auth/")) {
-      window.location.reload();
-    }
-  }
-  return res;
-};
 
 export default function App() {
   const { isAuthenticated, error, login, logout } = useAuth();
@@ -102,13 +90,15 @@ export default function App() {
   }
 
   return (
-    <AppErrorBoundary>
-      <BrowserRouter>
-        <AnalysisProvider>
-          <AppShell offline={offline} />
-        </AnalysisProvider>
-      </BrowserRouter>
-    </AppErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <AppErrorBoundary>
+        <BrowserRouter>
+          <AnalysisProvider>
+            <AppShell offline={offline} />
+          </AnalysisProvider>
+        </BrowserRouter>
+      </AppErrorBoundary>
+    </QueryClientProvider>
   );
 }
 

@@ -1,4 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "../utils/apiClient";
 
 export interface BacktestSummary {
   startDate: string;
@@ -51,45 +53,41 @@ export interface BacktestHistoryItem {
 }
 
 export function useBacktest() {
+  const queryClient = useQueryClient();
   const [result, setResult] = useState<BacktestResult | null>(null);
-  const [history, setHistory] = useState<BacktestHistoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const runBacktest = useCallback(async (startDate: string, endDate: string, initialCapital: number) => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const res = await fetch("/api/invest/backtest/run", {
+  const historyQuery = useQuery({
+    queryKey: ["backtest", "history"],
+    queryFn: async () => {
+      const data = await apiFetch<{ runs: BacktestHistoryItem[] }>("/api/invest/backtest/history");
+      return data.runs ?? [];
+    },
+  });
+
+  const mutation = useMutation({
+    mutationFn: ({ startDate, endDate, initialCapital }: {
+      startDate: string; endDate: string; initialCapital: number;
+    }) =>
+      apiFetch<BacktestResult>("/api/invest/backtest/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ start_date: startDate, end_date: endDate, initial_capital: initialCapital }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      }),
+    onSuccess: (data) => {
       setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Backtest failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      queryClient.invalidateQueries({ queryKey: ["backtest", "history"] });
+    },
+  });
 
-  const fetchHistory = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/backtest/history");
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(data.runs || []);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  return { result, history, loading, error, runBacktest, fetchHistory };
+  return {
+    result,
+    history: historyQuery.data ?? [],
+    loading: mutation.isPending,
+    error: mutation.error?.message ?? null,
+    runBacktest: (startDate: string, endDate: string, initialCapital: number) => {
+      setResult(null);
+      return mutation.mutateAsync({ startDate, endDate, initialCapital });
+    },
+    fetchHistory: () => historyQuery.refetch(),
+  };
 }

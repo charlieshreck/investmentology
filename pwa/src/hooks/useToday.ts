@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "../utils/apiClient";
 import type { Recommendation } from "../types/models";
 
 // --- Daily Briefing Summary ---
@@ -33,27 +34,17 @@ export interface BriefingSummary {
 }
 
 export function useDailyBriefing() {
-  const [data, setData] = useState<BriefingSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["daily", "briefing"],
+    queryFn: () => apiFetch<BriefingSummary>("/api/invest/daily/briefing/summary"),
+  });
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/daily/briefing/summary");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  return { data, loading, error, refresh };
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refresh: () => query.refetch(),
+  };
 }
 
 // --- Portfolio Advisor Actions ---
@@ -81,27 +72,17 @@ export interface AdvisorAction {
 }
 
 export function usePortfolioAdvisor() {
-  const [actions, setActions] = useState<AdvisorAction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["portfolio", "advisor"],
+    queryFn: () => apiFetch<{ actions: AdvisorAction[] }>("/api/invest/portfolio/advisor"),
+  });
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/portfolio/advisor");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setActions(json.actions ?? []);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  return { actions, loading, error, refresh };
+  return {
+    actions: query.data?.actions ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refresh: () => query.refetch(),
+  };
 }
 
 // --- Thesis Summary ---
@@ -118,27 +99,17 @@ export interface ThesisPosition {
 }
 
 export function useThesisSummary() {
-  const [positions, setPositions] = useState<ThesisPosition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["portfolio", "thesis-summary"],
+    queryFn: () => apiFetch<{ positions: ThesisPosition[] }>("/api/invest/portfolio/thesis-summary"),
+  });
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/portfolio/thesis-summary");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setPositions(json.positions ?? []);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  return { positions, loading, error, refresh };
+  return {
+    positions: query.data?.positions ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refresh: () => query.refetch(),
+  };
 }
 
 // --- Portfolio Risk Snapshot ---
@@ -163,27 +134,17 @@ export interface RiskSnapshot {
 }
 
 export function usePortfolioRisk() {
-  const [data, setData] = useState<RiskSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["portfolio", "risk-snapshot"],
+    queryFn: () => apiFetch<RiskSnapshot>("/api/invest/portfolio/risk-snapshot"),
+  });
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/portfolio/risk-snapshot");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  return { data, loading, error, refresh };
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refresh: () => query.refetch(),
+  };
 }
 
 // --- Learning Attribution ---
@@ -214,29 +175,16 @@ export interface AttributionReport {
 }
 
 export function useAttribution() {
-  const [data, setData] = useState<AttributionReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["learning", "attribution"],
+    queryFn: () => apiFetch<AttributionReport>("/api/invest/learning/attribution"),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/invest/learning/attribution");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        if (!cancelled) setData(json);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, []);
-
-  return { data, loading, error };
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+  };
 }
 
 // --- Top Recommendations (for Today page) ---
@@ -244,33 +192,19 @@ export function useAttribution() {
 const POSITIVE_VERDICTS = new Set(["STRONG_BUY", "BUY", "ACCUMULATE"]);
 
 export function useTopRecommendations(limit = 3) {
-  const [items, setItems] = useState<Recommendation[]>([]);
-  const [totalNew, setTotalNew] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const query = useQuery({
+    queryKey: ["recommendations"],
+    queryFn: () => apiFetch<{ items: Recommendation[] }>("/api/invest/recommendations"),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/invest/recommendations");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const all: Recommendation[] = data.items ?? [];
-        const positive = all.filter((r) => POSITIVE_VERDICTS.has(r.verdict));
-        positive.sort((a, b) => (b.successProbability ?? 0) - (a.successProbability ?? 0));
-        if (!cancelled) {
-          setItems(positive.slice(0, limit));
-          setTotalNew(positive.length);
-        }
-      } catch {
-        // silent — Today page still works without recs
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [limit]);
+  const all = query.data?.items ?? [];
+  const positive = all
+    .filter((r) => POSITIVE_VERDICTS.has(r.verdict))
+    .sort((a, b) => (b.successProbability ?? 0) - (a.successProbability ?? 0));
 
-  return { items, totalNew, loading };
+  return {
+    items: positive.slice(0, limit),
+    totalNew: positive.length,
+    loading: query.isLoading,
+  };
 }

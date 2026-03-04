@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "../stores/useStore";
+import { apiFetch } from "../utils/apiClient";
 import type { PortfolioResponse, ClosedPositionsResponse } from "../types/api";
-import type { ClosedPosition } from "../types/models";
 
 export function usePortfolio() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [closedPositions, setClosedPositions] = useState<ClosedPosition[]>([]);
-  const [totalRealizedPnl, setTotalRealizedPnl] = useState(0);
+  const queryClient = useQueryClient();
   const setPortfolio = useStore((s) => s.setPortfolio);
   const positions = useStore((s) => s.positions);
   const totalValue = useStore((s) => s.totalValue);
@@ -16,75 +14,63 @@ export function usePortfolio() {
   const cash = useStore((s) => s.cash);
   const alerts = useStore((s) => s.alerts);
 
-  const fetchPortfolio = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/invest/portfolio");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: PortfolioResponse = await res.json();
-      setPortfolio(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, [setPortfolio]);
+  const portfolioQuery = useQuery({
+    queryKey: ["portfolio"],
+    queryFn: () => apiFetch<PortfolioResponse>("/api/invest/portfolio"),
+  });
 
-  const fetchClosed = useCallback(async () => {
-    try {
-      const res = await fetch("/api/invest/portfolio/closed");
-      if (!res.ok) return;
-      const data: ClosedPositionsResponse = await res.json();
-      setClosedPositions(data.closedPositions);
-      setTotalRealizedPnl(data.totalRealizedPnl);
-    } catch {
-      // silent — closed positions are secondary
-    }
-  }, []);
-
+  // Sync to Zustand store
   useEffect(() => {
-    fetchPortfolio();
-    fetchClosed();
-  }, [fetchPortfolio, fetchClosed]);
+    if (portfolioQuery.data) setPortfolio(portfolioQuery.data);
+  }, [portfolioQuery.data, setPortfolio]);
 
-  const addPosition = useCallback(async (data: {
-    ticker: string;
-    entry_price: number;
-    shares: number;
-    position_type?: string;
-    weight?: number;
-    stop_loss?: number | null;
-    fair_value_estimate?: number | null;
-    thesis?: string;
-  }) => {
-    const res = await fetch("/api/invest/portfolio/positions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await fetchPortfolio();
-    return res.json();
-  }, [fetchPortfolio]);
+  const closedQuery = useQuery({
+    queryKey: ["portfolio", "closed"],
+    queryFn: () => apiFetch<ClosedPositionsResponse>("/api/invest/portfolio/closed"),
+  });
 
-  const closePosition = useCallback(async (positionId: number, exitPrice: number) => {
-    const res = await fetch(`/api/invest/portfolio/positions/${positionId}/close`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ exit_price: exitPrice }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await fetchPortfolio();
-    await fetchClosed();
-    return res.json();
-  }, [fetchPortfolio, fetchClosed]);
+  const addPositionMutation = useMutation({
+    mutationFn: (data: {
+      ticker: string;
+      entry_price: number;
+      shares: number;
+      position_type?: string;
+      weight?: number;
+      stop_loss?: number | null;
+      fair_value_estimate?: number | null;
+      thesis?: string;
+    }) =>
+      apiFetch("/api/invest/portfolio/positions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+    },
+  });
+
+  const closePositionMutation = useMutation({
+    mutationFn: ({ positionId, exitPrice }: { positionId: number; exitPrice: number }) =>
+      apiFetch(`/api/invest/portfolio/positions/${positionId}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exit_price: exitPrice }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+    },
+  });
 
   return {
     positions, totalValue, dayPnl, dayPnlPct, cash, alerts,
-    closedPositions, totalRealizedPnl,
-    loading, error,
-    refetch: fetchPortfolio,
-    addPosition, closePosition,
+    closedPositions: closedQuery.data?.closedPositions ?? [],
+    totalRealizedPnl: closedQuery.data?.totalRealizedPnl ?? 0,
+    loading: portfolioQuery.isLoading,
+    error: portfolioQuery.error?.message ?? null,
+    refetch: () => portfolioQuery.refetch(),
+    addPosition: addPositionMutation.mutateAsync,
+    closePosition: (positionId: number, exitPrice: number) =>
+      closePositionMutation.mutateAsync({ positionId, exitPrice }),
   };
 }

@@ -1,33 +1,17 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "../utils/apiClient";
 import type { Stock } from "../types/models";
 
 export function useStock(ticker: string | undefined) {
-  const [stock, setStock] = useState<Stock | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["stock", ticker],
+    queryFn: () => apiFetch<Stock>(`/api/invest/stock/${ticker}`),
+    enabled: !!ticker,
+  });
 
-  useEffect(() => {
-    if (!ticker) return;
-    let cancelled = false;
-    async function fetchStock() {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/invest/stock/${ticker}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: Stock = await res.json();
-        if (!cancelled) {
-          setStock(data);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    fetchStock();
-    return () => { cancelled = true; };
-  }, [ticker]);
-
-  return { stock, loading, error };
+  return {
+    stock: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+  };
 }

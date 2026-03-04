@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "../utils/apiClient";
 
 export interface Correlation {
   ticker1: string;
@@ -12,22 +13,14 @@ interface CorrelationData {
 }
 
 export function useCorrelations(positionCount: number, tickerFingerprint: string) {
-  const [data, setData] = useState<CorrelationData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const query = useQuery({
+    queryKey: ["correlations", tickerFingerprint],
+    queryFn: () => apiFetch<CorrelationData>("/api/invest/portfolio/correlations"),
+    enabled: positionCount >= 2,
+  });
 
-  useEffect(() => {
-    if (positionCount < 2) {
-      setData(null);
-      return;
-    }
-
-    setLoading(true);
-    fetch("/api/invest/portfolio/correlations")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [positionCount, tickerFingerprint]);
-
-  return { data, loading };
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+  };
 }
