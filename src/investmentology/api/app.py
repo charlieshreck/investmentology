@@ -207,6 +207,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         learning,
         pipeline,
         portfolio,
+        push,
         quant_gate,
         recommendations,
         stocks,
@@ -232,6 +233,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(daily.router, prefix=prefix, tags=["daily"])
     app.include_router(thesis.router, prefix=prefix, tags=["thesis"])
     app.include_router(pipeline.router, prefix=prefix, tags=["pipeline"])
+    app.include_router(push.router, prefix=prefix, tags=["push"])
     app.include_router(ws.router, prefix=prefix, tags=["websocket"])
 
     return app

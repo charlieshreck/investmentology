@@ -22,6 +22,8 @@ export function BottomNav() {
 function MobileNav() {
   return (
     <nav
+      aria-label="Main navigation"
+      role="navigation"
       style={{
         position: "fixed",
         bottom: 0,
@@ -44,6 +46,7 @@ function MobileNav() {
           key={item.to}
           to={item.to}
           end={item.end}
+          aria-label={item.label}
           style={{ textDecoration: "none", position: "relative", flex: 1 }}
         >
           {({ isActive }) => (
@@ -120,6 +123,8 @@ function MobileNav() {
 function SideNav() {
   return (
     <nav
+      aria-label="Main navigation"
+      role="navigation"
       style={{
         position: "fixed",
         top: 0,

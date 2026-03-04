@@ -121,6 +121,27 @@ function AppShell({ offline }: { offline: boolean }) {
       flexDirection: "column",
       marginLeft: isDesktop ? "var(--sidebar-width)" : undefined,
     }}>
+      {/* Skip-to-content link (visible on focus for keyboard users) */}
+      <a
+        href="#main-content"
+        style={{
+          position: "absolute",
+          left: "-9999px",
+          top: 0,
+          zIndex: 9999,
+          padding: "8px 16px",
+          background: "var(--color-accent)",
+          color: "#fff",
+          fontWeight: 600,
+          fontSize: 14,
+          textDecoration: "none",
+          borderRadius: "0 0 4px 0",
+        }}
+        onFocus={(e) => { e.currentTarget.style.left = "0"; }}
+        onBlur={(e) => { e.currentTarget.style.left = "-9999px"; }}
+      >
+        Skip to content
+      </a>
       <AnimatePresence>
         {offline && (
           <motion.div
@@ -156,7 +177,9 @@ function AppShell({ offline }: { offline: boolean }) {
         )}
       </AnimatePresence>
       <AnalysisStatusBar />
-      <div
+      <main
+        id="main-content"
+        role="main"
         style={{
           flex: 1,
           overflow: "hidden",
@@ -182,7 +205,7 @@ function AppShell({ offline }: { offline: boolean }) {
             <Route path="/settings" element={<ViewErrorBoundary viewName="Settings"><Suspense fallback={<ViewLoader />}><PageTransition><SettingsView /></PageTransition></Suspense></ViewErrorBoundary>} />
           </Routes>
         </AnimatePresence>
-      </div>
+      </main>
       <BottomNav />
 
       {/* Command palette (Cmd+K) */}
