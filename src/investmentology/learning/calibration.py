@@ -58,6 +58,9 @@ class CalibrationReport:
     recommendations: list[str] = field(default_factory=list)
 
 
+MIN_BUCKET_COUNT = 10  # Minimum samples per bucket for statistical significance
+
+
 class CalibrationEngine:
     """Computes calibration metrics and generates adjustment recommendations."""
 
@@ -180,14 +183,14 @@ class CalibrationEngine:
         recs: list[str] = []
 
         # ECE threshold
-        if ece > 0.15:
+        if ece > 0.12:
             recs.append(
                 f"High calibration error (ECE={ece:.3f}). "
                 "Consider retraining confidence thresholds."
             )
 
         # Brier score threshold
-        if brier > 0.30:
+        if brier > 0.25:
             recs.append(
                 f"High Brier score ({brier:.3f}). "
                 "Predictions are poorly calibrated overall."
@@ -195,7 +198,7 @@ class CalibrationEngine:
 
         # Check for overconfident buckets
         for bucket in buckets:
-            if bucket.count >= 5 and bucket.accuracy < bucket.midpoint - 0.15:
+            if bucket.count >= MIN_BUCKET_COUNT and bucket.accuracy < bucket.midpoint - 0.15:
                 recs.append(
                     f"Overconfident in {bucket.low:.0%}-{bucket.high:.0%} range: "
                     f"claimed {bucket.midpoint:.0%}, actual {bucket.accuracy:.0%}. "
@@ -204,7 +207,7 @@ class CalibrationEngine:
 
         # Check for underconfident buckets
         for bucket in buckets:
-            if bucket.count >= 5 and bucket.accuracy > bucket.midpoint + 0.15:
+            if bucket.count >= MIN_BUCKET_COUNT and bucket.accuracy > bucket.midpoint + 0.15:
                 recs.append(
                     f"Underconfident in {bucket.low:.0%}-{bucket.high:.0%} range: "
                     f"claimed {bucket.midpoint:.0%}, actual {bucket.accuracy:.0%}. "
@@ -234,7 +237,7 @@ class CalibrationEngine:
         """
         adjustments: dict[str, float] = {}
         for bucket in buckets:
-            if bucket.count < 5:
+            if bucket.count < MIN_BUCKET_COUNT:
                 continue
             gap = bucket.accuracy - bucket.midpoint
             # Only suggest adjustment if gap is significant

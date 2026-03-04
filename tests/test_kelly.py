@@ -56,8 +56,8 @@ class TestKellyCalculator:
         assert fraction == pytest.approx(0.0, abs=0.01)
 
     def test_min_decisions_constant(self):
-        """Verify the minimum decisions threshold is 50."""
-        assert KELLY_MIN_DECISIONS == 50
+        """Verify the minimum decisions threshold is 75."""
+        assert KELLY_MIN_DECISIONS == 75
 
 
 class TestPositionSizerWithKelly:

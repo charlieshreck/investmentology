@@ -27,7 +27,7 @@ class SizingConfig:
 
 
 # Minimum settled decisions before Kelly criterion activates
-KELLY_MIN_DECISIONS = 50
+KELLY_MIN_DECISIONS = 75
 
 
 class KellyCalculator:
