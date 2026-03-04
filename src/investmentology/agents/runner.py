@@ -118,6 +118,15 @@ class AgentRunner:
         if "social_sentiment" in opt and request.social_sentiment:
             parts.extend(self._fmt_social(request))
 
+        if "analyst_ratings" in opt and request.analyst_ratings:
+            parts.extend(self._fmt_analyst_ratings(request.analyst_ratings))
+
+        if "short_interest" in opt and request.short_interest:
+            parts.extend(self._fmt_short_interest(request.short_interest))
+
+        if "research_briefing" in opt and request.research_briefing:
+            parts.extend(self._fmt_research_briefing(request.research_briefing))
+
         if "macro_context" in opt and request.macro_context:
             parts.extend(self._fmt_macro(request.macro_context))
 
@@ -474,6 +483,67 @@ class AgentRunner:
         elif bias == "bearish" and pos_ratio and float(pos_ratio) < 0.3:
             parts.append("  NOTE: Social bearishness — potential value opportunity if fundamentals strong")
         return parts
+
+    @staticmethod
+    def _fmt_analyst_ratings(ratings: dict) -> list[str]:
+        """Format analyst consensus ratings."""
+        parts = ["", "ANALYST RATINGS:"]
+        if ratings.get("price_target"):
+            pt = ratings["price_target"]
+            parts.append(
+                f"  Price targets: Low ${pt.get('low', '?')} | "
+                f"Mean ${pt.get('mean', '?')} | High ${pt.get('high', '?')}"
+            )
+        if ratings.get("trends"):
+            latest = ratings["trends"][0]
+            total = sum(latest.get(k, 0) for k in ("strong_buy", "buy", "hold", "sell", "strong_sell"))
+            if total:
+                parts.append(
+                    f"  Consensus ({latest.get('period', 'recent')}): "
+                    f"{latest.get('strong_buy', 0)} Strong Buy, "
+                    f"{latest.get('buy', 0)} Buy, "
+                    f"{latest.get('hold', 0)} Hold, "
+                    f"{latest.get('sell', 0)} Sell, "
+                    f"{latest.get('strong_sell', 0)} Strong Sell"
+                )
+        if ratings.get("recent_changes"):
+            parts.append("  Recent changes:")
+            for c in ratings["recent_changes"][:3]:
+                parts.append(
+                    f"    {c.get('firm', '?')}: {c.get('action', '?')} "
+                    f"({c.get('from_grade', '?')} → {c.get('to_grade', '?')})"
+                )
+        return parts
+
+    @staticmethod
+    def _fmt_short_interest(si: dict) -> list[str]:
+        """Format short interest data."""
+        parts = ["", "SHORT INTEREST:"]
+        shares = si.get("short_interest", 0)
+        if shares:
+            parts.append(f"  Short shares: {shares:,}")
+        if si.get("change_pct") is not None:
+            direction = "up" if si["change_pct"] > 0 else "down"
+            parts.append(f"  Change: {direction} {abs(si['change_pct'])}% from prior period")
+            if si["change_pct"] > 20:
+                parts.append("  NOTE: Significant increase in short interest — bearish signal")
+            elif si["change_pct"] < -20:
+                parts.append("  NOTE: Significant short covering — potential squeeze/bullish")
+        if si.get("settlement_date"):
+            parts.append(f"  As of: {si['settlement_date']}")
+        return parts
+
+    @staticmethod
+    def _fmt_research_briefing(briefing: str) -> list[str]:
+        """Format the Gemini-synthesized research briefing."""
+        return [
+            "",
+            "=" * 60,
+            "DEEP RESEARCH BRIEFING (synthesized from news, social media, analyst reports):",
+            "=" * 60,
+            briefing,
+            "=" * 60,
+        ]
 
     @staticmethod
     def _fmt_macro(macro: dict) -> list[str]:

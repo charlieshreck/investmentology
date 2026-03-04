@@ -34,6 +34,12 @@ class AnalysisRequest:
     filing_context: dict | None = None
     # Institutional holders (13F data)
     institutional_context: list[dict] | None = None
+    # Analyst consensus ratings
+    analyst_ratings: dict | None = None
+    # Short interest data
+    short_interest: dict | None = None
+    # Gemini-synthesized research briefing (deep research on news, events, sentiment)
+    research_briefing: str | None = None
     # Previous analysis context for history-aware re-analysis
     previous_verdict: dict | None = None
     previous_signals: list[dict] | None = None

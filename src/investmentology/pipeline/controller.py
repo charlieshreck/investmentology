@@ -30,7 +30,7 @@ from investmentology.agents.skills import (
     SKILLS,
 )
 from investmentology.pipeline import state
-from investmentology.pipeline.convergence import should_debate  # noqa: F401
+from investmentology.pipeline.convergence import should_debate, synthesis_ready
 from investmentology.pipeline.pre_filter import deterministic_pre_filter
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
 from investmentology.registry.db import Database
@@ -186,6 +186,9 @@ class PipelineController:
 
             elif step == state.STEP_GATE_DECISION:
                 await self._handle_gate_decision(cycle_id, ticker, step_id)
+
+            elif step == state.STEP_RESEARCH:
+                await self._handle_research(cycle_id, ticker, step_id)
 
             elif step.startswith(state.STEP_AGENT_PREFIX):
                 agent_name = step[len(state.STEP_AGENT_PREFIX):]
@@ -529,6 +532,13 @@ class PipelineController:
         ):
             return
 
+        # Wait for research step if it exists (may not for legacy cycles)
+        research_status = state.get_step_status(
+            self.db, cycle_id, ticker, state.STEP_RESEARCH,
+        )
+        if research_status and research_status["status"] not in ("completed", "failed", "expired"):
+            return
+
         skill = SKILLS.get(agent_name)
         if not skill:
             state.mark_failed(self.db, step_id, f"Unknown agent: {agent_name}")
@@ -570,14 +580,99 @@ class PipelineController:
                 name=f"cli-{agent_name}-{ticker}",
             )
 
+    async def _handle_research(
+        self, cycle_id: UUID, ticker: str, step_id: int,
+    ) -> None:
+        """Gather raw research data and send to Gemini for synthesis."""
+        if not state.is_step_completed(
+            self.db, cycle_id, ticker, state.STEP_GATE_DECISION,
+        ):
+            return
+
+        state.mark_running(self.db, step_id)
+        try:
+            # 1. Gather raw research material
+            from investmentology.data.research_gatherer import ResearchGatherer
+            gatherer = ResearchGatherer()
+
+            fundamentals = state.get_data_cache(
+                self.db, cycle_id, ticker, "fundamentals",
+            )
+            company_name = (fundamentals or {}).get("name", ticker)
+
+            raw_research = await gatherer.gather(ticker, company_name)
+            if not raw_research:
+                logger.warning("No research data gathered for %s", ticker)
+                state.mark_completed(self.db, step_id)
+                return
+
+            # 2. Build research prompt and send to Gemini via HB proxy
+            research_prompt = gatherer.build_research_prompt(
+                ticker, company_name, raw_research,
+            )
+
+            try:
+                llm_response = await self.gateway.call(
+                    provider="remote-researcher",
+                    system_prompt=(
+                        "You are a senior equity research analyst preparing a briefing "
+                        "for an investment committee. Be specific with dates, numbers, "
+                        "and attributions. No filler — every sentence must contain a fact."
+                    ),
+                    user_prompt=research_prompt,
+                    model="gemini-2.5-pro",
+                )
+                briefing = llm_response.content
+            except Exception:
+                logger.warning(
+                    "Gemini research synthesis failed for %s, using raw summary",
+                    ticker, exc_info=True,
+                )
+                # Fallback: store raw headlines as minimal briefing
+                briefing = gatherer.build_fallback_briefing(ticker, raw_research)
+
+            # 3. Cache the research briefing
+            state.store_data_cache(
+                self.db, cycle_id, ticker, "research_briefing",
+                {"briefing": briefing, "raw_sources": len(raw_research.get("articles", []))},
+            )
+
+            state.mark_completed(self.db, step_id)
+            logger.info(
+                "Research for %s completed (%d chars, %d sources)",
+                ticker, len(briefing), len(raw_research.get("articles", [])),
+            )
+        except Exception as e:
+            # Research failure should NOT block agents — mark completed anyway
+            state.mark_completed(self.db, step_id)
+            logger.warning("Research failed for %s, proceeding without: %s", ticker, e)
+
     async def _handle_debate(
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
-        """Trigger debate if agents disagree significantly."""
-        if not state.are_all_agent_steps_completed(
+        """Trigger debate if agents disagree significantly.
+
+        Uses a soft completeness gate: proceeds when enough agents have
+        finished (completed or failed) rather than waiting for all.
+        """
+        statuses = state.count_agent_step_statuses(
             self.db, cycle_id, ticker, PRIMARY_AGENT_NAMES,
-        ):
+        )
+        completed = statuses.get("completed", 0)
+        failed = statuses.get("failed", 0)
+        expired = statuses.get("expired", 0)
+        finished = completed + failed + expired
+        total = len(PRIMARY_AGENT_NAMES)
+
+        # Soft gate: need 4+ completed, OR all agents finished (completed/failed/expired)
+        if not synthesis_ready(completed, total, True, True) and finished < total:
             return
+
+        if failed or expired:
+            logger.info(
+                "Debate for %s proceeding with %d/%d completed (%d failed, %d expired)",
+                ticker, completed, total, failed, expired,
+            )
 
         state.mark_running(self.db, step_id)
         try:
@@ -1016,6 +1111,15 @@ class PipelineController:
                 self.db, cycle_id, ticker, "technical_indicators",
             )
 
+        # 3b. Research briefing from cache
+        research_briefing = None
+        if cycle_id:
+            rb = state.get_data_cache(
+                self.db, cycle_id, ticker, "research_briefing",
+            )
+            if rb:
+                research_briefing = rb.get("briefing")
+
         # 4. Portfolio context
         portfolio_context = self._get_portfolio_context(ticker)
 
@@ -1063,6 +1167,7 @@ class PipelineController:
             quant_gate_rank=qg_rank,
             piotroski_score=piotroski,
             altman_z_score=altman_z,
+            research_briefing=research_briefing,
         )
 
     def _get_analysis_tickers(self) -> list[str]:

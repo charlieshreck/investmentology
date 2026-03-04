@@ -24,6 +24,7 @@ STEP_DATA_VALIDATE = "data_validate"
 STEP_PRE_FILTER = "pre_filter"
 STEP_SCREENER_PREFIX = "screener:"
 STEP_GATE_DECISION = "gate_decision"
+STEP_RESEARCH = "research"
 STEP_AGENT_PREFIX = "agent:"
 STEP_DEBATE = "debate"
 STEP_SYNTHESIS = "synthesis"
@@ -263,6 +264,22 @@ def are_all_agent_steps_completed(
     return rows[0]["cnt"] == len(agent_names) if rows else False
 
 
+def count_agent_step_statuses(
+    db: Database, cycle_id: UUID, ticker: str, agent_names: list[str],
+) -> dict[str, int]:
+    """Count agent steps by status for a ticker. Returns {status: count}."""
+    placeholders = ", ".join(["%s"] * len(agent_names))
+    steps = [f"agent:{name}" for name in agent_names]
+    rows = db.execute(
+        f"SELECT status, COUNT(*) AS cnt FROM invest.pipeline_state "
+        f"WHERE cycle_id = %s AND ticker = %s "
+        f"AND step IN ({placeholders}) "
+        f"GROUP BY status",
+        (cycle_id, ticker, *steps),
+    )
+    return {r["status"]: r["cnt"] for r in rows}
+
+
 def get_ticker_progress(
     db: Database, cycle_id: UUID, ticker: str,
 ) -> list[dict]:
@@ -456,13 +473,16 @@ def create_analysis_steps(
     agent_names: list[str],
     include_debate: bool = True,
     include_synthesis: bool = True,
+    include_research: bool = True,
 ) -> int:
-    """Create Phase 2 steps: analysis agents, debate, synthesis.
+    """Create Phase 2 steps: research, analysis agents, debate, synthesis.
 
     Called only for tickers that pass the scout gate. Data fetch/validate
     and screener steps already exist from Phase 1.
     """
     steps = []
+    if include_research:
+        steps.append(STEP_RESEARCH)
     for name in agent_names:
         steps.append(f"{STEP_AGENT_PREFIX}{name}")
     if include_debate:

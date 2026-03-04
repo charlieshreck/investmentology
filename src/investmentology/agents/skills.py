@@ -116,6 +116,7 @@ free cash flow, and ample liquid reserves.""",
         "filing_context", "institutional_context", "social_sentiment",
         "portfolio_context", "previous_verdict", "previous_signals",
         "position_thesis", "position_type", "days_held", "thesis_health",
+        "analyst_ratings", "short_interest", "research_briefing",
     ],
     allowed_tags=[
         # Fundamental
@@ -658,6 +659,7 @@ Define exit conditions before entry. If wrong, cut immediately.""",
         "earnings_context", "technical_indicators", "insider_context",
         "portfolio_context", "previous_verdict",
         "pnl_pct", "entry_price",
+        "analyst_ratings", "short_interest", "research_briefing",
     ],
     allowed_tags=[
         # Macro
@@ -882,7 +884,7 @@ Price/Book < 0.7 with positive tangible book = auto-PASS. Earnings yield \
         "When in doubt, PASS. Moderate overvaluation is not your concern -- reject only CLEAR, EXTREME overvaluation.",
     ],
     required_data=["fundamentals", "sector", "industry"],
-    optional_data=["quant_gate_rank"],
+    optional_data=["quant_gate_rank", "news_context", "research_briefing"],
     allowed_tags=[
         "OVERVALUED", "FAIRLY_VALUED", "UNDERVALUED", "DEEP_VALUE",
         "MARGIN_COMPRESSING", "ROIC_DECLINING", "ROIC_IMPROVING",

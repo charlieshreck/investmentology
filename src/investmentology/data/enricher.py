@@ -57,6 +57,8 @@ class DataEnricher:
         self._enrich_filings(request)
         self._enrich_holders(request)
         self._enrich_technical(request)
+        self._enrich_analyst_ratings(request)
+        self._enrich_short_interest(request)
         return request
 
     def _enrich_macro(self, request: AnalysisRequest) -> None:
@@ -171,6 +173,22 @@ class DataEnricher:
         except Exception:
             logger.warning("Institutional holders enrichment failed for %s", request.ticker)
             request.institutional_context = []
+
+    def _enrich_analyst_ratings(self, request: AnalysisRequest) -> None:
+        if not self._finnhub or request.analyst_ratings is not None:
+            return
+        try:
+            request.analyst_ratings = self._finnhub.get_analyst_ratings(request.ticker)
+        except Exception:
+            logger.warning("Analyst ratings enrichment failed for %s", request.ticker)
+
+    def _enrich_short_interest(self, request: AnalysisRequest) -> None:
+        if not self._finnhub or request.short_interest is not None:
+            return
+        try:
+            request.short_interest = self._finnhub.get_short_interest(request.ticker)
+        except Exception:
+            logger.warning("Short interest enrichment failed for %s", request.ticker)
 
     def _enrich_technical(self, request: AnalysisRequest) -> None:
         """Compute technical indicators for Simons agent."""

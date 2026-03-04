@@ -28,7 +28,7 @@ PROXY_TOKEN = os.environ.get("HB_PROXY_TOKEN", "")
 if not PROXY_TOKEN:
     raise RuntimeError("HB_PROXY_TOKEN env var is required")
 
-MAX_CONCURRENT_AGENTS = int(os.environ.get("MAX_CONCURRENT_AGENTS", "4"))
+MAX_CONCURRENT_AGENTS = int(os.environ.get("MAX_CONCURRENT_AGENTS", "8"))
 _agent_semaphore: asyncio.Semaphore | None = None
 _active_agents = 0
 
@@ -46,6 +46,8 @@ AGENT_CONFIG = {
     "dalio":          {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
     "data-analyst":   {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 600},
     "board-gemini":   {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 360},
+    # Research agent — deep research synthesis (large context)
+    "researcher":     {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 900},
 }
 
 app = FastAPI(title="HB Agent Proxy", docs_url=None, redoc_url=None)

@@ -156,6 +156,104 @@ class FinnhubProvider:
             logger.debug("Failed to fetch Finnhub insider data for %s", ticker)
             return []
 
+    def get_analyst_ratings(self, ticker: str) -> dict | None:
+        """Get analyst recommendation trends and price targets."""
+        cache_key = f"analyst:{ticker}"
+        cached = self._cached(cache_key)
+        if cached is not None:
+            return cached
+
+        client = self._get_client()
+
+        try:
+            # Recommendation trends (buy/hold/sell counts over time)
+            trends_raw = client.recommendation_trends(ticker)
+            trends = []
+            for t in (trends_raw or [])[:4]:  # Last 4 months
+                trends.append({
+                    "period": t.get("period", ""),
+                    "strong_buy": t.get("strongBuy", 0),
+                    "buy": t.get("buy", 0),
+                    "hold": t.get("hold", 0),
+                    "sell": t.get("sell", 0),
+                    "strong_sell": t.get("strongSell", 0),
+                })
+
+            # Price target consensus
+            target_raw = client.price_target(ticker)
+            target = None
+            if target_raw:
+                target = {
+                    "high": target_raw.get("targetHigh"),
+                    "low": target_raw.get("targetLow"),
+                    "mean": target_raw.get("targetMean"),
+                    "median": target_raw.get("targetMedian"),
+                }
+
+            # Upgrades/downgrades
+            upgrades_raw = client.upgrade_downgrade(ticker)
+            recent_changes = []
+            for u in (upgrades_raw or [])[:5]:
+                recent_changes.append({
+                    "firm": u.get("company", ""),
+                    "action": u.get("action", ""),
+                    "from_grade": u.get("fromGrade", ""),
+                    "to_grade": u.get("toGrade", ""),
+                    "date": u.get("gradeTime", ""),
+                })
+
+            result = {
+                "trends": trends,
+                "price_target": target,
+                "recent_changes": recent_changes,
+            }
+            self._set_cache(cache_key, result)
+            return result
+        except Exception:
+            logger.debug("Failed to fetch Finnhub analyst ratings for %s", ticker)
+            return None
+
+    def get_short_interest(self, ticker: str) -> dict | None:
+        """Get short interest data."""
+        cache_key = f"short:{ticker}"
+        cached = self._cached(cache_key)
+        if cached is not None:
+            return cached
+
+        client = self._get_client()
+
+        try:
+            raw = client.stock_short_interest(
+                ticker,
+                _from=(datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
+                to=datetime.now().strftime("%Y-%m-%d"),
+            )
+            data_points = raw.get("data", []) if raw else []
+            if not data_points:
+                return None
+
+            latest = data_points[0] if data_points else {}
+            previous = data_points[1] if len(data_points) > 1 else {}
+
+            result = {
+                "short_interest": latest.get("shortInterest", 0),
+                "settlement_date": latest.get("settlementDate", ""),
+                "previous_short_interest": previous.get("shortInterest", 0),
+                "change_pct": (
+                    round(
+                        (latest.get("shortInterest", 0) - previous.get("shortInterest", 0))
+                        / previous["shortInterest"] * 100, 1
+                    )
+                    if previous.get("shortInterest")
+                    else None
+                ),
+            }
+            self._set_cache(cache_key, result)
+            return result
+        except Exception:
+            logger.debug("Failed to fetch Finnhub short interest for %s", ticker)
+            return None
+
     def get_social_sentiment(self, ticker: str) -> dict | None:
         """Get aggregated social media sentiment (Reddit + Twitter)."""
         cache_key = f"social:{ticker}"

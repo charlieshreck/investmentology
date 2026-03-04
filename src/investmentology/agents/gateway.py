@@ -549,7 +549,9 @@ class LLMGateway:
                 ("remote-dalio", "dalio", "gemini-2.5-pro"),
                 ("remote-data-analyst", "data-analyst", "gemini-2.5-pro"),
                 ("remote-board-gemini", "board-gemini", "gemini-2.5-pro"),
+                ("remote-researcher", "researcher", "gemini-2.5-pro"),
             ]:
+                timeout = 900 if agent == "researcher" else 600
                 gw.register_remote_cli_provider(
                     RemoteCLIProviderConfig(
                         name=name,
@@ -557,7 +559,7 @@ class LLMGateway:
                         agent_name=agent,
                         auth_token=_tok,
                         default_model=model,
-                        timeout_seconds=600,
+                        timeout_seconds=timeout,
                     )
                 )
 
