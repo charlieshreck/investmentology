@@ -56,9 +56,9 @@ def calculate_piotroski(
     # 1. Positive net income
     details["positive_net_income"] = current.net_income > ZERO
 
-    # 2. Positive operating cash flow (proxy: operating_income > 0)
-    # Without a cash flow statement, operating income is the best available proxy.
-    details["positive_ocf"] = current.operating_income > ZERO
+    # 2. Positive operating cash flow (use real OCF when available, else operating_income proxy)
+    ocf = current.operating_cash_flow if current.operating_cash_flow != ZERO else current.operating_income
+    details["positive_ocf"] = ocf > ZERO
 
     # 3. ROA improving
     if previous is not None and current.total_assets > ZERO and previous.total_assets > ZERO:
@@ -68,10 +68,8 @@ def calculate_piotroski(
     else:
         details["roa_improving"] = False
 
-    # 4. Accruals quality: OCF > net income
-    # Without real OCF, approximate: operating_income > net_income
-    # (meaning real cash earnings exceed reported, i.e., low accruals)
-    details["accruals_quality"] = current.operating_income > current.net_income
+    # 4. Accruals quality: OCF > net income (low accruals = higher quality)
+    details["accruals_quality"] = ocf > current.net_income
 
     # --- Leverage ---
 

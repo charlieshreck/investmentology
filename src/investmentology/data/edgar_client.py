@@ -58,6 +58,12 @@ FRAME_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
     "stockholders_equity": [
         ("StockholdersEquity", "USD", "Q4I"),
     ],
+    "retained_earnings": [
+        ("RetainedEarningsAccumulatedDeficit", "USD", "Q4I"),
+    ],
+    "operating_cash_flow": [
+        ("NetCashProvidedByUsedInOperatingActivities", "USD", ""),
+    ],
 }
 
 

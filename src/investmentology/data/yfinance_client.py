@@ -175,9 +175,9 @@ class YFinanceClient:
             if current_ratio and current_liabilities_est:
                 current_assets_est = _to_decimal(float(current_liabilities_est) * current_ratio)
 
-            # Total liabilities from balance sheet (not just totalDebt which
-            # excludes accounts payable, deferred revenue, pension, etc.)
+            # Total liabilities + retained earnings from balance sheet
             total_liabilities_val = None
+            retained_earnings_val = None
             try:
                 bs = stock.balance_sheet
                 if bs is not None and not bs.empty:
@@ -189,10 +189,22 @@ class YFinanceClient:
                             raw = bs.loc[label].iloc[0]
                             total_liabilities_val = _to_decimal(raw)
                             break
+                    if "Retained Earnings" in bs.index:
+                        retained_earnings_val = _to_decimal(bs.loc["Retained Earnings"].iloc[0])
             except Exception:
                 pass
             if total_liabilities_val is None:
                 total_liabilities_val = _to_decimal(info.get("totalDebt"))
+
+            # Operating cash flow from cash flow statement
+            operating_cash_flow_val = None
+            try:
+                cf = stock.cashflow
+                if cf is not None and not cf.empty:
+                    if "Operating Cash Flow" in cf.index:
+                        operating_cash_flow_val = _to_decimal(cf.loc["Operating Cash Flow"].iloc[0])
+            except Exception:
+                pass
 
             result: dict[str, Any] = {
                 "ticker": ticker,
@@ -217,6 +229,8 @@ class YFinanceClient:
                 "sector": info.get("sector"),
                 "industry": info.get("industry"),
                 "name": info.get("shortName"),
+                "retained_earnings": retained_earnings_val,
+                "operating_cash_flow": operating_cash_flow_val,
                 "enterprise_value": _to_decimal(info.get("enterpriseValue")),
                 "pe_ratio": _to_decimal(info.get("trailingPE")),
                 "forward_pe": _to_decimal(info.get("forwardPE")),

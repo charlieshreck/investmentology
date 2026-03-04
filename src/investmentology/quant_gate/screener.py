@@ -74,6 +74,8 @@ def _dict_to_snapshot(d: dict) -> FundamentalsSnapshot | None:
             total_liabilities=d.get("total_liabilities") or Decimal(0),
             shares_outstanding=int(d["shares_outstanding"]) if d.get("shares_outstanding") else 0,
             price=d.get("price") or Decimal(0),
+            retained_earnings=d.get("retained_earnings") or Decimal(0),
+            operating_cash_flow=d.get("operating_cash_flow") or Decimal(0),
         )
     except (KeyError, TypeError, ValueError):
         logger.debug("Failed to convert dict to snapshot for %s", d.get("ticker"))

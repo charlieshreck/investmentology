@@ -67,9 +67,10 @@ def calculate_altman(snapshot: FundamentalsSnapshot) -> AltmanResult | None:
     a = working_capital / ta
 
     # B: Retained Earnings / Total Assets
-    # NOTE: Uses net_income as proxy — retained_earnings not available from yfinance/EDGAR bulk.
-    # This understates B for mature companies with large accumulated RE.
-    b = snapshot.net_income / ta
+    # Use real retained_earnings when available; fall back to net_income as proxy.
+    re = snapshot.retained_earnings if snapshot.retained_earnings != ZERO else snapshot.net_income
+    b = re / ta
+    has_real_re = snapshot.retained_earnings != ZERO
 
     # C: EBIT / Total Assets
     c = snapshot.operating_income / ta
@@ -86,5 +87,5 @@ def calculate_altman(snapshot: FundamentalsSnapshot) -> AltmanResult | None:
         ticker=snapshot.ticker,
         z_score=z_score,
         zone=_classify_zone(z_score),
-        is_approximate=True,  # net_income proxy for retained_earnings
+        is_approximate=not has_real_re,
     )

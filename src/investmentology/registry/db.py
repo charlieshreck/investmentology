@@ -28,7 +28,14 @@ class Database:
     def connect(self) -> None:
         """Create a connection pool (or single connection if pool unavailable)."""
         if HAS_POOL:
-            self._pool = ConnectionPool(self._dsn, kwargs={"row_factory": dict_row})
+            self._pool = ConnectionPool(
+                self._dsn,
+                min_size=2,
+                max_size=10,
+                timeout=30.0,
+                max_lifetime=3600,
+                kwargs={"row_factory": dict_row},
+            )
             self._pool.wait()
             logger.info("Connection pool established")
         else:
