@@ -9,7 +9,6 @@ import { useWatchlist } from "../hooks/useWatchlist";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
 import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
-import { OrbitBorder } from "../components/shared/OrbitBorder";
 import { ChevronDown } from "lucide-react";
 
 import type { WatchlistItem, AgentStance } from "../types/models";
@@ -246,7 +245,6 @@ function ItemCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <OrbitBorder verdict={v?.recommendation || "WATCHLIST"} radius={10}>
     <div style={{
       borderRadius: "var(--radius-sm)",
       overflow: "hidden",
@@ -423,7 +421,6 @@ function ItemCard({
         )}
       </AnimatePresence>
     </div>
-    </OrbitBorder>
   );
 }
 

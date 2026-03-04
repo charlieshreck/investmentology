@@ -9,6 +9,7 @@ import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
 
 // Layer 1
+import { OrbitBorder } from "../components/shared/OrbitBorder";
 import { HeroVerdictStrip } from "../components/deepdive/HeroVerdictStrip";
 import { PositionTile } from "../components/deepdive/PositionTile";
 import { SignalPills } from "../components/deepdive/SignalPills";
@@ -441,8 +442,12 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       {/* Price Chart */}
       <PriceChart ticker={data.ticker} />
 
-      {/* Hero Verdict Strip */}
-      {data.verdict && <HeroVerdictStrip verdict={data.verdict} />}
+      {/* Hero Verdict Strip — glowing orbit border matches verdict */}
+      {data.verdict && (
+        <OrbitBorder verdict={data.verdict.recommendation || "WATCHLIST"} radius={18}>
+          <HeroVerdictStrip verdict={data.verdict} />
+        </OrbitBorder>
+      )}
 
       {/* Position Tile (compact P&L) */}
       {data.position && <PositionTile position={data.position} />}

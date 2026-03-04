@@ -9,7 +9,6 @@ import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
 import { SignalTagCloud } from "../components/shared/SignalTagCloud";
 import { FormattedProse } from "../components/shared/FormattedProse";
-import { OrbitBorder } from "../components/shared/OrbitBorder";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
@@ -217,7 +216,6 @@ function RecCard({
     : vColor;
 
   return (
-    <OrbitBorder verdict={rec.verdict} radius={18}>
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -641,7 +639,6 @@ function RecCard({
         )}
       </AnimatePresence>
     </motion.div>
-    </OrbitBorder>
   );
 }
 

@@ -127,7 +127,15 @@ export function OrbitBorder({
   const filterOuterId = `glow-outer-${verdict}-${size?.w ?? 0}`;
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div
+      ref={containerRef}
+      style={{
+        position: "relative",
+        borderRadius: radius,
+        border: `1px solid ${config.color}40`,
+        boxShadow: `0 0 20px ${config.color}15, 0 0 60px ${config.color}08, inset 0 0 20px ${config.color}06`,
+      }}
+    >
       {children}
 
       {pathData && (
@@ -151,6 +159,15 @@ export function OrbitBorder({
               <feGaussianBlur in="SourceGraphic" stdDeviation="8" />
             </filter>
           </defs>
+
+          {/* Static glowing border frame */}
+          <path
+            d={pathData.d}
+            fill="none"
+            stroke={config.color}
+            strokeWidth={1}
+            opacity={0.25}
+          />
 
           {/* Outer glow trail */}
           <OrbitPath
