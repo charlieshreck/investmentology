@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, Depends, Query
 
 from investmentology.api.deps import get_gateway, get_registry
+from investmentology.api.schemas import SystemHealthResponse
 from investmentology.agents.gateway import LLMGateway
 from investmentology.registry.queries import Registry
 
@@ -145,7 +146,7 @@ def agents_panel(
     return {"agents": agents}
 
 
-@router.get("/system/health")
+@router.get("/system/health", response_model=SystemHealthResponse)
 def health_check(
     registry: Registry = Depends(get_registry),
     gateway: LLMGateway = Depends(get_gateway),

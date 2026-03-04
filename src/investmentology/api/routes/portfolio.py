@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from investmentology.api.deps import get_registry
+from investmentology.api.schemas import PortfolioBalanceResponse
 from investmentology.api.services.portfolio_service import PortfolioService
 from investmentology.registry.queries import Registry
 from investmentology.timing.sizing import PositionSizer, SizingConfig
@@ -284,7 +285,7 @@ def get_closed_positions(registry: Registry = Depends(get_registry)) -> dict:
     return PortfolioService(registry).get_closed()
 
 
-@router.get("/portfolio/balance")
+@router.get("/portfolio/balance", response_model=PortfolioBalanceResponse)
 def get_portfolio_balance(registry: Registry = Depends(get_registry)) -> dict:
     """Portfolio balance: sector allocation, risk spectrum, and soft-band health."""
     return PortfolioService(registry).get_balance()

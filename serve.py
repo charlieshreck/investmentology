@@ -1,4 +1,6 @@
 """Single-port server: FastAPI API + PWA static files on port 80."""
+import json
+import logging
 import uvicorn
 from pathlib import Path
 from fastapi import Request, Response
@@ -7,6 +9,26 @@ from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from investmentology.api.app import create_app
+
+
+class JSONFormatter(logging.Formatter):
+    """JSON log formatter for structured logging."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_data: dict = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        # Merge extra fields (request_id, method, path, status, duration_ms)
+        for key in ("request_id", "method", "path", "status", "duration_ms"):
+            val = getattr(record, key, None)
+            if val is not None:
+                log_data[key] = val
+        if record.exc_info and record.exc_info[0]:
+            log_data["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_data)
 
 PWA_DIR = Path(__file__).parent / "pwa" / "dist"
 
@@ -69,4 +91,9 @@ async def spa_fallback(request: Request, full_path: str):
 
 
 if __name__ == "__main__":
+    # Configure structured JSON logging
+    logging.basicConfig(level=logging.INFO)
+    for handler in logging.root.handlers:
+        handler.setFormatter(JSONFormatter())
+
     uvicorn.run(app, host="0.0.0.0", port=80)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -163,6 +165,38 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique request ID to each request and response."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("x-request-id", str(uuid.uuid4())[:8])
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["x-request-id"] = request_id
+        return response
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Log API requests with method, path, status, and duration."""
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.monotonic()
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+            logger.info(
+                "request",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                    "request_id": getattr(request.state, "request_id", ""),
+                },
+            )
+        return response
+
+
 def create_app(*, use_lifespan: bool = True) -> FastAPI:
     """Build and return the FastAPI application.
 
@@ -195,8 +229,10 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Auth middleware — must be added before routes
+    # Middleware stack (executed outermost-first: RequestID → Logging → Auth)
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(RequestIDMiddleware)
 
     # Import and mount route modules
     from investmentology.api.routes import (
