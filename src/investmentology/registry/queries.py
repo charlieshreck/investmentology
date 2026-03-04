@@ -1,243 +1,117 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import date
 from decimal import Decimal
 
 from investmentology.models.decision import Decision, DecisionType
-from investmentology.models.lifecycle import WatchlistState, validate_transition
+from investmentology.models.lifecycle import WatchlistState
 from investmentology.models.position import PortfolioPosition
 from investmentology.models.prediction import Prediction
 from investmentology.models.stock import FundamentalsSnapshot, Stock
 from investmentology.registry.db import Database
+from investmentology.registry.repos import (
+    CronRepo,
+    DecisionRepo,
+    EnrichedRepo,
+    FundamentalsRepo,
+    LearningRepo,
+    PositionRepo,
+    PredictionRepo,
+    QuantGateRepo,
+    SignalRepo,
+    StockRepo,
+    VerdictRepo,
+    WatchlistRepo,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class Registry:
-    """Query layer bridging Python models and the invest schema."""
+    """Query layer bridging Python models and the invest schema.
+
+    Thin facade delegating to domain-specific repo classes.
+    """
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._stocks = StockRepo(db)
+        self._fundamentals = FundamentalsRepo(db)
+        self._quant_gate = QuantGateRepo(db)
+        self._decisions = DecisionRepo(db)
+        self._predictions = PredictionRepo(db)
+        self._watchlist = WatchlistRepo(db)
+        self._positions = PositionRepo(db)
+        self._signals = SignalRepo(db)
+        self._verdicts = VerdictRepo(db)
+        self._enriched = EnrichedRepo(db)
+        self._cron = CronRepo(db)
+        self._learning = LearningRepo(db)
 
     # ------------------------------------------------------------------
     # Stock universe
     # ------------------------------------------------------------------
 
     def upsert_stocks(self, stocks: list[Stock]) -> int:
-        """Insert or update stocks. Returns count of affected rows."""
-        query = """
-            INSERT INTO invest.stocks (ticker, name, sector, industry, market_cap, exchange, is_active, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (ticker) DO UPDATE SET
-                name = EXCLUDED.name,
-                sector = EXCLUDED.sector,
-                industry = EXCLUDED.industry,
-                market_cap = EXCLUDED.market_cap,
-                exchange = EXCLUDED.exchange,
-                is_active = EXCLUDED.is_active,
-                updated_at = NOW()
-        """
-        params = [
-            (s.ticker, s.name, s.sector, s.industry, s.market_cap, s.exchange, s.is_active)
-            for s in stocks
-        ]
-        return self._db.execute_many(query, params)
+        return self._stocks.upsert_stocks(stocks)
 
     def get_active_stocks(self) -> list[Stock]:
-        """Return all active stocks."""
-        rows = self._db.execute(
-            "SELECT ticker, name, sector, industry, market_cap, exchange, is_active "
-            "FROM invest.stocks WHERE is_active = TRUE ORDER BY ticker"
-        )
-        return [
-            Stock(
-                ticker=r["ticker"],
-                name=r["name"],
-                sector=r["sector"] or "",
-                industry=r["industry"] or "",
-                market_cap=Decimal(str(r["market_cap"])) if r["market_cap"] else Decimal(0),
-                exchange=r["exchange"] or "",
-                is_active=r["is_active"],
-            )
-            for r in rows
-        ]
+        return self._stocks.get_active_stocks()
 
     # ------------------------------------------------------------------
     # Fundamentals
     # ------------------------------------------------------------------
 
     def insert_fundamentals(self, snapshots: list[FundamentalsSnapshot]) -> int:
-        """Insert fundamental snapshots. Returns count inserted."""
-        query = """
-            INSERT INTO invest.fundamentals_cache (
-                ticker, fetched_at, operating_income, market_cap, total_debt, cash,
-                current_assets, current_liabilities, net_ppe, revenue, net_income,
-                total_assets, total_liabilities, shares_outstanding, price
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        params = [
-            (
-                s.ticker, s.fetched_at, s.operating_income, s.market_cap, s.total_debt,
-                s.cash, s.current_assets, s.current_liabilities, s.net_ppe, s.revenue,
-                s.net_income, s.total_assets, s.total_liabilities, s.shares_outstanding,
-                s.price,
-            )
-            for s in snapshots
-        ]
-        return self._db.execute_many(query, params)
+        return self._fundamentals.insert_fundamentals(snapshots)
 
     def get_latest_fundamentals(self, ticker: str) -> FundamentalsSnapshot | None:
-        """Get the most recent fundamentals for a single ticker."""
-        rows = self._db.execute(
-            "SELECT * FROM invest.fundamentals_cache "
-            "WHERE ticker = %s ORDER BY fetched_at DESC LIMIT 1",
-            (ticker,),
-        )
-        if not rows:
-            return None
-        return self._row_to_fundamentals(rows[0])
+        return self._fundamentals.get_latest_fundamentals(ticker)
 
     def get_all_latest_fundamentals(self) -> list[FundamentalsSnapshot]:
-        """Get the most recent fundamentals for all tickers."""
-        rows = self._db.execute("""
-            SELECT DISTINCT ON (ticker) *
-            FROM invest.fundamentals_cache
-            ORDER BY ticker, fetched_at DESC
-        """)
-        return [self._row_to_fundamentals(r) for r in rows]
+        return self._fundamentals.get_all_latest_fundamentals()
 
     # ------------------------------------------------------------------
     # Quant Gate
     # ------------------------------------------------------------------
 
     def create_quant_gate_run(
-        self, universe_size: int, passed_count: int, config: dict, data_quality: dict | None = None,
+        self, universe_size: int, passed_count: int,
+        config: dict, data_quality: dict | None = None,
     ) -> int:
-        """Create a new quant gate run. Returns the run_id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.quant_gate_runs (run_date, universe_size, passed_count, config, data_quality) "
-            "VALUES (CURRENT_DATE, %s, %s, %s, %s) RETURNING id",
-            (universe_size, passed_count, json.dumps(config), json.dumps(data_quality or {})),
+        return self._quant_gate.create_quant_gate_run(
+            universe_size, passed_count, config, data_quality,
         )
-        return rows[0]["id"]
 
     def insert_quant_gate_results(self, run_id: int, results: list[dict]) -> int:
-        """Insert quant gate ranking results. Returns count inserted."""
-        query = """
-            INSERT INTO invest.quant_gate_results (
-                run_id, ticker, earnings_yield, roic, ey_rank, roic_rank,
-                combined_rank, piotroski_score, altman_z_score,
-                composite_score, altman_zone
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        params = [
-            (
-                run_id, r["ticker"], r.get("earnings_yield"), r.get("roic"),
-                r.get("ey_rank"), r.get("roic_rank"), r.get("combined_rank"),
-                r.get("piotroski_score"), r.get("altman_z_score"),
-                r.get("composite_score"), r.get("altman_zone"),
-            )
-            for r in results
-        ]
-        return self._db.execute_many(query, params)
+        return self._quant_gate.insert_quant_gate_results(run_id, results)
 
     # ------------------------------------------------------------------
-    # Decisions (append-only)
+    # Decisions
     # ------------------------------------------------------------------
 
     def log_decision(self, decision: Decision) -> int:
-        """Log a decision. Returns the decision id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.decisions "
-            "(ticker, decision_type, layer_source, confidence, reasoning, signals, metadata) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (
-                decision.ticker,
-                decision.decision_type.value,
-                decision.layer_source,
-                decision.confidence,
-                decision.reasoning,
-                json.dumps(decision.signals) if decision.signals else None,
-                json.dumps(decision.metadata) if decision.metadata else None,
-            ),
-        )
-        return rows[0]["id"]
+        return self._decisions.log_decision(decision)
 
     def get_decisions(
-        self,
-        ticker: str | None = None,
-        decision_type: DecisionType | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        self, ticker: str | None = None, decision_type: DecisionType | None = None,
+        limit: int = 100, offset: int = 0,
     ) -> list[Decision]:
-        """Get decisions with optional filters."""
-        conditions: list[str] = []
-        params: list = []
-
-        if ticker is not None:
-            conditions.append("ticker = %s")
-            params.append(ticker)
-        if decision_type is not None:
-            conditions.append("decision_type = %s")
-            params.append(decision_type.value)
-
-        where = ""
-        if conditions:
-            where = "WHERE " + " AND ".join(conditions)
-
-        rows = self._db.execute(
-            f"SELECT id, ticker, decision_type, layer_source, confidence, "
-            f"reasoning, signals, metadata, created_at "
-            f"FROM invest.decisions {where} "
-            f"ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            tuple(params + [limit, offset]),
-        )
-        return [self._row_to_decision(r) for r in rows]
+        return self._decisions.get_decisions(ticker, decision_type, limit, offset)
 
     # ------------------------------------------------------------------
     # Predictions
     # ------------------------------------------------------------------
 
     def log_prediction(self, prediction: Prediction) -> int:
-        """Log a prediction. Returns the prediction id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.predictions "
-            "(ticker, prediction_type, predicted_value, confidence, horizon_days, "
-            "settlement_date, source) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (
-                prediction.ticker,
-                prediction.prediction_type,
-                prediction.predicted_value,
-                prediction.confidence,
-                prediction.horizon_days,
-                prediction.settlement_date,
-                prediction.source,
-            ),
-        )
-        return rows[0]["id"]
+        return self._predictions.log_prediction(prediction)
 
     def settle_prediction(self, prediction_id: int, actual_value: Decimal) -> None:
-        """Settle a prediction with its actual outcome."""
-        self._db.execute(
-            "UPDATE invest.predictions "
-            "SET actual_value = %s, is_settled = TRUE, settled_at = NOW() "
-            "WHERE id = %s",
-            (actual_value, prediction_id),
-        )
+        self._predictions.settle_prediction(prediction_id, actual_value)
 
     def get_unsettled_predictions(self, as_of: date | None = None) -> list[Prediction]:
-        """Get predictions due for settlement."""
-        target = as_of or date.today()
-        rows = self._db.execute(
-            "SELECT * FROM invest.predictions "
-            "WHERE is_settled = FALSE AND settlement_date <= %s "
-            "ORDER BY settlement_date",
-            (target,),
-        )
-        return [self._row_to_prediction(r) for r in rows]
+        return self._predictions.get_unsettled_predictions(as_of)
 
     # ------------------------------------------------------------------
     # Watchlist
@@ -247,278 +121,89 @@ class Registry:
         self, ticker: str, state: WatchlistState = WatchlistState.UNIVERSE,
         source_run_id: int | None = None, notes: str | None = None,
     ) -> int:
-        """Add a stock to the watchlist. Returns watchlist id.
-
-        Uses ON CONFLICT to update existing entries rather than creating duplicates.
-        """
-        rows = self._db.execute(
-            "INSERT INTO invest.watchlist (ticker, state, source_run_id, notes) "
-            "VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (ticker, state) DO UPDATE SET "
-            "source_run_id = EXCLUDED.source_run_id, "
-            "notes = EXCLUDED.notes, "
-            "updated_at = NOW() "
-            "RETURNING id",
-            (ticker, state.value, source_run_id, notes),
-        )
-        return rows[0]["id"]
+        return self._watchlist.add_to_watchlist(ticker, state, source_run_id, notes)
 
     def update_watchlist_state(self, ticker: str, new_state: WatchlistState) -> None:
-        """Update watchlist state with transition validation."""
-        rows = self._db.execute(
-            "SELECT state FROM invest.watchlist WHERE ticker = %s ORDER BY updated_at DESC LIMIT 1",
-            (ticker,),
-        )
-        if not rows:
-            raise ValueError(f"Ticker {ticker} not found in watchlist")
-
-        current_state = WatchlistState(rows[0]["state"])
-        if not validate_transition(current_state, new_state):
-            raise ValueError(
-                f"Invalid transition: {current_state.value} -> {new_state.value}"
-            )
-
-        self._db.execute(
-            "UPDATE invest.watchlist SET state = %s, updated_at = NOW() "
-            "WHERE ticker = %s AND state = %s",
-            (new_state.value, ticker, current_state.value),
-        )
+        self._watchlist.update_watchlist_state(ticker, new_state)
 
     def get_watchlist_by_state(self, state: WatchlistState | None = None) -> list[dict]:
-        """Get watchlist items, optionally filtered by state."""
-        if state is not None:
-            return self._db.execute(
-                "SELECT * FROM invest.watchlist WHERE state = %s ORDER BY updated_at DESC",
-                (state.value,),
-            )
-        return self._db.execute(
-            "SELECT * FROM invest.watchlist ORDER BY state, updated_at DESC"
-        )
+        return self._watchlist.get_watchlist_by_state(state)
 
     # ------------------------------------------------------------------
     # Portfolio positions
     # ------------------------------------------------------------------
 
     def upsert_position(self, position: PortfolioPosition) -> None:
-        """Insert or update a portfolio position."""
-        self._db.execute(
-            "INSERT INTO invest.portfolio_positions "
-            "(ticker, entry_date, entry_price, current_price, shares, position_type, "
-            "weight, stop_loss, fair_value_estimate, thesis, is_closed, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, NOW()) "
-            "ON CONFLICT (ticker) WHERE is_closed = false DO UPDATE SET "
-            "current_price = EXCLUDED.current_price, "
-            "shares = EXCLUDED.shares, "
-            "weight = EXCLUDED.weight, "
-            "stop_loss = EXCLUDED.stop_loss, "
-            "fair_value_estimate = EXCLUDED.fair_value_estimate, "
-            "thesis = EXCLUDED.thesis, "
-            "updated_at = NOW()",
-            (
-                position.ticker, position.entry_date, position.entry_price,
-                position.current_price, position.shares, position.position_type,
-                position.weight, position.stop_loss, position.fair_value_estimate,
-                position.thesis,
-            ),
-        )
+        self._positions.upsert_position(position)
 
     def get_open_positions(self) -> list[PortfolioPosition]:
-        """Get all open (non-closed) portfolio positions."""
-        rows = self._db.execute(
-            "SELECT * FROM invest.portfolio_positions "
-            "WHERE is_closed = FALSE ORDER BY ticker"
-        )
-        return [self._row_to_position(r) for r in rows]
+        return self._positions.get_open_positions()
 
     def create_position(
-        self,
-        ticker: str,
-        entry_date: date,
-        entry_price: Decimal,
-        shares: Decimal,
-        position_type: str,
-        weight: Decimal,
-        stop_loss: Decimal | None = None,
-        fair_value_estimate: Decimal | None = None,
+        self, ticker: str, entry_date: date, entry_price: Decimal,
+        shares: Decimal, position_type: str, weight: Decimal,
+        stop_loss: Decimal | None = None, fair_value_estimate: Decimal | None = None,
         thesis: str = "",
     ) -> int:
-        """Create a new portfolio position. Returns position id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.portfolio_positions "
-            "(ticker, entry_date, entry_price, current_price, shares, position_type, "
-            "weight, stop_loss, fair_value_estimate, thesis, is_closed) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING id",
-            (
-                ticker, entry_date, entry_price, entry_price, shares,
-                position_type, weight, stop_loss, fair_value_estimate, thesis,
-            ),
+        return self._positions.create_position(
+            ticker, entry_date, entry_price, shares, position_type,
+            weight, stop_loss, fair_value_estimate, thesis,
         )
-        return rows[0]["id"]
 
     def close_position(
         self, position_id: int, exit_price: Decimal, exit_date: date | None = None,
     ) -> None:
-        """Close a position with exit price and compute realized P&L."""
-        actual_exit_date = exit_date or date.today()
-        self._db.execute(
-            "UPDATE invest.portfolio_positions SET "
-            "exit_date = %s, exit_price = %s, is_closed = TRUE, "
-            "realized_pnl = ((%s - entry_price) * shares), "
-            "updated_at = NOW() "
-            "WHERE id = %s AND is_closed = FALSE",
-            (actual_exit_date, exit_price, exit_price, position_id),
-        )
+        self._positions.close_position(position_id, exit_price, exit_date)
 
     def create_position_atomic(
-        self,
-        ticker: str,
-        entry_date: date,
-        entry_price: Decimal,
-        shares: Decimal,
-        position_type: str,
-        weight: Decimal,
-        purchase_cost: Decimal,
-        stop_loss: Decimal | None = None,
-        fair_value_estimate: Decimal | None = None,
-        thesis: str = "",
+        self, ticker: str, entry_date: date, entry_price: Decimal,
+        shares: Decimal, position_type: str, weight: Decimal,
+        purchase_cost: Decimal, stop_loss: Decimal | None = None,
+        fair_value_estimate: Decimal | None = None, thesis: str = "",
     ) -> int:
-        """Create a position and deduct cash reserve in a single transaction."""
-        with self._db.transaction() as tx:
-            rows = tx.execute(
-                "INSERT INTO invest.portfolio_positions "
-                "(ticker, entry_date, entry_price, current_price, shares, position_type, "
-                "weight, stop_loss, fair_value_estimate, thesis, is_closed) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING id",
-                (
-                    ticker, entry_date, entry_price, entry_price, shares,
-                    position_type, weight, stop_loss, fair_value_estimate, thesis,
-                ),
-            )
-            tx.execute(
-                "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve - %s",
-                (purchase_cost,),
-            )
-            return rows[0]["id"]
+        return self._positions.create_position_atomic(
+            ticker, entry_date, entry_price, shares, position_type,
+            weight, purchase_cost, stop_loss, fair_value_estimate, thesis,
+        )
 
     def close_position_atomic(
-        self,
-        position_id: int,
-        exit_price: Decimal,
-        proceeds: Decimal,
-        exit_date: date | None = None,
+        self, position_id: int, exit_price: Decimal,
+        proceeds: Decimal, exit_date: date | None = None,
     ) -> None:
-        """Close a position and credit cash reserve in a single transaction."""
-        actual_exit_date = exit_date or date.today()
-        with self._db.transaction() as tx:
-            tx.execute(
-                "UPDATE invest.portfolio_positions SET "
-                "exit_date = %s, exit_price = %s, is_closed = TRUE, "
-                "realized_pnl = ((%s - entry_price) * shares), "
-                "updated_at = NOW() "
-                "WHERE id = %s AND is_closed = FALSE",
-                (actual_exit_date, exit_price, exit_price, position_id),
-            )
-            tx.execute(
-                "UPDATE invest.portfolio_budget SET cash_reserve = cash_reserve + %s",
-                (proceeds,),
-            )
+        self._positions.close_position_atomic(
+            position_id, exit_price, proceeds, exit_date,
+        )
 
     def update_position_analysis(
         self, ticker: str, fair_value_estimate: Decimal | None = None,
         stop_loss: Decimal | None = None, thesis: str | None = None,
     ) -> bool:
-        """Update fair_value_estimate, stop_loss, and/or thesis on an open position.
-
-        Returns True if a row was updated.
-        """
-        updates: list[str] = []
-        params: list = []
-        if fair_value_estimate is not None:
-            updates.append("fair_value_estimate = %s")
-            params.append(fair_value_estimate)
-        if stop_loss is not None:
-            updates.append("stop_loss = %s")
-            params.append(stop_loss)
-        if thesis is not None:
-            updates.append("thesis = %s")
-            params.append(thesis)
-        if not updates:
-            return False
-        updates.append("updated_at = NOW()")
-        params.append(ticker)
-        rows = self._db.execute(
-            f"UPDATE invest.portfolio_positions SET {', '.join(updates)} "
-            "WHERE ticker = %s AND is_closed = false RETURNING id",
-            tuple(params),
+        return self._positions.update_position_analysis(
+            ticker, fair_value_estimate, stop_loss, thesis,
         )
-        return bool(rows)
 
     def get_closed_positions(self) -> list[PortfolioPosition]:
-        """Get all closed positions for P&L history."""
-        rows = self._db.execute(
-            "SELECT * FROM invest.portfolio_positions "
-            "WHERE is_closed = TRUE ORDER BY exit_date DESC"
-        )
-        return [self._row_to_position(r) for r in rows]
+        return self._positions.get_closed_positions()
 
     def get_position_by_id(self, position_id: int) -> PortfolioPosition | None:
-        """Get a single position by ID."""
-        rows = self._db.execute(
-            "SELECT * FROM invest.portfolio_positions WHERE id = %s",
-            (position_id,),
-        )
-        if not rows:
-            return None
-        return self._row_to_position(rows[0])
+        return self._positions.get_position_by_id(position_id)
 
     # ------------------------------------------------------------------
     # Cron audit
     # ------------------------------------------------------------------
 
     def log_cron_start(self, job_name: str) -> int:
-        """Log the start of a cron job. Returns cron_run id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.cron_runs (job_name, started_at, status) "
-            "VALUES (%s, NOW(), 'running') RETURNING id",
-            (job_name,),
-        )
-        return rows[0]["id"]
+        return self._cron.log_cron_start(job_name)
 
     def log_cron_finish(self, cron_id: int, status: str, error: str | None = None) -> None:
-        """Log the completion of a cron job."""
-        self._db.execute(
-            "UPDATE invest.cron_runs SET finished_at = NOW(), status = %s, error = %s WHERE id = %s",
-            (status, error, cron_id),
-        )
+        self._cron.log_cron_finish(cron_id, status, error)
 
     # ------------------------------------------------------------------
     # Market snapshots
     # ------------------------------------------------------------------
 
     def insert_market_snapshot(self, snapshot: dict) -> int:
-        """Insert a daily market snapshot. Returns snapshot id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.market_snapshots "
-            "(snapshot_date, spy_price, qqq_price, iwm_price, vix, "
-            "ten_year_yield, two_year_yield, hy_oas, put_call_ratio, "
-            "sector_data, pendulum_score, regime_score) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (
-                snapshot.get("snapshot_date", date.today()),
-                snapshot.get("spy_price"),
-                snapshot.get("qqq_price"),
-                snapshot.get("iwm_price"),
-                snapshot.get("vix"),
-                snapshot.get("ten_year_yield"),
-                snapshot.get("two_year_yield"),
-                snapshot.get("hy_oas"),
-                snapshot.get("put_call_ratio"),
-                json.dumps(snapshot.get("sector_data"), default=str) if snapshot.get("sector_data") else None,
-                snapshot.get("pendulum_score"),
-                snapshot.get("regime_score"),
-            ),
-        )
-        return rows[0]["id"]
+        return self._signals.insert_market_snapshot(snapshot)
 
     # ------------------------------------------------------------------
     # Agent signals
@@ -530,19 +215,10 @@ class Registry:
         token_usage: dict | None = None, latency_ms: int | None = None,
         run_id: int | None = None,
     ) -> int:
-        """Insert agent signal output. Returns signal id."""
-        rows = self._db.execute(
-            "INSERT INTO invest.agent_signals "
-            "(ticker, agent_name, model, signals, confidence, reasoning, "
-            "token_usage, latency_ms, run_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (
-                ticker, agent_name, model, json.dumps(signals), confidence,
-                reasoning, json.dumps(token_usage) if token_usage else None,
-                latency_ms, run_id,
-            ),
+        return self._signals.insert_agent_signals(
+            ticker, agent_name, model, signals, confidence, reasoning,
+            token_usage, latency_ms, run_id,
         )
-        return rows[0]["id"]
 
     # ------------------------------------------------------------------
     # Verdicts
@@ -558,591 +234,52 @@ class Registry:
         board_adjusted_verdict: str | None = None,
         adversarial_result: dict | None = None,
     ) -> int:
-        """Insert a computed verdict. Returns verdict id."""
-        # Try with all columns first; fall back if columns don't exist yet
-        if advisory_opinions is not None or board_narrative is not None or adversarial_result is not None:
-            try:
-                rows = self._db.execute(
-                    "INSERT INTO invest.verdicts "
-                    "(ticker, verdict, confidence, consensus_score, reasoning, "
-                    "agent_stances, risk_flags, auditor_override, munger_override, "
-                    "advisory_opinions, board_narrative, board_adjusted_verdict, "
-                    "adversarial_result) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                    (
-                        ticker, verdict, confidence, consensus_score, reasoning,
-                        json.dumps(agent_stances), json.dumps(risk_flags),
-                        auditor_override, munger_override,
-                        json.dumps(advisory_opinions) if advisory_opinions else None,
-                        json.dumps(board_narrative) if board_narrative else None,
-                        board_adjusted_verdict,
-                        json.dumps(adversarial_result) if adversarial_result else None,
-                    ),
-                )
-                return rows[0]["id"]
-            except Exception:
-                pass  # Fall through to base insert if columns don't exist
-
-        rows = self._db.execute(
-            "INSERT INTO invest.verdicts "
-            "(ticker, verdict, confidence, consensus_score, reasoning, "
-            "agent_stances, risk_flags, auditor_override, munger_override) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (
-                ticker, verdict, confidence, consensus_score, reasoning,
-                json.dumps(agent_stances), json.dumps(risk_flags),
-                auditor_override, munger_override,
-            ),
+        return self._verdicts.insert_verdict(
+            ticker, verdict, confidence, consensus_score, reasoning,
+            agent_stances, risk_flags, auditor_override, munger_override,
+            advisory_opinions, board_narrative, board_adjusted_verdict,
+            adversarial_result,
         )
-        return rows[0]["id"]
 
     def get_latest_verdict(self, ticker: str) -> dict | None:
-        """Get the most recent verdict for a ticker."""
-        rows = self._db.execute(
-            "SELECT id, ticker, verdict, confidence, consensus_score, "
-            "reasoning, agent_stances, risk_flags, "
-            "auditor_override, munger_override, "
-            "advisory_opinions, board_narrative, board_adjusted_verdict, "
-            "adversarial_result, created_at "
-            "FROM invest.verdicts WHERE ticker = %s "
-            "ORDER BY created_at DESC LIMIT 1",
-            (ticker,),
-        )
-        return rows[0] if rows else None
+        return self._verdicts.get_latest_verdict(ticker)
 
     def get_verdict_history(self, ticker: str, limit: int = 20) -> list[dict]:
-        """Get verdict history for a ticker, newest first."""
-        return self._db.execute(
-            "SELECT id, ticker, verdict, confidence, consensus_score, "
-            "reasoning, agent_stances, risk_flags, "
-            "auditor_override, munger_override, "
-            "advisory_opinions, board_narrative, board_adjusted_verdict, "
-            "adversarial_result, created_at "
-            "FROM invest.verdicts WHERE ticker = %s "
-            "ORDER BY created_at DESC LIMIT %s",
-            (ticker, limit),
-        )
+        return self._verdicts.get_verdict_history(ticker, limit)
+
+    # ------------------------------------------------------------------
+    # Enriched queries
+    # ------------------------------------------------------------------
 
     def get_enriched_watchlist(self) -> list[dict]:
-        """Get watchlist items enriched with prices, scores, and verdicts.
-
-        Uses LATERAL joins to pull latest price, quant gate scores,
-        and verdict for each watchlist item in a single query.
-        """
-        return self._db.execute("""
-            WITH latest_watchlist AS (
-                SELECT DISTINCT ON (ticker) *
-                FROM invest.watchlist
-                ORDER BY ticker, updated_at DESC
-            )
-            SELECT
-                w.id, w.ticker, w.state, w.notes, w.price_at_add,
-                w.entered_at, w.updated_at,
-                s.name, s.sector,
-                f.price AS current_price, f.market_cap,
-                qg.composite_score, qg.piotroski_score, qg.altman_zone,
-                qg.combined_rank, qg.altman_z_score,
-                v.verdict, v.confidence AS verdict_confidence,
-                v.consensus_score, v.reasoning AS verdict_reasoning,
-                v.agent_stances, v.risk_flags,
-                v.created_at AS verdict_date
-            FROM latest_watchlist w
-            LEFT JOIN invest.stocks s ON s.ticker = w.ticker
-            LEFT JOIN LATERAL (
-                SELECT price, market_cap
-                FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = w.ticker
-                ORDER BY fc.fetched_at DESC LIMIT 1
-            ) f ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT composite_score, piotroski_score, altman_zone,
-                       combined_rank, altman_z_score
-                FROM invest.quant_gate_results qgr
-                WHERE qgr.ticker = w.ticker
-                ORDER BY qgr.run_id DESC LIMIT 1
-            ) qg ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT verdict, confidence, consensus_score, reasoning,
-                       agent_stances, risk_flags,
-                       advisory_opinions, board_narrative, board_adjusted_verdict,
-                       created_at
-                FROM invest.verdicts vd
-                WHERE vd.ticker = w.ticker
-                ORDER BY vd.created_at DESC LIMIT 1
-            ) v ON TRUE
-            ORDER BY
-                CASE w.state::text
-                    WHEN 'CONVICTION_BUY' THEN 1
-                    WHEN 'POSITION_HOLD' THEN 2
-                    WHEN 'POSITION_TRIM' THEN 3
-                    WHEN 'WATCHLIST_EARLY' THEN 4
-                    WHEN 'WATCHLIST_CATALYST' THEN 5
-                    WHEN 'ASSESSED' THEN 6
-                    WHEN 'CANDIDATE' THEN 7
-                    WHEN 'CONFLICT_REVIEW' THEN 8
-                    WHEN 'POSITION_SELL' THEN 9
-                    WHEN 'REJECTED' THEN 10
-                    WHEN 'UNIVERSE' THEN 11
-                    ELSE 12
-                END,
-                COALESCE(qg.composite_score, 0) DESC,
-                w.updated_at DESC
-        """)
+        return self._enriched.get_enriched_watchlist()
 
     def get_all_actionable_verdicts(self) -> list[dict]:
-        """Get the latest verdict for every ticker, enriched with stock info and prices.
-
-        Returns only actionable verdicts (not DISCARD), one per ticker.
-        Includes price_history for sparkline charts.
-        """
-        return self._db.execute("""
-            WITH latest_verdicts AS (
-                SELECT DISTINCT ON (v.ticker)
-                    v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
-                    v.reasoning, v.agent_stances, v.risk_flags,
-                    v.auditor_override, v.munger_override,
-                    v.advisory_opinions, v.board_narrative, v.board_adjusted_verdict,
-                    v.adversarial_result, v.created_at
-                FROM invest.verdicts v
-                WHERE v.verdict != 'DISCARD'
-                ORDER BY v.ticker, v.created_at DESC
-            )
-            SELECT
-                lv.id, lv.ticker, lv.verdict, lv.confidence, lv.consensus_score,
-                lv.reasoning, lv.agent_stances, lv.risk_flags,
-                lv.auditor_override, lv.munger_override,
-                lv.advisory_opinions, lv.board_narrative, lv.board_adjusted_verdict,
-                lv.adversarial_result, lv.created_at,
-                s.name, s.sector, s.industry,
-                f.price AS current_price, f.market_cap,
-                w.state AS watchlist_state,
-                entry.price AS entry_price,
-                ph.history AS price_history
-            FROM latest_verdicts lv
-            LEFT JOIN invest.stocks s ON s.ticker = lv.ticker
-            LEFT JOIN LATERAL (
-                SELECT price, market_cap
-                FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = lv.ticker
-                ORDER BY fc.fetched_at DESC LIMIT 1
-            ) f ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT state
-                FROM invest.watchlist wl
-                WHERE wl.ticker = lv.ticker
-                ORDER BY wl.updated_at DESC LIMIT 1
-            ) w ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT price
-                FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = lv.ticker
-                  AND fc.price > 0
-                  AND fc.fetched_at <= lv.created_at + interval '1 day'
-                ORDER BY fc.fetched_at DESC LIMIT 1
-            ) entry ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT json_agg(
-                    json_build_object('date', dt::text, 'price', p)
-                    ORDER BY dt
-                ) AS history
-                FROM (
-                    SELECT DISTINCT ON (fc.fetched_at::date)
-                        fc.fetched_at::date AS dt, fc.price AS p
-                    FROM invest.fundamentals_cache fc
-                    WHERE fc.ticker = lv.ticker AND fc.price > 0
-                    ORDER BY fc.fetched_at::date, fc.fetched_at DESC
-                ) daily
-            ) ph ON TRUE
-        """)
+        return self._enriched.get_all_actionable_verdicts()
 
     def get_blocked_tickers(self) -> set[str]:
-        """Return tickers with active (un-cleared) re-entry blocks.
-
-        These tickers should be excluded from re-analysis until their
-        block conditions clear (price moves, time elapses, or manual override).
-        """
-        try:
-            rows = self._db.execute(
-                "SELECT DISTINCT ticker FROM invest.reentry_blocks "
-                "WHERE is_cleared = FALSE"
-            )
-            return {r["ticker"] for r in rows}
-        except Exception:
-            # Table may not exist yet (migration not run)
-            return set()
+        return self._enriched.get_blocked_tickers()
 
     def get_watchlist_tickers_for_reanalysis(
         self, states: list[str], min_hours: int = 20,
         min_move_pct: float = 0.0, force_after_hours: int = 0,
     ) -> list[str]:
-        """Get watchlist tickers that need re-analysis.
-
-        Returns tickers in the given states whose latest verdict is older
-        than min_hours, or who have never been analyzed.  Tickers with
-        active re-entry blocks are excluded (unless held).
-
-        If min_move_pct > 0, also filters out tickers whose price hasn't
-        moved by at least that percentage since last analysis — unless
-        force_after_hours is set and the ticker hasn't been analyzed in
-        that many hours (ensures periodic full re-analysis).
-
-        Held positions (CONVICTION_BUY, POSITION_HOLD) always pass the
-        materiality check and re-entry block check since we need to
-        monitor our holdings.
-        """
-        held_states = {"CONVICTION_BUY", "POSITION_HOLD"}
-        blocked = self.get_blocked_tickers()
-
-        if min_move_pct > 0:
-            # Materiality-aware query: skip non-movers unless forced
-            rows = self._db.execute(
-                """
-                SELECT w.ticker, w.state,
-                       latest_v.created_at AS last_verdict_at,
-                       latest_v.price_at_verdict,
-                       current_p.price AS current_price
-                FROM invest.watchlist w
-                LEFT JOIN LATERAL (
-                    SELECT v.created_at,
-                           fc.price AS price_at_verdict
-                    FROM invest.verdicts v
-                    LEFT JOIN LATERAL (
-                        SELECT price FROM invest.fundamentals_cache fc2
-                        WHERE fc2.ticker = v.ticker
-                          AND fc2.price > 0
-                          AND fc2.fetched_at <= v.created_at + interval '1 hour'
-                        ORDER BY fc2.fetched_at DESC LIMIT 1
-                    ) fc ON TRUE
-                    WHERE v.ticker = w.ticker
-                    ORDER BY v.created_at DESC LIMIT 1
-                ) latest_v ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT price FROM invest.fundamentals_cache fc3
-                    WHERE fc3.ticker = w.ticker AND fc3.price > 0
-                    ORDER BY fc3.fetched_at DESC LIMIT 1
-                ) current_p ON TRUE
-                WHERE w.state = ANY(%s)
-                  AND (latest_v.created_at IS NULL
-                       OR latest_v.created_at < NOW() - make_interval(hours => %s))
-                ORDER BY latest_v.created_at ASC NULLS FIRST
-                """,
-                (states, min_hours),
-            )
-
-            result = []
-            for r in rows:
-                ticker = r["ticker"]
-                state = r.get("state", "")
-
-                # Never analyzed → always include
-                if r.get("last_verdict_at") is None:
-                    result.append(ticker)
-                    continue
-
-                # Held positions → always include (bypass blocks + materiality)
-                if state in held_states:
-                    result.append(ticker)
-                    continue
-
-                # Re-entry block check: skip if agents flagged specific issues
-                if ticker in blocked:
-                    continue
-
-                # Force re-analysis after N hours regardless of movement
-                if force_after_hours > 0:
-                    from datetime import datetime, timezone
-                    last_at = r["last_verdict_at"]
-                    if hasattr(last_at, "tzinfo") and last_at.tzinfo is None:
-                        last_at = last_at.replace(tzinfo=timezone.utc)
-                    hours_since = (datetime.now(timezone.utc) - last_at).total_seconds() / 3600
-                    if hours_since >= force_after_hours:
-                        result.append(ticker)
-                        continue
-
-                # Materiality check: has price moved enough?
-                old_price = r.get("price_at_verdict")
-                new_price = r.get("current_price")
-                if old_price and new_price and float(old_price) > 0:
-                    move_pct = abs(float(new_price) - float(old_price)) / float(old_price) * 100
-                    if move_pct >= min_move_pct:
-                        result.append(ticker)
-                    # else: skip — hasn't moved enough
-                else:
-                    # Can't determine movement → include to be safe
-                    result.append(ticker)
-
-            return result
-
-        # Simple time-based query (original behavior)
-        rows = self._db.execute(
-            """
-            SELECT w.ticker, w.state
-            FROM invest.watchlist w
-            LEFT JOIN LATERAL (
-                SELECT created_at
-                FROM invest.verdicts v
-                WHERE v.ticker = w.ticker
-                ORDER BY v.created_at DESC LIMIT 1
-            ) latest_v ON TRUE
-            WHERE w.state = ANY(%s)
-              AND (latest_v.created_at IS NULL
-                   OR latest_v.created_at < NOW() - make_interval(hours => %s))
-            ORDER BY latest_v.created_at ASC NULLS FIRST
-            """,
-            (states, min_hours),
+        return self._enriched.get_watchlist_tickers_for_reanalysis(
+            states, min_hours, min_move_pct, force_after_hours,
         )
-        # Filter out blocked tickers (held positions bypass block check)
-        return [
-            r["ticker"] for r in rows
-            if r["ticker"] not in blocked or r.get("state") in held_states
-        ]
 
     def get_watch_verdicts_enriched(self) -> list[dict]:
-        """Get WATCHLIST verdicts enriched with entry price, current price, and price history.
-
-        For each ticker with a WATCHLIST verdict:
-        - entry_price: price closest to verdict date
-        - current_price: latest price
-        - price_history: daily prices as JSON array [{date, price}, ...]
-        """
-        return self._db.execute("""
-            WITH portfolio_tickers AS (
-                SELECT ticker FROM invest.portfolio_positions
-                WHERE is_closed = false AND shares > 0
-            ),
-            latest_watchlist_verdicts AS (
-                SELECT DISTINCT ON (v.ticker)
-                    v.id, v.ticker, v.verdict, v.confidence, v.consensus_score,
-                    v.reasoning, v.agent_stances, v.risk_flags,
-                    v.auditor_override, v.munger_override, v.created_at
-                FROM invest.verdicts v
-                WHERE v.verdict = 'WATCHLIST'
-                  AND v.ticker NOT IN (SELECT ticker FROM portfolio_tickers)
-                ORDER BY v.ticker, v.created_at DESC
-            )
-            SELECT
-                lw.id, lw.ticker, lw.verdict, lw.confidence, lw.consensus_score,
-                lw.reasoning, lw.agent_stances, lw.risk_flags,
-                lw.auditor_override, lw.munger_override, lw.created_at,
-                s.name, s.sector, s.industry,
-                cur.price AS current_price, cur.market_cap,
-                entry.price AS entry_price,
-                w.state AS watchlist_state,
-                w.entered_at AS watchlist_entered,
-                ph.history AS price_history
-            FROM latest_watchlist_verdicts lw
-            LEFT JOIN invest.stocks s ON s.ticker = lw.ticker
-            LEFT JOIN LATERAL (
-                SELECT price, market_cap
-                FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = lw.ticker
-                ORDER BY fc.fetched_at DESC LIMIT 1
-            ) cur ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT price
-                FROM invest.fundamentals_cache fc
-                WHERE fc.ticker = lw.ticker
-                  AND fc.price > 0
-                  AND fc.fetched_at <= lw.created_at + interval '1 day'
-                ORDER BY fc.fetched_at DESC LIMIT 1
-            ) entry ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT state, entered_at
-                FROM invest.watchlist wl
-                WHERE wl.ticker = lw.ticker
-                ORDER BY wl.updated_at DESC LIMIT 1
-            ) w ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT json_agg(
-                    json_build_object('date', dt::text, 'price', p)
-                    ORDER BY dt
-                ) AS history
-                FROM (
-                    SELECT DISTINCT ON (fc.fetched_at::date)
-                        fc.fetched_at::date AS dt, fc.price AS p
-                    FROM invest.fundamentals_cache fc
-                    WHERE fc.ticker = lw.ticker AND fc.price > 0
-                    ORDER BY fc.fetched_at::date, fc.fetched_at DESC
-                ) daily
-            ) ph ON TRUE
-            ORDER BY lw.confidence DESC NULLS LAST
-        """)
+        return self._enriched.get_watch_verdicts_enriched()
 
     # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _row_to_position(r: dict) -> PortfolioPosition:
-        return PortfolioPosition(
-            ticker=r["ticker"],
-            entry_date=r["entry_date"],
-            entry_price=Decimal(str(r["entry_price"])),
-            current_price=Decimal(str(r["current_price"])) if r["current_price"] else Decimal(0),
-            shares=Decimal(str(r["shares"])),
-            position_type=r["position_type"],
-            weight=Decimal(str(r["weight"])) if r["weight"] else Decimal(0),
-            stop_loss=Decimal(str(r["stop_loss"])) if r["stop_loss"] else None,
-            fair_value_estimate=Decimal(str(r["fair_value_estimate"])) if r["fair_value_estimate"] else None,
-            thesis=r["thesis"] or "",
-            id=r["id"],
-            exit_date=r.get("exit_date"),
-            exit_price=Decimal(str(r["exit_price"])) if r.get("exit_price") else None,
-            is_closed=r.get("is_closed", False),
-            realized_pnl=Decimal(str(r["realized_pnl"])) if r.get("realized_pnl") else None,
-        )
-
-    @staticmethod
-    def _row_to_fundamentals(r: dict) -> FundamentalsSnapshot:
-        return FundamentalsSnapshot(
-            ticker=r["ticker"],
-            fetched_at=r["fetched_at"],
-            operating_income=Decimal(str(r["operating_income"])) if r["operating_income"] is not None else Decimal(0),
-            market_cap=Decimal(str(r["market_cap"])) if r["market_cap"] is not None else Decimal(0),
-            total_debt=Decimal(str(r["total_debt"])) if r["total_debt"] is not None else Decimal(0),
-            cash=Decimal(str(r["cash"])) if r["cash"] is not None else Decimal(0),
-            current_assets=Decimal(str(r["current_assets"])) if r["current_assets"] is not None else Decimal(0),
-            current_liabilities=Decimal(str(r["current_liabilities"])) if r["current_liabilities"] is not None else Decimal(0),
-            net_ppe=Decimal(str(r["net_ppe"])) if r["net_ppe"] is not None else Decimal(0),
-            revenue=Decimal(str(r["revenue"])) if r["revenue"] is not None else Decimal(0),
-            net_income=Decimal(str(r["net_income"])) if r["net_income"] is not None else Decimal(0),
-            total_assets=Decimal(str(r["total_assets"])) if r["total_assets"] is not None else Decimal(0),
-            total_liabilities=Decimal(str(r["total_liabilities"])) if r["total_liabilities"] is not None else Decimal(0),
-            shares_outstanding=int(r["shares_outstanding"]) if r["shares_outstanding"] is not None else 0,
-            price=Decimal(str(r["price"])) if r["price"] is not None else Decimal(0),
-        )
-
-    @staticmethod
-    def _row_to_decision(r: dict) -> Decision:
-        return Decision(
-            id=r["id"],
-            ticker=r["ticker"],
-            decision_type=DecisionType(r["decision_type"]),
-            layer_source=r["layer_source"],
-            confidence=Decimal(str(r["confidence"])) if r["confidence"] is not None else None,
-            reasoning=r["reasoning"] or "",
-            signals=r["signals"],
-            metadata=r["metadata"],
-            created_at=r["created_at"],
-        )
-
-    # ------------------------------------------------------------------
-    # Base rate queries (for pre-mortem calibration)
+    # Learning
     # ------------------------------------------------------------------
 
     def get_sector_outcomes(self, sector: str) -> dict:
-        """Get historical outcome stats for a sector.
-
-        Returns dict with: total, successful, failed, success_rate,
-        avg_confidence, common_verdicts.
-        """
-        try:
-            rows = self._db.execute(
-                """
-                SELECT
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE do.outcome = 'CORRECT') AS successful,
-                    COUNT(*) FILTER (WHERE do.outcome = 'INCORRECT') AS failed,
-                    AVG(d.confidence) AS avg_confidence
-                FROM invest.decisions d
-                JOIN invest.decision_outcomes do ON do.decision_id = d.id
-                JOIN invest.stocks s ON s.ticker = d.ticker
-                WHERE s.sector = %s
-                """,
-                (sector,),
-            )
-            if not rows or rows[0]["total"] == 0:
-                return {}
-            r = rows[0]
-            total = r["total"]
-            return {
-                "total": total,
-                "successful": r["successful"] or 0,
-                "failed": r["failed"] or 0,
-                "success_rate": round((r["successful"] or 0) / total, 3) if total else 0,
-                "avg_confidence": float(r["avg_confidence"]) if r["avg_confidence"] else 0,
-            }
-        except Exception:
-            logger.debug("get_sector_outcomes failed for %s", sector)
-            return {}
+        return self._learning.get_sector_outcomes(sector)
 
     def get_failure_modes(self, sector: str, limit: int = 5) -> list[str]:
-        """Get most common failure/rejection reasons for a sector."""
-        try:
-            rows = self._db.execute(
-                """
-                SELECT d.reasoning
-                FROM invest.decisions d
-                JOIN invest.stocks s ON s.ticker = d.ticker
-                WHERE s.sector = %s
-                  AND d.decision_type IN ('REJECT', 'SELL')
-                  AND d.reasoning IS NOT NULL
-                ORDER BY d.created_at DESC
-                LIMIT %s
-                """,
-                (sector, limit),
-            )
-            return [r["reasoning"][:200] for r in rows if r.get("reasoning")]
-        except Exception:
-            logger.debug("get_failure_modes failed for %s", sector)
-            return []
+        return self._learning.get_failure_modes(sector, limit)
 
     def get_win_loss_stats(self) -> dict:
-        """Get overall win/loss statistics for Kelly criterion.
-
-        Returns dict with: win_rate, avg_win_pct, avg_loss_pct, total_settled.
-        Requires positions with both entry and exit prices.
-        """
-        try:
-            rows = self._db.execute(
-                """
-                SELECT
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE exit_price > entry_price) AS wins,
-                    AVG(CASE WHEN exit_price > entry_price
-                        THEN (exit_price - entry_price) / entry_price * 100
-                        ELSE NULL END) AS avg_win_pct,
-                    AVG(CASE WHEN exit_price <= entry_price
-                        THEN (entry_price - exit_price) / entry_price * 100
-                        ELSE NULL END) AS avg_loss_pct
-                FROM invest.portfolio_positions
-                WHERE exit_price IS NOT NULL
-                  AND entry_price > 0
-                """
-            )
-            if not rows or rows[0]["total"] == 0:
-                return {}
-            r = rows[0]
-            total = r["total"]
-            wins = r["wins"] or 0
-            return {
-                "total_settled": total,
-                "win_rate": round(wins / total, 3) if total else 0,
-                "avg_win_pct": float(r["avg_win_pct"]) if r["avg_win_pct"] else 0,
-                "avg_loss_pct": float(r["avg_loss_pct"]) if r["avg_loss_pct"] else 0,
-            }
-        except Exception:
-            logger.debug("get_win_loss_stats failed")
-            return {}
-
-    @staticmethod
-    def _row_to_prediction(r: dict) -> Prediction:
-        return Prediction(
-            id=r["id"],
-            ticker=r["ticker"],
-            prediction_type=r["prediction_type"],
-            predicted_value=Decimal(str(r["predicted_value"])),
-            confidence=Decimal(str(r["confidence"])) if r["confidence"] is not None else Decimal(0),
-            horizon_days=r["horizon_days"],
-            settlement_date=r["settlement_date"],
-            source=r["source"] or "",
-            actual_value=Decimal(str(r["actual_value"])) if r["actual_value"] is not None else None,
-            is_settled=r["is_settled"],
-            settled_at=r["settled_at"],
-            created_at=r["created_at"],
-            price_at_prediction=(
-                Decimal(str(r["price_at_prediction"]))
-                if r.get("price_at_prediction") is not None
-                else None
-            ),
-        )
+        return self._learning.get_win_loss_stats()
