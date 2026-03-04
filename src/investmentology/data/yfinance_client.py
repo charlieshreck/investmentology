@@ -144,7 +144,8 @@ class YFinanceClient:
     def _fetch_fundamentals_raw(self, ticker: str) -> dict | None:
         """Raw yfinance fetch without validation or caching."""
         try:
-            info = yf.Ticker(ticker).info
+            stock = yf.Ticker(ticker)
+            info = stock.info
             if not info or info.get("quoteType") is None:
                 self._circuit_breaker.record_failure()
                 logger.debug("No data returned for %s", ticker)
@@ -174,6 +175,25 @@ class YFinanceClient:
             if current_ratio and current_liabilities_est:
                 current_assets_est = _to_decimal(float(current_liabilities_est) * current_ratio)
 
+            # Total liabilities from balance sheet (not just totalDebt which
+            # excludes accounts payable, deferred revenue, pension, etc.)
+            total_liabilities_val = None
+            try:
+                bs = stock.balance_sheet
+                if bs is not None and not bs.empty:
+                    for label in [
+                        "Total Liabilities Net Minority Interest",
+                        "Total Non Current Liabilities Net Minority Interest",
+                    ]:
+                        if label in bs.index:
+                            raw = bs.loc[label].iloc[0]
+                            total_liabilities_val = _to_decimal(raw)
+                            break
+            except Exception:
+                pass
+            if total_liabilities_val is None:
+                total_liabilities_val = _to_decimal(info.get("totalDebt"))
+
             result: dict[str, Any] = {
                 "ticker": ticker,
                 "fetched_at": datetime.now(UTC).isoformat(),
@@ -189,7 +209,7 @@ class YFinanceClient:
                 "revenue": _to_decimal(revenue),
                 "net_income": _to_decimal(net_income_val),
                 "total_assets": total_assets_est,
-                "total_liabilities": _to_decimal(info.get("totalDebt")),
+                "total_liabilities": total_liabilities_val,
                 "shares_outstanding": _to_decimal(info.get("sharesOutstanding")),
                 "price": _to_decimal(
                     info.get("currentPrice") or info.get("regularMarketPrice")

@@ -40,6 +40,8 @@ class AnalysisRequest:
     short_interest: dict | None = None
     # Gemini-synthesized research briefing (deep research on news, events, sentiment)
     research_briefing: str | None = None
+    # Sector ETF performance (1-month % change by ETF ticker)
+    sector_performance: dict | None = None
     # Previous analysis context for history-aware re-analysis
     previous_verdict: dict | None = None
     previous_signals: list[dict] | None = None

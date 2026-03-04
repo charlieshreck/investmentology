@@ -59,6 +59,7 @@ class DataEnricher:
         self._enrich_technical(request)
         self._enrich_analyst_ratings(request)
         self._enrich_short_interest(request)
+        self._enrich_sector_performance(request)
         return request
 
     def _enrich_macro(self, request: AnalysisRequest) -> None:
@@ -189,6 +190,23 @@ class DataEnricher:
             request.short_interest = self._finnhub.get_short_interest(request.ticker)
         except Exception:
             logger.warning("Short interest enrichment failed for %s", request.ticker)
+
+    def _enrich_sector_performance(self, request: AnalysisRequest) -> None:
+        """Add sector ETF performance data (shared across all tickers in a batch)."""
+        if request.sector_performance is not None:
+            return
+        try:
+            from investmentology.data.snapshots import fetch_sector_performance
+
+            if not hasattr(self, "_sector_perf_cache"):
+                self._sector_perf_cache = None
+            if self._sector_perf_cache is None:
+                raw = fetch_sector_performance(period="1mo")
+                self._sector_perf_cache = {k: float(v) for k, v in raw.items()} if raw else {}
+            if self._sector_perf_cache:
+                request.sector_performance = dict(self._sector_perf_cache)
+        except Exception:
+            logger.warning("Sector performance enrichment failed for %s", request.ticker)
 
     def _enrich_technical(self, request: AnalysisRequest) -> None:
         """Compute technical indicators for Simons agent."""

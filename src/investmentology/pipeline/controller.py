@@ -1249,7 +1249,7 @@ class PipelineController:
         # 4. Portfolio context
         portfolio_context = self._get_portfolio_context(ticker)
 
-        # 5. Previous verdict
+        # 5. Previous verdict + verdict chain from Neo4j
         previous_verdict = None
         try:
             from investmentology.registry.queries import Registry
@@ -1260,6 +1260,36 @@ class PipelineController:
                     "verdict": prev.get("verdict") if isinstance(prev, dict) else getattr(prev, "verdict", None),
                     "confidence": float(prev.get("confidence", 0) if isinstance(prev, dict) else getattr(prev, "confidence", 0)),
                 }
+        except Exception:
+            pass
+
+        # 5b. Enrich with Neo4j verdict chain history
+        try:
+            import httpx as _httpx
+            resp = _httpx.post(
+                "http://knowledge-mcp.ai-platform.svc.cluster.local:8000/api/call",
+                json={
+                    "name": "query_graph",
+                    "arguments": {
+                        "query": (
+                            f"MATCH (s:InvestStock {{ticker: '{ticker}'}})-[:HAS_VERDICT]->(v:InvestVerdict) "
+                            f"RETURN v.verdict AS verdict, v.confidence AS confidence, "
+                            f"v.created_at AS date "
+                            f"ORDER BY v.created_at DESC LIMIT 5"
+                        ),
+                    },
+                },
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                chain_data = resp.json().get("result", [])
+                if chain_data and isinstance(chain_data, list):
+                    if previous_verdict is None:
+                        previous_verdict = {}
+                    previous_verdict["verdict_chain"] = [
+                        {"verdict": r.get("verdict"), "confidence": r.get("confidence"), "date": r.get("date")}
+                        for r in chain_data[:5]
+                    ]
         except Exception:
             pass
 

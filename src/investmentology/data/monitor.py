@@ -81,8 +81,7 @@ class DailyMonitor:
 
             # Step 6: Run alerts
             vix = Decimal(str(snapshot.get("vix") or 0))
-            # SPY drawdown would be calculated from recent high; use 0 as default
-            spy_drawdown = Decimal("0")
+            spy_drawdown = self._compute_spy_drawdown()
             sector_map = self._build_sector_map(positions)
             # Re-fetch positions with updated prices
             positions = self._registry.get_open_positions()
@@ -160,11 +159,12 @@ class DailyMonitor:
             # Check stop losses with current prices (from registry, no live fetch)
             stop_alerts = self._alert_engine.check_stop_losses(positions)
 
-            # Check circuit breakers with live VIX
+            # Check circuit breakers with live VIX + SPY drawdown
             vix_price = self._yf_client.get_price("^VIX")
             vix = vix_price if vix_price is not None else Decimal("0")
+            spy_drawdown = self._compute_spy_drawdown()
             breaker_alerts = self._alert_engine.check_circuit_breakers(
-                vix, Decimal("0"),
+                vix, spy_drawdown,
             )
 
             result.alerts = breaker_alerts + stop_alerts
@@ -178,9 +178,32 @@ class DailyMonitor:
         result.duration_seconds = time.monotonic() - start
         return result
 
-    @staticmethod
-    def _build_sector_map(positions: list) -> dict[str, str]:
-        """Build a ticker -> sector map. Placeholder until sector data is in registry."""
-        # In Phase 1, sector data comes from the stocks table.
-        # For now, return empty map; the alert engine handles missing sectors gracefully.
-        return {}
+    def _build_sector_map(self, positions: list) -> dict[str, str]:
+        """Build a ticker -> sector map from yfinance data."""
+        sector_map: dict[str, str] = {}
+        for pos in positions:
+            try:
+                fundamentals = self._yf_client.get_fundamentals(pos.ticker)
+                if fundamentals and fundamentals.get("sector"):
+                    sector_map[pos.ticker] = fundamentals["sector"]
+            except Exception:
+                logger.debug("Sector lookup failed for %s", pos.ticker)
+        return sector_map
+
+    def _compute_spy_drawdown(self) -> Decimal:
+        """Compute SPY drawdown from 52-week high as a percentage."""
+        try:
+            import yfinance as yf
+
+            spy = yf.Ticker("SPY")
+            hist = spy.history(period="1y")
+            if hist.empty:
+                return Decimal("0")
+            high_52w = float(hist["High"].max())
+            current = float(hist["Close"].iloc[-1])
+            if high_52w > 0:
+                drawdown_pct = ((high_52w - current) / high_52w) * 100
+                return Decimal(str(round(drawdown_pct, 2)))
+        except Exception:
+            logger.debug("SPY drawdown calculation failed", exc_info=True)
+        return Decimal("0")

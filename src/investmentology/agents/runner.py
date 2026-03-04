@@ -133,6 +133,9 @@ class AgentRunner:
         if "market_snapshot" in opt and request.market_snapshot:
             parts.extend(self._fmt_market_snapshot(request.market_snapshot))
 
+        if request.sector_performance:
+            parts.extend(self._fmt_sector_performance(request.sector_performance, request.sector))
+
         if "technical_indicators" in opt:
             parts.extend(self._fmt_technical(request))
 
@@ -598,6 +601,23 @@ class AgentRunner:
         return parts
 
     @staticmethod
+    def _fmt_sector_performance(perf: dict, ticker_sector: str) -> list[str]:
+        """Format sector ETF 1-month performance for sector rotation context."""
+        # Map sector names to ETF tickers
+        etf_to_sector = {
+            "XLK": "Technology", "XLV": "Healthcare", "XLF": "Financials",
+            "XLI": "Industrials", "XLC": "Communication", "XLY": "Consumer Cyclical",
+            "XLP": "Consumer Defensive", "XLE": "Energy", "XLU": "Utilities",
+            "XLB": "Basic Materials", "XLRE": "Real Estate",
+        }
+        parts = ["", "SECTOR ETF PERFORMANCE (1-month):"]
+        for etf, pct in sorted(perf.items(), key=lambda x: x[1], reverse=True):
+            name = etf_to_sector.get(etf, etf)
+            marker = " ← THIS SECTOR" if name == ticker_sector else ""
+            parts.append(f"  {name} ({etf}): {pct:+.1f}%{marker}")
+        return parts
+
+    @staticmethod
     def _fmt_technical(request: AnalysisRequest) -> list[str]:
         """Format technical indicators with interpretation hints."""
         if not request.technical_indicators:
@@ -699,5 +719,14 @@ class AgentRunner:
         ]
         if pv.get("reasoning"):
             parts.append(f"  Reasoning: {pv['reasoning'][:200]}")
+        # Verdict chain from Neo4j (historical verdicts for this ticker)
+        chain = pv.get("verdict_chain")
+        if chain:
+            parts.append("  VERDICT HISTORY (most recent first):")
+            for entry in chain[:5]:
+                v = entry.get("verdict", "?")
+                c = entry.get("confidence", "?")
+                d = entry.get("date", "?")
+                parts.append(f"    {d}: {v} (conf: {c})")
         parts.append("  Consider: Has anything materially changed since the last analysis?")
         return parts
