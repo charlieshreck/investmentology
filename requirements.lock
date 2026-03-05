@@ -112,6 +112,8 @@ peewee==4.0.1
     # via yfinance
 platformdirs==4.9.2
     # via yfinance
+prometheus-client==0.24.1
+    # via investmentology (pyproject.toml)
 protobuf==7.34.0
     # via yfinance
 psycopg[binary]==3.3.3
