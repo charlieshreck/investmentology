@@ -48,7 +48,7 @@ class ReportService:
         # Quant gate results
         qg_rows = reg._db.execute(
             "SELECT combined_rank, piotroski_score, altman_z_score, altman_zone, "
-            "momentum_score, composite_score, earnings_yield, roic "
+            "composite_score, earnings_yield, roic "
             "FROM invest.quant_gate_results WHERE ticker = %s "
             "ORDER BY id DESC LIMIT 1",
             (ticker,),
@@ -235,9 +235,10 @@ class ReportService:
         parts = [
             f"**Greenblatt Rank**: #{qg['combined_rank']}",
             f"**Composite Score**: {float(qg['composite_score']):.2f}" if qg.get("composite_score") else None,
+            f"**Earnings Yield**: {float(qg['earnings_yield']):.1%}" if qg.get("earnings_yield") else None,
+            f"**ROIC**: {float(qg['roic']):.1%}" if qg.get("roic") else None,
             f"**Piotroski F-Score**: {qg['piotroski_score']}/9" if qg.get("piotroski_score") is not None else None,
             f"**Altman Z-Score**: {float(qg['altman_z_score']):.2f} ({qg.get('altman_zone', 'N/A')})" if qg.get("altman_z_score") else None,
-            f"**Momentum**: {float(qg['momentum_score']):.2f}" if qg.get("momentum_score") is not None else None,
         ]
         return {
             "title": "Quantitative Gate",
