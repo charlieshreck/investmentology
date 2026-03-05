@@ -33,6 +33,57 @@ from investmentology.advisory.triggers import reanalysis_loop
 logger = logging.getLogger(__name__)
 
 
+def _bootstrap_default_user(db: Database, config) -> None:
+    """Create a default admin user if the users table is empty.
+
+    Uses the existing AUTH_PASSWORD_HASH from config so the same password works.
+    Also assigns all orphan data (user_id IS NULL) to the new user.
+    """
+    try:
+        rows = db.execute("SELECT COUNT(*) AS cnt FROM invest.users")
+        if rows and rows[0]["cnt"] > 0:
+            return  # Users exist, nothing to do
+
+        if not config or not config.auth_password_hash:
+            logger.warning("No users and no AUTH_PASSWORD_HASH — cannot bootstrap default user")
+            return
+
+        # Take the first hash if comma-separated
+        pw_hash = config.auth_password_hash.split(",")[0].strip()
+
+        result = db.execute(
+            "INSERT INTO invest.users (email, password_hash, display_name) "
+            "VALUES (%s, %s, %s) RETURNING id",
+            ("admin@investmentology.local", pw_hash, "Admin"),
+        )
+        if not result:
+            return
+
+        user_id = result[0]["id"]
+        logger.info("Created default admin user (id=%s)", user_id)
+
+        # Assign orphan data to the new user
+        tables = [
+            "invest.portfolio_positions",
+            "invest.portfolio_budget",
+            "invest.decisions",
+            "invest.watchlist",
+            "invest.predictions",
+            "invest.push_subscriptions",
+        ]
+        for table in tables:
+            try:
+                db.execute(
+                    f"UPDATE {table} SET user_id = %s WHERE user_id IS NULL",  # noqa: S608
+                    (user_id,),
+                )
+            except Exception:
+                logger.debug("Could not update %s — column may not exist", table)
+
+        logger.info("Assigned orphan data to default user %s", user_id)
+    except Exception:
+        logger.warning("Default user bootstrap failed", exc_info=True)
+
 
 async def _daily_settlement_loop(registry):
     """Background task: settle due predictions once per day at startup and then every 24h."""
@@ -57,6 +108,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db = Database(config.db_dsn)
     db.connect()
     registry = Registry(db)
+
+    # Bootstrap default user if users table is empty (single→multi-user migration)
+    _bootstrap_default_user(db, config)
 
     # Async database (for gradual route migration to async)
     from investmentology.registry.db import AsyncDatabase
