@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
 interface ReportSection {
@@ -107,13 +107,26 @@ export function ResearchReport() {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(0);
 
+  const goBack = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate("/");
+    }
+  }, [navigate]);
+
   useEffect(() => {
     if (!ticker) return;
     setLoading(true);
     fetch(`/api/invest/stock/${ticker}/report`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => setReport(data))
-      .catch(() => setReport(null))
+      .catch((err) => {
+        setReport({ ticker: ticker.toUpperCase(), name: "", sector: "", industry: "", generated_at: "", sections: [], error: err.message || "Failed to load report" });
+      })
       .finally(() => setLoading(false));
   }, [ticker]);
 
@@ -135,7 +148,7 @@ export function ResearchReport() {
           {report?.error || "Report unavailable"}
         </p>
         <button
-          onClick={() => navigate(-1)}
+          onClick={goBack}
           style={{
             padding: "8px 20px",
             background: "var(--color-accent)",
@@ -192,7 +205,7 @@ export function ResearchReport() {
         <div style={{ marginBottom: "var(--space-xl)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: "var(--space-sm)" }}>
             <button
-              onClick={() => navigate(-1)}
+              onClick={goBack}
               style={{
                 background: "var(--color-surface-1)",
                 border: "1px solid var(--color-surface-2)",

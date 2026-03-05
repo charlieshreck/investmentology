@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { BentoCard } from "../components/shared/BentoCard";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { ScenarioAnalysis } from "../components/portfolio/ScenarioAnalysis";
@@ -253,6 +254,7 @@ function stateBadge(state: string) {
 }
 
 export function StockDeepDive({ ticker }: { ticker: string }) {
+  const navigate = useNavigate();
   const [data, setData] = useState<StockResponse | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -462,19 +464,20 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
             >
               What if?
             </button>
-            <a
-              href={`/report/${data.ticker}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => {
+                useStore.getState().setOverlayTicker(null);
+                navigate(`/report/${data.ticker}`);
+              }}
               style={{
                 padding: "var(--space-xs) var(--space-md)", borderRadius: "var(--radius-sm)",
                 background: "var(--color-surface-1)", border: "1px solid var(--color-surface-2)",
-                color: "var(--color-text-muted)", textDecoration: "none",
-                fontSize: "var(--text-xs)", fontWeight: 600, whiteSpace: "nowrap",
+                color: "var(--color-text-muted)",
+                cursor: "pointer", fontSize: "var(--text-xs)", fontWeight: 600, whiteSpace: "nowrap",
               }}
             >
               Full Report
-            </a>
+            </button>
           </div>
         </div>
       </div>

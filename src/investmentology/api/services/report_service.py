@@ -35,10 +35,8 @@ class ReportService:
         ticker = ticker.upper()
         reg = self._reg
 
-        # Fundamentals
+        # Fundamentals (optional — report still works without)
         fundamentals = reg.get_latest_fundamentals(ticker)
-        if not fundamentals:
-            return None
 
         # Stock info
         stock_rows = reg._db.execute(
@@ -98,17 +96,30 @@ class ReportService:
             (ticker,),
         )
 
+        # Need at least some data to build a report
+        has_data = fundamentals or verdict or signal_rows or quant_gate or position
+        if not has_data and not stock:
+            return None
+
         # Build report sections
         sections = []
 
         # 1. Executive Summary
-        sections.append(self._executive_summary(ticker, stock, verdict, fundamentals))
+        if fundamentals:
+            sections.append(self._executive_summary(ticker, stock, verdict, fundamentals))
+        elif verdict:
+            content = f"**{stock.get('name', ticker)}** ({ticker})"
+            if stock.get("sector"):
+                content += f" — {stock['sector']}"
+            content += f"\n\n**Verdict**: {verdict['verdict']} (confidence: {float(verdict['confidence']):.0%})"
+            sections.append({"title": "Executive Summary", "content": content})
 
         # 2. Investment Thesis
         sections.append(self._investment_thesis(ticker, position, verdict, decision_rows))
 
         # 3. Financial Overview
-        sections.append(self._financial_overview(fundamentals))
+        if fundamentals:
+            sections.append(self._financial_overview(fundamentals))
 
         # 4. Quantitative Gate
         if quant_gate:
@@ -123,12 +134,15 @@ class ReportService:
             sections.append(self._risk_assessment(adversarial_rows))
 
         # 7. Portfolio Context
-        if position:
+        if position and fundamentals:
             sections.append(self._portfolio_context(position, fundamentals))
 
         # 8. Recommendation
         if verdict:
             sections.append(self._recommendation(verdict))
+
+        if not sections:
+            return None
 
         return {
             "ticker": ticker,
