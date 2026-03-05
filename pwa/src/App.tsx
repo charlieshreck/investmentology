@@ -47,7 +47,7 @@ function ViewLoader() {
 }
 
 export default function App() {
-  const { isAuthenticated, error, login, logout } = useAuth();
+  const { isAuthenticated, error, login, register, logout } = useAuth();
   const [offline, setOffline] = useState(!navigator.onLine);
 
   // Store logout in window for use by nav/settings
@@ -88,7 +88,7 @@ export default function App() {
 
   // Not authenticated — show login
   if (!isAuthenticated) {
-    return <Login onLogin={login} error={error} />;
+    return <Login onLogin={login} onRegister={register} error={error} />;
   }
 
   return (

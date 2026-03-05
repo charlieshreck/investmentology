@@ -20,10 +20,17 @@ def verify_password(plain: str, hashed: str) -> bool:
     return False
 
 
-def create_token(secret: str, expiry_hours: int) -> str:
-    """Create a signed JWT with an expiration claim."""
-    exp = datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
-    return jwt.encode({"exp": exp}, secret, algorithm=ALGORITHM)
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password using bcrypt."""
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
+
+
+def create_token(secret: str, expiry_hours: int, user_id: int | None = None) -> str:
+    """Create a signed JWT with an expiration claim and optional user_id."""
+    payload: dict = {"exp": datetime.now(timezone.utc) + timedelta(hours=expiry_hours)}
+    if user_id is not None:
+        payload["sub"] = str(user_id)
+    return jwt.encode(payload, secret, algorithm=ALGORITHM)
 
 
 def verify_token(token: str, secret: str) -> bool:
@@ -33,3 +40,13 @@ def verify_token(token: str, secret: str) -> bool:
         return True
     except JWTError:
         return False
+
+
+def get_user_id_from_token(token: str, secret: str) -> int | None:
+    """Extract user_id from a valid JWT token. Returns None if no sub claim or invalid."""
+    try:
+        payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+        sub = payload.get("sub")
+        return int(sub) if sub else None
+    except (JWTError, ValueError, TypeError):
+        return None

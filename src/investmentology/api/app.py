@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from investmentology.api.auth import verify_token
+from investmentology.api.auth import get_user_id_from_token, verify_token
 
 from investmentology.agents.gateway import LLMGateway
 from investmentology.api.deps import app_state
@@ -120,6 +120,7 @@ PUBLIC_PATHS = {
     "/api/invest/auth/login",
     "/api/invest/auth/logout",
     "/api/invest/auth/check",
+    "/api/invest/auth/register",
     "/api/invest/system/health",
     "/metrics",
 }
@@ -191,6 +192,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "Not authenticated"},
             )
+
+        # Extract user_id from JWT and store in request state
+        request.state.user_id = get_user_id_from_token(token, config.auth_secret_key)
 
         return await call_next(request)
 
