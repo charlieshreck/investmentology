@@ -17,6 +17,8 @@ export interface BacktestSummary {
   winningTrades: number;
   losingTrades: number;
   avgHoldingDays: number;
+  benchmarkReturn: number;
+  alpha: number;
 }
 
 export interface BacktestTrade {
@@ -34,6 +36,7 @@ export interface BacktestTrade {
 export interface BacktestResult {
   summary: BacktestSummary;
   equityCurve: { date: string; value: number }[];
+  benchmarkCurve: { date: string; value: number }[];
   monthlyReturns: { month: string; return: number }[];
   trades: BacktestTrade[];
 }

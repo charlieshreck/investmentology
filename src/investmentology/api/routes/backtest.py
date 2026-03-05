@@ -77,6 +77,24 @@ def run_backtest(
     return tearsheet
 
 
+@router.get("/backtest/results/{run_id}")
+def get_backtest_result(
+    run_id: int,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Get full results of a past backtest run."""
+    rows = registry._db.execute(
+        "SELECT result_json FROM invest.backtests WHERE id = %s",
+        (run_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+    result_json = rows[0].get("result_json")
+    if not result_json:
+        raise HTTPException(status_code=404, detail="No stored results for this run")
+    return result_json if isinstance(result_json, dict) else __import__("json").loads(result_json)
+
+
 @router.get("/backtest/history")
 def get_backtest_history(registry: Registry = Depends(get_registry)) -> dict:
     """Return list of past backtest runs."""

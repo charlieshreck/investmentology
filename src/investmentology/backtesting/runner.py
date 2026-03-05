@@ -42,6 +42,9 @@ class BacktestResult:
     trades: list[Trade] = field(default_factory=list)
     equity_curve: list[dict] = field(default_factory=list)
     monthly_returns: list[dict] = field(default_factory=list)
+    benchmark_curve: list[dict] = field(default_factory=list)
+    benchmark_return: float = 0.0
+    alpha: float = 0.0
 
 
 class BacktestRunner:
@@ -190,11 +193,17 @@ class BacktestRunner:
                     holding_days=(end_date - pos["entry_date"]).days,
                 ))
 
+        # Benchmark (SPY) tracking
+        benchmark_curve, benchmark_return = self._compute_benchmark(
+            start_date, end_date, initial_capital, equity_curve,
+        )
+
         # Compute stats
         final_value = equity_curve[-1]["value"] if equity_curve else initial_capital
         total_return = (final_value / initial_capital - 1) * 100
         days = (end_date - start_date).days
         annualized = ((final_value / initial_capital) ** (365 / max(days, 1)) - 1) * 100 if days > 0 else 0
+        alpha = total_return - benchmark_return
 
         winning = [t for t in trades if t.pnl > 0]
         losing = [t for t in trades if t.pnl <= 0]
@@ -225,7 +234,71 @@ class BacktestRunner:
             trades=trades,
             equity_curve=equity_curve,
             monthly_returns=monthly,
+            benchmark_curve=benchmark_curve,
+            benchmark_return=round(benchmark_return, 2),
+            alpha=round(alpha, 2),
         )
+
+    def _compute_benchmark(
+        self,
+        start: date,
+        end: date,
+        initial_capital: float,
+        equity_curve: list[dict],
+    ) -> tuple[list[dict], float]:
+        """Compute SPY buy-and-hold benchmark aligned to the equity curve dates."""
+        try:
+            import yfinance as yf
+
+            spy = yf.Ticker("SPY")
+            hist = spy.history(
+                start=(start - timedelta(days=5)).isoformat(),
+                end=(end + timedelta(days=5)).isoformat(),
+                auto_adjust=True,
+            )
+            if hist.empty:
+                return [], 0.0
+
+            spy_prices: dict[date, float] = {
+                d.date(): float(row["Close"])
+                for d, row in hist.iterrows()
+            }
+
+            # Find the first available SPY price on or after start_date
+            first_price = None
+            for ec_entry in equity_curve:
+                dt = date.fromisoformat(ec_entry["date"])
+                if dt in spy_prices:
+                    first_price = spy_prices[dt]
+                    break
+            if not first_price:
+                return [], 0.0
+
+            shares = initial_capital / first_price
+            curve: list[dict] = []
+            for ec_entry in equity_curve:
+                dt = date.fromisoformat(ec_entry["date"])
+                p = spy_prices.get(dt)
+                if p is None:
+                    # Look back up to 3 days
+                    for i in range(1, 4):
+                        prev = dt - timedelta(days=i)
+                        if prev in spy_prices:
+                            p = spy_prices[prev]
+                            break
+                if p is not None:
+                    curve.append({"date": ec_entry["date"], "value": round(shares * p, 2)})
+
+            if curve:
+                benchmark_return = (curve[-1]["value"] / initial_capital - 1) * 100
+            else:
+                benchmark_return = 0.0
+
+            return curve, round(benchmark_return, 2)
+
+        except Exception:
+            logger.warning("Benchmark computation failed", exc_info=True)
+            return [], 0.0
 
     def _get_decisions(self, start: date, end: date) -> list[dict]:
         """Fetch BUY/SELL decisions from the registry."""

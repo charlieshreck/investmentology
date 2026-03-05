@@ -23,8 +23,11 @@ def generate_tearsheet(result: BacktestResult) -> dict:
             "winningTrades": result.winning_trades,
             "losingTrades": result.losing_trades,
             "avgHoldingDays": result.avg_holding_days,
+            "benchmarkReturn": result.benchmark_return,
+            "alpha": result.alpha,
         },
         "equityCurve": result.equity_curve,
+        "benchmarkCurve": result.benchmark_curve,
         "monthlyReturns": result.monthly_returns,
         "trades": [
             {

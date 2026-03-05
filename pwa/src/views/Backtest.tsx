@@ -17,7 +17,13 @@ function pnlColor(n: number): string {
   return n > 0 ? "var(--color-success)" : n < 0 ? "var(--color-error)" : "var(--color-text-secondary)";
 }
 
-function EquityCurve({ data }: { data: { date: string; value: number }[] }) {
+function EquityCurve({
+  data,
+  benchmark,
+}: {
+  data: { date: string; value: number }[];
+  benchmark?: { date: string; value: number }[];
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -35,8 +41,10 @@ function EquityCurve({ data }: { data: { date: string; value: number }[] }) {
     ctx.clearRect(0, 0, W, H);
 
     const values = data.map((d) => d.value);
-    const min = Math.min(...values) * 0.995;
-    const max = Math.max(...values) * 1.005;
+    const bmValues = benchmark?.map((d) => d.value) ?? [];
+    const allValues = [...values, ...bmValues];
+    const min = Math.min(...allValues) * 0.995;
+    const max = Math.max(...allValues) * 1.005;
     const range = max - min || 1;
 
     // Draw grid
@@ -48,6 +56,22 @@ function EquityCurve({ data }: { data: { date: string; value: number }[] }) {
       ctx.moveTo(0, y);
       ctx.lineTo(W, y);
       ctx.stroke();
+    }
+
+    // Draw benchmark curve (dashed, muted)
+    if (bmValues.length > 1) {
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      for (let i = 0; i < bmValues.length; i++) {
+        const x = (i / (bmValues.length - 1)) * W;
+        const y = H - ((bmValues[i] - min) / range) * H;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // Draw equity curve
@@ -75,7 +99,7 @@ function EquityCurve({ data }: { data: { date: string; value: number }[] }) {
     gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = gradient;
     ctx.fill();
-  }, [data]);
+  }, [data, benchmark]);
 
   return <canvas ref={canvasRef} style={{ width: "100%", height: 200 }} />;
 }
@@ -196,7 +220,7 @@ export function Backtest() {
         {result && (
           <>
             {/* Key stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--space-md)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-md)" }}>
               <BentoCard title="Total Return">
                 <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)", color: pnlColor(result.summary.totalReturn) }}>
                   {formatPct(result.summary.totalReturn)}
@@ -205,11 +229,21 @@ export function Backtest() {
                   Annualized: {formatPct(result.summary.annualizedReturn)}
                 </div>
               </BentoCard>
+              <BentoCard title="vs SPY">
+                <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)", color: pnlColor(result.summary.alpha) }}>
+                  {formatPct(result.summary.alpha)}
+                </div>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                  SPY: {formatPct(result.summary.benchmarkReturn)}
+                </div>
+              </BentoCard>
               <BentoCard title="Sharpe Ratio">
                 <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)", color: result.summary.sharpeRatio >= 1 ? "var(--color-success)" : "var(--color-warning)" }}>
                   {result.summary.sharpeRatio.toFixed(2)}
                 </div>
               </BentoCard>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-md)" }}>
               <BentoCard title="Max Drawdown">
                 <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--color-error)" }}>
                   -{result.summary.maxDrawdown.toFixed(1)}%
@@ -221,6 +255,14 @@ export function Backtest() {
                 </div>
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
                   {result.summary.winningTrades}W / {result.summary.losingTrades}L
+                </div>
+              </BentoCard>
+              <BentoCard title="Avg Hold">
+                <div style={{ fontSize: "var(--text-lg)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
+                  {result.summary.avgHoldingDays.toFixed(0)}d
+                </div>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                  {result.summary.totalTrades} trades
                 </div>
               </BentoCard>
             </div>
@@ -235,7 +277,15 @@ export function Backtest() {
                   {formatCurrency(result.summary.finalValue)} end
                 </span>
               </div>
-              <EquityCurve data={result.equityCurve} />
+              <EquityCurve data={result.equityCurve} benchmark={result.benchmarkCurve} />
+              <div style={{ display: "flex", gap: "var(--space-lg)", marginTop: "var(--space-sm)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 12, height: 2, background: "#818cf8", borderRadius: 1 }} /> Strategy
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 12, height: 2, background: "rgba(251, 191, 36, 0.5)", borderRadius: 1, borderTop: "1px dashed rgba(251, 191, 36, 0.5)" }} /> SPY
+                </span>
+              </div>
             </BentoCard>
 
             {/* Monthly returns */}
