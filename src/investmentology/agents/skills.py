@@ -9,7 +9,7 @@ and parse responses — replacing the 8 individual agent classes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,7 @@ class AgentSkill:
     prompt_opener: str = ""  # First line of user prompt (e.g. "Analyze {ticker}...")
     signature_question: str = ""  # Closing line of user prompt
     react_capable: bool = False  # True = use ReAct tool-use loop instead of single-shot
+    sector_overlays: dict[str, str] = field(default_factory=dict)  # sector -> extra methodology
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +152,26 @@ free cash flow, and ample liquid reserves.""",
         "ANSWER: If the stock market closed for the next ten years, would I "
         "still be comfortable owning this business at this price?"
     ),
+    sector_overlays={
+        "Financial Services": (
+            "Apply bank/insurance-specific methodology:\n"
+            "- Tangible Book Value per share vs market price (P/TBV < 1.5 is interesting)\n"
+            "- Net Interest Margin trend and sensitivity to rate environment\n"
+            "- Loan quality: NPL ratio, charge-off trends, reserve adequacy\n"
+            "- Basel III regulatory capital: CET1 > 10% preferred\n"
+            "- ROE decomposition via DuPont (leverage × margin × turnover)\n"
+            "- Fee income mix — less rate-sensitive revenue is a moat signal"
+        ),
+        "Technology": (
+            "Apply technology-specific methodology:\n"
+            "- R&D as % of revenue — capitalize mentally; sustained >15% signals reinvestment\n"
+            "- Customer acquisition cost (CAC) vs lifetime value (LTV); LTV/CAC > 3 preferred\n"
+            "- Total Addressable Market (TAM) realism — discount management estimates by 50%\n"
+            "- Switching costs: measure via net revenue retention rate (>120% = strong moat)\n"
+            "- Rule of 40: Revenue growth % + FCF margin % should exceed 40\n"
+            "- Stock-based compensation: add back to expenses for true owner earnings"
+        ),
+    },
 )
 
 SOROS = AgentSkill(
@@ -245,6 +266,17 @@ change your mind quickly is more important than being right initially.""",
         "ANSWER: Is there a reflexive feedback loop at work -- and are we in "
         "the self-reinforcing phase or approaching the point of reversal?"
     ),
+    sector_overlays={
+        "Energy": (
+            "Apply energy-specific reflexive analysis:\n"
+            "- Commodity cycle positioning: where are we in the oil/gas capex super-cycle?\n"
+            "- Reserve replacement ratio — must exceed 100% for sustainable production\n"
+            "- Break-even costs per barrel/mcf vs current commodity prices\n"
+            "- Reflexive loop: high prices → capex boom → oversupply → price crash → capex drought\n"
+            "- OPEC+ spare capacity and quota compliance as regime stability indicator\n"
+            "- Energy transition risk: stranded asset probability over 10-20 year horizon"
+        ),
+    },
 )
 
 SIMONS = AgentSkill(
@@ -331,6 +363,16 @@ data or extreme conflict. MUST include at least one cautionary signal.""",
         "or random noise, and what is the probability-weighted expected move?"
     ),
     react_capable=True,
+    sector_overlays={
+        "Technology": (
+            "Apply tech-sector quantitative adjustments:\n"
+            "- Momentum factor effectiveness varies by market cap tier:\n"
+            "  Large-cap tech: 12-month momentum is strong predictor\n"
+            "  Small-cap tech: momentum more noisy, use 6-month window\n"
+            "- Volatility regime matters: tech vol clusters after earnings\n"
+            "- Mean reversion is weaker in tech — trends persist longer than value sectors"
+        ),
+    },
 )
 
 AUDITOR = AgentSkill(
@@ -420,6 +462,17 @@ Examine related-party transactions for size and rationale.""",
         "ANSWER: What specific, observable event would cause me to admit this "
         "thesis is broken -- and has the team pre-committed to acting on it?"
     ),
+    sector_overlays={
+        "Financial Services": (
+            "Apply financial sector audit methodology:\n"
+            "- Mark-to-market analysis: Level 3 assets as % of tangible equity\n"
+            "- Off-balance-sheet exposure: committed credit lines, derivatives notional\n"
+            "- CET1 ratio validation against Basel III minimums (>10.5% incl buffers)\n"
+            "- Interest rate sensitivity: NII impact of +/-100bps parallel shift\n"
+            "- Credit quality flags: rising Stage 2 loans, reserve coverage trends\n"
+            "- Revenue quality: trading revenue volatility vs fee income stability"
+        ),
+    },
 )
 
 DALIO = AgentSkill(
@@ -515,6 +568,17 @@ conviction and acknowledge what you do NOT know.""",
         "falling growth, rising inflation, and falling inflation? Or is this "
         "a concentrated bet on one macro regime?"
     ),
+    sector_overlays={
+        "Utilities": (
+            "Apply utilities-specific all-weather analysis:\n"
+            "- Rate sensitivity: regulated utilities suffer when rates rise (bond proxy)\n"
+            "- Regulatory risk: allowed ROE from rate cases, rate base growth trajectory\n"
+            "- Dividend sustainability: payout ratio vs regulated earnings, capex needs\n"
+            "- Duration exposure: utilities behave like long-duration bonds in rate moves\n"
+            "- Transition capex: grid modernization and renewable mandates as growth catalyst\n"
+            "- All-weather score: how does this perform across the four quadrants?"
+        ),
+    },
 )
 
 LYNCH = AgentSkill(
@@ -795,6 +859,25 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         "ANSWER: How much can I lose, and is the margin of safety wide "
         "enough to compensate for everything I cannot predict?"
     ),
+    sector_overlays={
+        "Healthcare": (
+            "Apply biotech/pharma margin-of-safety methodology:\n"
+            "- Pipeline probability-weighting: Phase I (10%), Phase II (25%), Phase III (50%)\n"
+            "- Patent cliff analysis: key drug expiry dates, biosimilar competition timeline\n"
+            "- FDA catalyst calendar: PDUFA dates, advisory committee meetings\n"
+            "- Cash runway: cash / quarterly burn rate → quarters until dilution or death\n"
+            "- Sum-of-parts: risk-adjust each pipeline asset, add net cash, compare to market cap"
+        ),
+        "Real Estate": (
+            "Apply REIT-specific valuation methodology:\n"
+            "- NAV vs market cap: property appraisals, cap rate assumptions, discount/premium\n"
+            "- FFO and AFFO per share (not EPS — depreciation is not real for real estate)\n"
+            "- Cap rate analysis: implied cap rate vs comparable transactions\n"
+            "- Occupancy trends, lease rollover schedule, and tenant credit quality\n"
+            "- Debt maturity ladder: refinancing risk in rising rate environments\n"
+            "- Margin of safety = discount to conservative NAV estimate"
+        ),
+    },
 )
 
 FINANCIAL_HEALTH_SCREENER = AgentSkill(
@@ -1084,6 +1167,16 @@ Return ONLY valid JSON. No markdown, no code fences.""",
         "Check completeness, internal consistency, sector reasonableness, "
         "and temporal sanity."
     ),
+    sector_overlays={
+        "Healthcare": (
+            "Apply biotech/pharma data validation adjustments:\n"
+            "- Pre-revenue biotech with $0 revenue and high R&D is NORMAL, not corruption\n"
+            "- Clinical trial data: milestone payments can cause lumpy revenue — validate timing\n"
+            "- Pipeline asset valuation: check if market cap implies reasonable risk-adjustment\n"
+            "- Negative earnings are expected for clinical-stage companies\n"
+            "- Validate cash position carefully — it IS the runway, errors are critical"
+        ),
+    },
 )
 
 

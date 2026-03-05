@@ -101,6 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _bg_tasks = []
     _bg_tasks.append(asyncio.create_task(_daily_settlement_loop(registry)))
     _bg_tasks.append(asyncio.create_task(reanalysis_loop(registry, orchestrator)))
+    _bg_tasks.append(asyncio.create_task(_metrics_update_loop(registry)))
     logger.info("API started — DB, gateway, and background tasks ready")
     yield
 
@@ -120,7 +121,36 @@ PUBLIC_PATHS = {
     "/api/invest/auth/logout",
     "/api/invest/auth/check",
     "/api/invest/system/health",
+    "/metrics",
 }
+
+
+async def _metrics_update_loop(registry):
+    """Background task: update Prometheus gauges every 60 seconds."""
+    from investmentology.api.metrics import (
+        build_info,
+        db_pool_size,
+        portfolio_value_usd,
+        position_count,
+    )
+
+    build_info.info({"version": "0.1.0"})
+    while True:
+        try:
+            positions = registry.get_open_positions()
+            position_count.set(len(positions))
+            total_val = sum(float(p.current_price * p.shares) for p in positions)
+            portfolio_value_usd.set(total_val)
+
+            # DB pool stats
+            db = registry._db
+            if db._pool is not None:
+                stats = db._pool.get_stats()
+                db_pool_size.labels(state="pool_size").set(stats.get("pool_size", 0))
+                db_pool_size.labels(state="pool_available").set(stats.get("pool_available", 0))
+        except Exception:
+            logger.debug("Metrics update failed", exc_info=True)
+        await asyncio.sleep(60)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -177,23 +207,40 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log API requests with method, path, status, and duration."""
+    """Log API requests with method, path, status, and duration. Also records Prometheus metrics."""
 
     async def dispatch(self, request: Request, call_next):
+        from investmentology.api.metrics import (
+            api_request_duration,
+            api_requests_total,
+            template_path,
+        )
+
         start = time.monotonic()
         response = await call_next(request)
-        if request.url.path.startswith("/api/"):
-            duration_ms = round((time.monotonic() - start) * 1000, 1)
+        path = request.url.path
+        if path.startswith("/api/"):
+            duration_s = time.monotonic() - start
+            duration_ms = round(duration_s * 1000, 1)
             logger.info(
                 "request",
                 extra={
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": path,
                     "status": response.status_code,
                     "duration_ms": duration_ms,
                     "request_id": getattr(request.state, "request_id", ""),
                 },
             )
+            # Prometheus metrics
+            tmpl = template_path(path)
+            status = str(response.status_code)
+            api_request_duration.labels(
+                method=request.method, path_template=tmpl, status=status,
+            ).observe(duration_s)
+            api_requests_total.labels(
+                method=request.method, path_template=tmpl, status=status,
+            ).inc()
         return response
 
 
@@ -233,6 +280,14 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIDMiddleware)
+
+    # Prometheus /metrics endpoint (no auth required)
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics():
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+        from fastapi.responses import Response
+
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Import and mount route modules
     from investmentology.api.routes import (

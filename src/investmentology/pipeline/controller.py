@@ -168,11 +168,23 @@ class PipelineController:
 
     async def run_loop(self) -> None:
         """Main event loop — polls for work every POLL_INTERVAL seconds."""
+        from investmentology.api.metrics import pipeline_cycle_duration, pipeline_cycles_total
+
         while self._running:
+            import time as _time
+
+            start = _time.monotonic()
+            status = "success"
             try:
                 await self._tick()
             except Exception:
+                status = "error"
                 logger.exception("Controller tick failed")
+            finally:
+                pipeline_cycle_duration.labels(status=status).observe(
+                    _time.monotonic() - start,
+                )
+                pipeline_cycles_total.labels(status=status).inc()
             await asyncio.sleep(POLL_INTERVAL)
 
     # ------------------------------------------------------------------

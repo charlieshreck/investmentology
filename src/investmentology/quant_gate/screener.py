@@ -164,6 +164,9 @@ class QuantGateScreener:
         10. Add top N to watchlist as CANDIDATE
         11. Return ScreenerResult
         """
+        from investmentology.api.metrics import quant_gate_runs_total, quant_gate_stocks_scored
+
+        quant_gate_runs_total.inc()
         top_n = self._config.quant_gate_top_n
 
         # 1. Load universe
@@ -394,6 +397,8 @@ class QuantGateScreener:
             except Exception:
                 # Duplicate or constraint violation is expected on re-runs
                 logger.debug("Could not add %s to watchlist (may already exist)", result["ticker"])
+
+        quant_gate_stocks_scored.set(len(top_results))
 
         return ScreenerResult(
             run_id=run_id,

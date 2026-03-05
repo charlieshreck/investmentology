@@ -43,8 +43,12 @@ class AgentRunner:
     # System prompt
     # ------------------------------------------------------------------
 
-    def build_system_prompt(self) -> str:
-        """Assemble the system prompt from skill fields."""
+    def build_system_prompt(self, *, request: AnalysisRequest | None = None) -> str:
+        """Assemble the system prompt from skill fields.
+
+        If a request is provided, sector-specific overlays are appended
+        when the ticker's sector matches a defined overlay.
+        """
         parts = [
             f"You are {self.skill.display_name}.",
             "",
@@ -65,6 +69,15 @@ class AgentRunner:
         if self.skill.allowed_tags:
             parts.append(f"Allowed signal tags: {', '.join(self.skill.allowed_tags)}")
             parts.append("")
+
+        # Sector-specific methodology overlay
+        if request and hasattr(self.skill, "sector_overlays") and self.skill.sector_overlays:
+            sector = request.sector or ""
+            overlay = self.skill.sector_overlays.get(sector)
+            if overlay:
+                parts.append(f"## Sector-Specific Methodology ({sector})")
+                parts.append(overlay)
+                parts.append("")
 
         # Output format
         parts.append(self.skill.output_format)
@@ -289,18 +302,37 @@ class AgentRunner:
 
     async def analyze(self, request: AnalysisRequest) -> AnalysisResponse:
         """Run analysis using the skill's provider preference."""
-        system_prompt = self.build_system_prompt()
+        import time as _time
+
+        from investmentology.api.metrics import agent_analysis_duration, agent_analysis_total
+
+        system_prompt = self.build_system_prompt(request=request)
         user_prompt = self.build_user_prompt(request)
 
         provider = self._resolve_provider()
         model = self.skill.default_model
 
-        llm_response = await self.gateway.call(
-            provider=provider,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model,
-        )
+        start = _time.monotonic()
+        status = "success"
+        try:
+            llm_response = await self.gateway.call(
+                provider=provider,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+            )
+        except Exception:
+            status = "error"
+            agent_analysis_total.labels(agent_name=self.skill.name, status=status).inc()
+            agent_analysis_duration.labels(
+                agent_name=self.skill.name, provider=provider,
+            ).observe(_time.monotonic() - start)
+            raise
+
+        agent_analysis_duration.labels(
+            agent_name=self.skill.name, provider=provider,
+        ).observe(_time.monotonic() - start)
+        agent_analysis_total.labels(agent_name=self.skill.name, status=status).inc()
 
         signal_set = self.parse_response(llm_response.content, request)
         signal_set.token_usage = llm_response.token_usage
