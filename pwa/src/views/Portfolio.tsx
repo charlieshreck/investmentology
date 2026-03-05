@@ -158,7 +158,8 @@ export function Portfolio() {
   }
 
   // Merge live WebSocket prices
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const enrichedPositions = positions.map((p) => {
     const live = livePrices[p.ticker];
     if (!live) return p;
