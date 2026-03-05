@@ -158,6 +158,7 @@ export function Portfolio() {
   }
 
   // Merge live WebSocket prices
+  const todayStr = new Date().toISOString().slice(0, 10);
   const enrichedPositions = positions.map((p) => {
     const live = livePrices[p.ticker];
     if (!live) return p;
@@ -166,14 +167,19 @@ export function Portfolio() {
     const cost = p.avgCost * p.shares;
     const pnl = mv - cost;
     const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+    // For same-day buys, "today" should match "since buy" — the WS changePct
+    // uses yesterday's close which creates a misleading discrepancy.
+    const boughtToday = p.entryDate === todayStr;
+    const dayChg = boughtToday ? pnl : live.change * p.shares;
+    const dayChgPct = boughtToday ? pnlPct : live.changePct;
     return {
       ...p,
       currentPrice: livePrice,
       marketValue: mv,
       unrealizedPnl: pnl,
       unrealizedPnlPct: pnlPct,
-      dayChange: live.change * p.shares,
-      dayChangePct: live.changePct,
+      dayChange: dayChg,
+      dayChangePct: dayChgPct,
     };
   });
 
