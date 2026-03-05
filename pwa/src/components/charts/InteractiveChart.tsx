@@ -297,17 +297,17 @@ export function InteractiveChart({ ticker }: { ticker: string }) {
       </div>
 
       {/* Chart area */}
-      <div style={{ padding: "0 var(--space-lg) var(--space-md)" }}>
-        {loading ? (
-          <div style={{ height: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ padding: "0 var(--space-lg) var(--space-md)", position: "relative" }}>
+        <div ref={containerRef} style={{ height: 300 }} />
+        {loading && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 var(--space-lg) var(--space-md)" }}>
             <div className="skeleton" style={{ width: "100%", height: 260, borderRadius: "var(--radius-sm)" }} />
           </div>
-        ) : data.length < 2 ? (
-          <div style={{ height: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        )}
+        {!loading && data.length < 2 && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>No data</span>
           </div>
-        ) : (
-          <div ref={containerRef} style={{ height: 300 }} />
         )}
       </div>
     </div>
