@@ -249,7 +249,7 @@ class PortfolioService:
             if bought_today:
                 day_change_pct = unrealised_pct
                 day_change_total = unrealised
-                day_change_per_share = float(cur_price - a["entry_price"])
+                day_change_per_share = cur_price - float(a["entry_price"])
 
             total_day_pnl += day_change_total
 
