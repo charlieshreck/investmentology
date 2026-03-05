@@ -25,7 +25,7 @@ COOKIE_NAME = "session"
 
 class LoginRequest(BaseModel):
     password: str
-    email: str | None = None  # Optional for backward compat (password-only login)
+    email: str
 
 
 class RegisterRequest(BaseModel):
@@ -36,45 +36,36 @@ class RegisterRequest(BaseModel):
 
 @router.post("/auth/login")
 def login(body: LoginRequest, request: Request, response: Response) -> dict:
-    """Verify credentials and set a session cookie.
-
-    Supports two modes:
-    - Legacy: password-only (single-user mode via AUTH_PASSWORD_HASH env)
-    - Multi-user: email + password (looked up from invest.users table)
-    """
+    """Verify credentials and set a session cookie."""
     config = app_state.config
+    db = app_state.db
 
-    user_id: int | None = None
+    if not db:
+        return {"ok": False, "error": "Database not available"}
 
-    if body.email and app_state.db:
-        # Multi-user login: look up user by email
-        rows = app_state.db.execute(
-            "SELECT id, password_hash, is_active FROM invest.users WHERE email = %s",
-            (body.email.lower().strip(),),
-        )
-        if not rows:
-            response.status_code = 401
-            return {"ok": False, "error": "Invalid email or password"}
+    email = body.email.lower().strip()
+    if not email or "@" not in email:
+        response.status_code = 400
+        return {"ok": False, "error": "Email required"}
 
-        user = rows[0]
-        if not user.get("is_active", True):
-            response.status_code = 401
-            return {"ok": False, "error": "Account disabled"}
+    rows = db.execute(
+        "SELECT id, password_hash, is_active FROM invest.users WHERE email = %s",
+        (email,),
+    )
+    if not rows:
+        response.status_code = 401
+        return {"ok": False, "error": "Invalid email or password"}
 
-        if not verify_password(body.password, user["password_hash"]):
-            response.status_code = 401
-            return {"ok": False, "error": "Invalid email or password"}
+    user = rows[0]
+    if not user.get("is_active", True):
+        response.status_code = 401
+        return {"ok": False, "error": "Account disabled"}
 
-        user_id = user["id"]
+    if not verify_password(body.password, user["password_hash"]):
+        response.status_code = 401
+        return {"ok": False, "error": "Invalid email or password"}
 
-    else:
-        # Legacy single-password login
-        if not config or not config.auth_password_hash:
-            return {"ok": False, "error": "Auth not configured"}
-
-        if not verify_password(body.password, config.auth_password_hash):
-            response.status_code = 401
-            return {"ok": False, "error": "Invalid password"}
+    user_id = user["id"]
 
     if not config or not config.auth_secret_key:
         return {"ok": False, "error": "Auth not configured"}

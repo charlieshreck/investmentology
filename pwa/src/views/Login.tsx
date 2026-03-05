@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 interface LoginProps {
-  onLogin: (password: string, email?: string) => Promise<boolean>;
+  onLogin: (password: string, email: string) => Promise<boolean>;
   onRegister: (email: string, password: string, displayName?: string) => Promise<boolean>;
   error: string | null;
 }
@@ -15,12 +15,12 @@ export function Login({ onLogin, onRegister, error }: LoginProps) {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!password.trim() || submitting) return;
+    if (!password.trim() || !email.trim() || submitting) return;
     setSubmitting(true);
     if (mode === "register") {
       await onRegister(email, password, displayName);
     } else {
-      await onLogin(password, email || undefined);
+      await onLogin(password, email);
     }
     setSubmitting(false);
   };
@@ -38,7 +38,7 @@ export function Login({ onLogin, onRegister, error }: LoginProps) {
     marginBottom: "var(--space-md)",
   };
 
-  const canSubmit = password.trim() && (mode === "login" || email.trim());
+  const canSubmit = password.trim() && email.trim();
 
   return (
     <div
@@ -73,10 +73,10 @@ export function Login({ onLogin, onRegister, error }: LoginProps) {
           {/* Email field (always shown but optional for legacy login) */}
           <input
             type="email"
-            placeholder={mode === "login" ? "Email (optional)" : "Email"}
+            placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoFocus={mode === "register"}
+            autoFocus
             style={inputStyle}
           />
 
@@ -95,7 +95,6 @@ export function Login({ onLogin, onRegister, error }: LoginProps) {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoFocus={mode === "login"}
             style={{ ...inputStyle, marginBottom: "var(--space-lg)" }}
           />
 

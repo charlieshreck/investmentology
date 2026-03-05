@@ -4,7 +4,7 @@ interface AuthState {
   isAuthenticated: boolean | null; // null = checking
   userId: number | null;
   error: string | null;
-  login: (password: string, email?: string) => Promise<boolean>;
+  login: (password: string, email: string) => Promise<boolean>;
   register: (email: string, password: string, displayName?: string) => Promise<boolean>;
   logout: () => Promise<void>;
 }
@@ -25,11 +25,10 @@ export function useAuth(): AuthState {
       .catch(() => setIsAuthenticated(false));
   }, []);
 
-  const login = useCallback(async (password: string, email?: string): Promise<boolean> => {
+  const login = useCallback(async (password: string, email: string): Promise<boolean> => {
     setError(null);
     try {
-      const body: Record<string, string> = { password };
-      if (email) body.email = email;
+      const body = { password, email };
       const res = await fetch("/api/invest/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
