@@ -41,6 +41,13 @@ class IncomeTargetRequest(BaseModel):
     monthly_target: float
 
 
+class ScenarioRequest(BaseModel):
+    action: str  # "add", "remove", "resize"
+    ticker: str
+    shares: float
+    price: float | None = None
+
+
 router = APIRouter()
 
 
@@ -359,6 +366,20 @@ def set_income_target(
         (Decimal(str(body.monthly_target)),),
     )
     return {"monthlyTarget": body.monthly_target, "status": "updated"}
+
+
+@router.post("/portfolio/scenario")
+def evaluate_scenario(
+    body: ScenarioRequest,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """What-if scenario: simulate adding, removing, or resizing a position."""
+    return PortfolioService(registry).evaluate_scenario(
+        action=body.action,
+        ticker=body.ticker,
+        shares=body.shares,
+        price=body.price,
+    )
 
 
 @router.get("/portfolio/export")

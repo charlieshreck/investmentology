@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
+import { ScenarioAnalysis } from "../components/portfolio/ScenarioAnalysis";
 import { InteractiveChart } from "../components/charts/InteractiveChart";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { Badge } from "../components/shared/Badge";
@@ -258,6 +259,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
   const [addStatus, setAddStatus] = useState<string | null>(null);
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [closeExitPrice, setCloseExitPrice] = useState("");
   const [refetchKey, setRefetchKey] = useState(0);
 
@@ -448,6 +450,30 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
             >
               + Portfolio
             </button>
+            <button
+              onClick={() => setShowScenarioModal(true)}
+              style={{
+                padding: "var(--space-xs) var(--space-md)", borderRadius: "var(--radius-sm)",
+                background: "var(--color-surface-1)", border: "1px solid var(--color-surface-2)",
+                color: "var(--color-text-muted)",
+                cursor: "pointer", fontSize: "var(--text-xs)", fontWeight: 600, whiteSpace: "nowrap",
+              }}
+            >
+              What if?
+            </button>
+            <a
+              href={`/report/${data.ticker}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                padding: "var(--space-xs) var(--space-md)", borderRadius: "var(--radius-sm)",
+                background: "var(--color-surface-1)", border: "1px solid var(--color-surface-2)",
+                color: "var(--color-text-muted)", textDecoration: "none",
+                fontSize: "var(--text-xs)", fontWeight: 600, whiteSpace: "nowrap",
+              }}
+            >
+              Full Report
+            </a>
           </div>
         </div>
       </div>
@@ -592,6 +618,19 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           onClose={() => setShowPortfolioModal(false)}
           onSuccess={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
           onError={(msg) => { setAddStatus(msg); setTimeout(() => setAddStatus(null), 3000); }}
+        />
+      )}
+
+      {/* Scenario Analysis Modal */}
+      {showScenarioModal && (
+        <ScenarioAnalysis
+          ticker={data.ticker}
+          currentPrice={f?.price}
+          onClose={() => setShowScenarioModal(false)}
+          onProceed={() => {
+            setShowScenarioModal(false);
+            setShowPortfolioModal(true);
+          }}
         />
       )}
 

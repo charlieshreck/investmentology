@@ -570,6 +570,167 @@ class PortfolioService:
             "insights": insights,
         }
 
+    def evaluate_scenario(
+        self,
+        action: str,
+        ticker: str,
+        shares: float,
+        price: float | None = None,
+    ) -> dict:
+        """Simulate a portfolio change and return before/after comparison."""
+        ticker = ticker.upper()
+        registry = self._reg
+        positions = registry.get_open_positions()
+
+        # Resolve price if not provided
+        if price is None:
+            try:
+                import yfinance as yf
+                info = yf.Ticker(ticker).fast_info
+                price = float(info.get("lastPrice", 0) or info.get("last_price", 0))
+            except Exception:
+                price = 0.0
+        if price <= 0:
+            return {"error": "Could not determine price for scenario"}
+
+        # Current state
+        tickers = [p.ticker for p in positions]
+        sector_map = _lookup_sectors(registry._db, tickers + [ticker])
+
+        budget_rows = registry._db.execute(
+            "SELECT cash_reserve FROM invest.portfolio_budget LIMIT 1"
+        )
+        cash = float(budget_rows[0]["cash_reserve"]) if budget_rows else 0.0
+
+        current_total = sum(
+            float(p.market_value) for p in positions
+            if _safe_decimal(p.market_value) is not None
+        )
+
+        # Build simulated positions list
+        sim_positions: list[dict] = []
+        for p in positions:
+            mv = _safe_decimal(p.market_value) or 0
+            sim_positions.append({
+                "ticker": p.ticker,
+                "shares": float(p.shares),
+                "price": float(p.current_price) if p.current_price else 0,
+                "marketValue": mv,
+                "sector": sector_map.get(p.ticker, "Unknown"),
+            })
+
+        # Apply scenario action
+        scenario_value = shares * price
+        warnings: list[str] = []
+
+        if action == "add":
+            existing = next((sp for sp in sim_positions if sp["ticker"] == ticker), None)
+            if existing:
+                existing["shares"] += shares
+                existing["marketValue"] += scenario_value
+            else:
+                sim_positions.append({
+                    "ticker": ticker,
+                    "shares": shares,
+                    "price": price,
+                    "marketValue": scenario_value,
+                    "sector": sector_map.get(ticker, "Unknown"),
+                })
+            sim_cash = cash - scenario_value
+            if sim_cash < 0:
+                warnings.append(f"Insufficient cash: need ${scenario_value:,.0f}, have ${cash:,.0f}")
+
+        elif action == "remove":
+            existing = next((sp for sp in sim_positions if sp["ticker"] == ticker), None)
+            if not existing:
+                return {"error": f"No position in {ticker} to remove"}
+            if shares >= existing["shares"]:
+                sim_positions = [sp for sp in sim_positions if sp["ticker"] != ticker]
+            else:
+                existing["shares"] -= shares
+                existing["marketValue"] -= scenario_value
+            sim_cash = cash + scenario_value
+
+        elif action == "resize":
+            existing = next((sp for sp in sim_positions if sp["ticker"] == ticker), None)
+            if not existing:
+                return {"error": f"No position in {ticker} to resize"}
+            old_value = existing["marketValue"]
+            existing["shares"] = shares
+            existing["marketValue"] = shares * price
+            sim_cash = cash + (old_value - existing["marketValue"])
+
+        else:
+            return {"error": f"Unknown action: {action}"}
+
+        # Compute after-state metrics
+        sim_total = sum(sp["marketValue"] for sp in sim_positions)
+
+        # Sector exposure
+        sim_sector_values: dict[str, float] = {}
+        for sp in sim_positions:
+            s = sp["sector"]
+            sim_sector_values[s] = sim_sector_values.get(s, 0) + sp["marketValue"]
+
+        sim_sectors = []
+        for s, v in sorted(sim_sector_values.items(), key=lambda x: -x[1]):
+            pct = (v / sim_total * 100) if sim_total > 0 else 0
+            sim_sectors.append({
+                "name": s,
+                "pct": round(pct, 1),
+                "value": round(v, 2),
+                "color": SECTOR_COLORS.get(s, "#94a3b8"),
+            })
+            if pct > 25:
+                warnings.append(f"{s} sector would be {pct:.1f}% (limit: 25%)")
+
+        # Position concentration
+        for sp in sim_positions:
+            pos_pct = (sp["marketValue"] / sim_total * 100) if sim_total > 0 else 0
+            if pos_pct > 20:
+                warnings.append(f"{sp['ticker']} would be {pos_pct:.1f}% of portfolio (limit: 20%)")
+
+        # Current sector exposure for comparison
+        cur_sector_values: dict[str, float] = {}
+        for sp_cur in [{
+            "ticker": p.ticker,
+            "marketValue": _safe_decimal(p.market_value) or 0,
+            "sector": sector_map.get(p.ticker, "Unknown"),
+        } for p in positions]:
+            s = sp_cur["sector"]
+            cur_sector_values[s] = cur_sector_values.get(s, 0) + sp_cur["marketValue"]
+
+        cur_sectors = []
+        for s, v in sorted(cur_sector_values.items(), key=lambda x: -x[1]):
+            pct = (v / current_total * 100) if current_total > 0 else 0
+            cur_sectors.append({
+                "name": s,
+                "pct": round(pct, 1),
+                "value": round(v, 2),
+                "color": SECTOR_COLORS.get(s, "#94a3b8"),
+            })
+
+        return {
+            "ticker": ticker,
+            "action": action,
+            "shares": shares,
+            "price": round(price, 2),
+            "before": {
+                "totalValue": round(current_total, 2),
+                "cashReserve": round(cash, 2),
+                "positionCount": len(positions),
+                "sectors": cur_sectors,
+            },
+            "after": {
+                "totalValue": round(sim_total, 2),
+                "cashReserve": round(sim_cash, 2),
+                "positionCount": len(sim_positions),
+                "sectors": sim_sectors,
+            },
+            "warnings": warnings,
+            "canProceed": len(warnings) == 0,
+        }
+
     def get_briefing(self) -> dict:
         registry = self._reg
         positions = registry.get_open_positions()

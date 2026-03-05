@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from investmentology.api.deps import get_registry
+from investmentology.api.services.report_service import ReportService
 from investmentology.api.services.stock_service import StockService
 from investmentology.data.profile import fetch_news_from_yfinance
 from investmentology.registry.queries import Registry
@@ -126,3 +127,15 @@ def get_stock_chart(
     except Exception as exc:
         logger.warning("Chart fetch failed for %s: %s", ticker, exc)
         return {"ticker": ticker, "period": period, "data": [], "error": str(exc)}
+
+
+@router.get("/stock/{ticker}/report")
+def get_stock_report(
+    ticker: str,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Full AI research report assembled from all DB sources."""
+    report = ReportService(registry).generate(ticker)
+    if report is None:
+        return {"error": "Insufficient data for report", "ticker": ticker.upper()}
+    return report
