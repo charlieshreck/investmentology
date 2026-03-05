@@ -12,7 +12,7 @@ export function ClosedTradeCard({ trade: cp }: { trade: ClosedPosition }) {
 
   useEffect(() => {
     if (!expanded || currentPrice !== null) return;
-    apiFetch<any>(`/stock/${cp.ticker}`)
+    apiFetch<any>(`stock/${cp.ticker}`)
       .then((data) => {
         const price = data?.fundamentals?.price ?? data?.profile?.price ?? data?.profile?.currentPrice;
         if (price) setCurrentPrice(price);

@@ -18,7 +18,7 @@ export function PortfolioPerformanceChart() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["portfolio", "performance", period],
-    queryFn: () => apiFetch<PerformanceData>(`/portfolio/performance?period=${period}`),
+    queryFn: () => apiFetch<PerformanceData>(`portfolio/performance?period=${period}`),
     staleTime: 5 * 60 * 1000,
   });
 
