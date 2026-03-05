@@ -54,7 +54,7 @@ def _bootstrap_default_user(db: Database, config) -> None:
         result = db.execute(
             "INSERT INTO invest.users (email, password_hash, display_name) "
             "VALUES (%s, %s, %s) RETURNING id",
-            ("admin@investmentology.local", pw_hash, "Admin"),
+            ("charlieshreck@gmail.com", pw_hash, "Charlie"),
         )
         if not result:
             return
