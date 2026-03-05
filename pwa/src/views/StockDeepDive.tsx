@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { BentoCard } from "../components/shared/BentoCard";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
-import { PriceChart } from "../components/charts/PriceChart";
+import { InteractiveChart } from "../components/charts/InteractiveChart";
 import { MarketStatus } from "../components/shared/MarketStatus";
 import { Badge } from "../components/shared/Badge";
 import { formatCap } from "../utils/deepdiveHelpers";
@@ -453,7 +453,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       </div>
 
       {/* Price Chart */}
-      <PriceChart ticker={data.ticker} />
+      <InteractiveChart ticker={data.ticker} />
 
       {/* Hero Verdict Strip — glowing orbit border matches verdict */}
       {data.verdict && (
