@@ -24,6 +24,40 @@ def _safe_decimal(v: Decimal | None) -> float | None:
         return None
 
 
+import re
+
+_NAME_SUFFIXES = re.compile(
+    r",?\s*(?:Common\s+(?:Stock|Units?|Shares?)"
+    r"|Ordinary\s+Shares?"
+    r"|Class\s+[A-C]\b"
+    r"|representing\s+limited\s+partner\s+interests"
+    r"|\bInc\.?"
+    r"|\bCorporation\b"
+    r"|\bCorp\.?"
+    r"|\bLtd\.?"
+    r"|\bplc\b"
+    r"|\bN\.V\.?"
+    r"|\bL\.P\.?"
+    r"|,?\s*& Co\.?"
+    r")\s*",
+    re.IGNORECASE,
+)
+
+
+def _short_name(name: str | None) -> str | None:
+    """Strip common yfinance suffixes from stock names."""
+    if not name:
+        return name
+    # Split on first comma to remove trailing legal descriptors
+    short = name.split(",")[0] if ", " in name else name
+    # Iteratively strip suffixes (some names have multiple, e.g. "Corp Common Stock")
+    prev = None
+    while short != prev:
+        prev = short
+        short = _NAME_SUFFIXES.sub(" ", short).strip()
+    return short or name
+
+
 # Sector → risk category mapping
 SECTOR_RISK_MAP: dict[str, str] = {
     "Technology": "growth",
@@ -179,7 +213,7 @@ class PortfolioService:
                 items.append({
                     "id": a["id"],
                     "ticker": a["ticker"],
-                    "name": stock_names.get(a["ticker"]),
+                    "name": _short_name(stock_names.get(a["ticker"])),
                     "shares": float(a["shares"]),
                     "avgCost": float(a["entry_price"]),
                     "currentPrice": None,
@@ -210,7 +244,7 @@ class PortfolioService:
             items.append({
                 "id": a["id"],
                 "ticker": a["ticker"],
-                "name": stock_names.get(a["ticker"]),
+                "name": _short_name(stock_names.get(a["ticker"])),
                 "shares": float(a["shares"]),
                 "avgCost": float(a["entry_price"]),
                 "currentPrice": cur_price,
@@ -419,8 +453,8 @@ class PortfolioService:
             rpnl = float(p.realized_pnl) if p.realized_pnl else 0.0
             total_realized += p.realized_pnl or Decimal("0")
             si = stock_info.get(p.ticker, {})
-            name = si.get("name", p.ticker) or p.ticker
-            short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+            raw_name = si.get("name", p.ticker) or p.ticker
+            short_name = _short_name(raw_name) or p.ticker
             v = verdicts.get(p.ticker)
             items.append({
                 "id": p.id,
@@ -780,8 +814,8 @@ class PortfolioService:
             pnl = float(p.current_price - p.entry_price) * float(p.shares)
             pnl_pct = float(p.pnl_pct * 100) if p.pnl_pct else 0
             sector = stock_info.get(p.ticker, {}).get("sector", "Other") or "Other"
-            name = stock_info.get(p.ticker, {}).get("name", p.ticker) or p.ticker
-            short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+            raw_name = stock_info.get(p.ticker, {}).get("name", p.ticker) or p.ticker
+            short_name = _short_name(raw_name) or p.ticker
 
             sectors[sector] = sectors.get(sector, 0) + weight
 
@@ -1396,8 +1430,8 @@ class PortfolioService:
                 payers += 1
 
             si = stock_info.get(p.ticker, {})
-            name = si.get("name", p.ticker) or p.ticker
-            short_name = name.split(",")[0].split(" Inc")[0].split(" Corp")[0].strip()
+            raw_name = si.get("name", p.ticker) or p.ticker
+            short_name = _short_name(raw_name) or p.ticker
 
             items.append({
                 "ticker": p.ticker,

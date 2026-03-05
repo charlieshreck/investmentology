@@ -13,7 +13,7 @@ export function PositionSparkline({ ticker, entryDate, avgCost }: { ticker: stri
       else if (days > 90) period = "6mo";
       else period = "3mo";
     }
-    apiFetch<{ data: Array<{ close: number }> }>(`/stock/${ticker}/chart?period=${period}`)
+    apiFetch<{ data: Array<{ close: number }> }>(`stock/${ticker}/chart?period=${period}`)
       .then((data) => {
         if (data?.data?.length > 1) {
           setPoints(data.data.map((d) => d.close));

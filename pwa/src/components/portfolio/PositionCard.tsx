@@ -107,7 +107,7 @@ export function PositionCard({
               fontSize: 8, color: "var(--color-text-muted)", fontWeight: 500, marginTop: 1,
               whiteSpace: "nowrap",
             }}>
-              {p.name.replace(/\s*Common Stock/i, "").trim()}
+              {p.name.split(",")[0].replace(/\s*(?:Common\s+(?:Stock|Units?|Shares?)|Ordinary\s+Shares?|Inc\.?|Corp\.?|Ltd\.?|L\.?P\.?)\s*/gi, " ").trim()}
             </div>
           )}
           <div style={{ fontSize: 9, color: "var(--color-text-muted)", fontWeight: 500, marginTop: 1 }}>

@@ -22,6 +22,7 @@ import { RiskPanel } from "../components/deepdive/RiskPanel";
 import { PositionPanel } from "../components/deepdive/PositionPanel";
 import { CompetencePanel } from "../components/deepdive/CompetencePanel";
 import { ResearchBriefingPanel } from "../components/deepdive/ResearchBriefingPanel";
+import { CollapsiblePanel } from "../components/deepdive/CollapsiblePanel";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
 
@@ -489,83 +490,111 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       )}
 
       {/* Position Tile (compact P&L) */}
-      {data.position && <PositionTile position={data.position} />}
+      {data.position && (
+        <CollapsiblePanel
+          title="Position"
+          preview={
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              {data.position.shares.toFixed(2)} shares · {data.position.pnl >= 0 ? "+" : ""}${data.position.pnl.toFixed(2)} ({data.position.pnlPct >= 0 ? "+" : ""}{data.position.pnlPct.toFixed(1)}%)
+            </span>
+          }
+          variant={data.position.pnl >= 0 ? "accent" : "warning"}
+          defaultOpen
+        >
+          <PositionTile position={data.position} />
+        </CollapsiblePanel>
+      )}
 
       {/* Signal Pill Badges */}
-      <SignalPills
-        consensusTier={data.consensusTier}
-        stabilityLabel={data.stabilityLabel}
-        stabilityScore={data.stabilityScore}
-        buzz={data.buzz}
-        earningsMomentum={data.earningsMomentum}
-      />
+      {(data.consensusTier || data.stabilityLabel || data.buzz || data.earningsMomentum) && (
+        <CollapsiblePanel
+          title="Signals"
+          preview={
+            [
+              data.consensusTier && data.consensusTier.replace(/_/g, " "),
+              data.stabilityLabel && data.stabilityLabel !== "UNKNOWN" && data.stabilityLabel,
+              data.buzz && `Buzz: ${data.buzz.buzzLabel}`,
+              data.earningsMomentum && data.earningsMomentum.label.replace(/_/g, " "),
+            ].filter(Boolean).join(" · ") || "No signals"
+          }
+          defaultOpen
+        >
+          <SignalPills
+            consensusTier={data.consensusTier}
+            stabilityLabel={data.stabilityLabel}
+            stabilityScore={data.stabilityScore}
+            buzz={data.buzz}
+            earningsMomentum={data.earningsMomentum}
+          />
+        </CollapsiblePanel>
+      )}
 
       {/* Target Price Range */}
       {data.targetPriceRange && data.targetPriceRange.prices.length >= 2 && f && (
-        <div style={{
-          padding: "var(--space-md) var(--space-lg)",
-          background: "var(--color-surface-0)",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--glass-border)",
-        }}>
-          <div style={{
-            fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600,
-            textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "var(--space-sm)",
-          }}>
-            Agent Fair Value Range
-          </div>
-          <div style={{ position: "relative", height: 32, marginBottom: "var(--space-sm)" }}>
-            {/* Track */}
-            <div style={{
-              position: "absolute", top: 14, left: 0, right: 0, height: 4,
-              background: "var(--color-surface-2)", borderRadius: 2,
-            }} />
-            {/* Range fill */}
-            {(() => {
-              const { low, high } = data.targetPriceRange!;
-              const padding = (high - low) * 0.15 || high * 0.1;
-              const rangeMin = low - padding;
-              const rangeMax = high + padding;
-              const pct = (v: number) => ((v - rangeMin) / (rangeMax - rangeMin)) * 100;
-              return (
-                <>
-                  <div style={{
-                    position: "absolute", top: 14, height: 4, borderRadius: 2,
-                    left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%`,
-                    background: "var(--color-accent-bright)", opacity: 0.3,
-                  }} />
-                  {/* Current price marker */}
-                  <div style={{
-                    position: "absolute", top: 8, height: 16, width: 2,
-                    background: "var(--color-text-primary)",
-                    left: `${Math.min(100, Math.max(0, pct(f.price)))}%`,
-                  }} />
-                  {/* Agent dots */}
-                  {data.targetPriceRange!.prices.map((tp, i) => (
-                    <div key={i} title={`${tp.agent}: $${tp.price.toFixed(0)}`} style={{
-                      position: "absolute", top: 12, width: 8, height: 8,
-                      borderRadius: "50%", background: "var(--color-accent-bright)",
-                      border: "1px solid var(--color-surface-0)",
-                      left: `calc(${pct(tp.price)}% - 4px)`,
+        <CollapsiblePanel
+          title="Fair Value Range"
+          preview={
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              ${data.targetPriceRange.low.toFixed(0)}–${data.targetPriceRange.high.toFixed(0)} · median ${data.targetPriceRange.median.toFixed(0)}
+              {f.price < data.targetPriceRange.median
+                ? ` (${(((data.targetPriceRange.median - f.price) / f.price) * 100).toFixed(0)}% upside)`
+                : ` (${(((f.price - data.targetPriceRange.median) / data.targetPriceRange.median) * 100).toFixed(0)}% above)`
+              }
+            </span>
+          }
+          variant="accent"
+          defaultOpen
+        >
+          <div>
+            <div style={{ position: "relative", height: 32, marginBottom: "var(--space-sm)" }}>
+              {/* Track */}
+              <div style={{
+                position: "absolute", top: 14, left: 0, right: 0, height: 4,
+                background: "var(--color-surface-2)", borderRadius: 2,
+              }} />
+              {/* Range fill */}
+              {(() => {
+                const { low, high } = data.targetPriceRange!;
+                const padding = (high - low) * 0.15 || high * 0.1;
+                const rangeMin = low - padding;
+                const rangeMax = high + padding;
+                const pct = (v: number) => ((v - rangeMin) / (rangeMax - rangeMin)) * 100;
+                return (
+                  <>
+                    <div style={{
+                      position: "absolute", top: 14, height: 4, borderRadius: 2,
+                      left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%`,
+                      background: "var(--color-accent-bright)", opacity: 0.3,
                     }} />
-                  ))}
-                </>
-              );
-            })()}
+                    {/* Current price marker */}
+                    <div style={{
+                      position: "absolute", top: 8, height: 16, width: 2,
+                      background: "var(--color-text-primary)",
+                      left: `${Math.min(100, Math.max(0, pct(f.price)))}%`,
+                    }} />
+                    {/* Agent dots */}
+                    {data.targetPriceRange!.prices.map((tp, i) => (
+                      <div key={i} title={`${tp.agent}: $${tp.price.toFixed(0)}`} style={{
+                        position: "absolute", top: 12, width: 8, height: 8,
+                        borderRadius: "50%", background: "var(--color-accent-bright)",
+                        border: "1px solid var(--color-surface-0)",
+                        left: `calc(${pct(tp.price)}% - 4px)`,
+                      }} />
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+              <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.low.toFixed(0)}</span>
+              <span style={{ color: "var(--color-accent-bright)", fontWeight: 600 }}>median ${data.targetPriceRange.median.toFixed(0)}</span>
+              <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.high.toFixed(0)}</span>
+            </div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", marginTop: 2 }}>
+              Current: ${f.price.toFixed(2)}
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
-            <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.low.toFixed(0)}</span>
-            <span style={{ color: "var(--color-accent-bright)", fontWeight: 600 }}>median ${data.targetPriceRange.median.toFixed(0)}</span>
-            <span style={{ color: "var(--color-text-muted)" }}>${data.targetPriceRange.high.toFixed(0)}</span>
-          </div>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", marginTop: 2 }}>
-            Current: ${f.price.toFixed(2)}
-            {f.price < data.targetPriceRange.median
-              ? ` (${(((data.targetPriceRange.median - f.price) / f.price) * 100).toFixed(0)}% upside to median)`
-              : ` (${(((f.price - data.targetPriceRange.median) / data.targetPriceRange.median) * 100).toFixed(0)}% above median)`
-            }
-          </div>
-        </div>
+        </CollapsiblePanel>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -591,14 +620,28 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           LAYER 3 — THE ARCHIVES (full detail)
          ═══════════════════════════════════════════════════════════════════ */}
 
-      <ArchiveSection
-        verdictHistory={data.verdictHistory}
-        signals={data.signals}
-        decisions={data.decisions}
-        news={news}
-        businessSummary={p?.businessSummary ?? null}
-        watchlist={data.watchlist}
-      />
+      {(data.verdictHistory.length > 1 || data.signals.length > 0 || data.decisions.length > 0 || news.length > 0 || p?.businessSummary || data.watchlist) && (
+        <CollapsiblePanel
+          title="Archives"
+          preview={
+            [
+              data.verdictHistory.length > 1 && `${data.verdictHistory.length} verdicts`,
+              data.signals.length > 0 && `${data.signals.length} signals`,
+              data.decisions.length > 0 && `${data.decisions.length} decisions`,
+              news.length > 0 && `${news.length} articles`,
+            ].filter(Boolean).join(" · ") || "Historical data"
+          }
+        >
+          <ArchiveSection
+            verdictHistory={data.verdictHistory}
+            signals={data.signals}
+            decisions={data.decisions}
+            news={news}
+            businessSummary={p?.businessSummary ?? null}
+            watchlist={data.watchlist}
+          />
+        </CollapsiblePanel>
+      )}
 
       {/* Empty state */}
       {!data.quantGate && !p && data.signals.length === 0 && data.decisions.length === 0 && !data.verdict && (
