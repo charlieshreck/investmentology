@@ -39,6 +39,7 @@ class ReportService:
         fundamentals = reg.get_latest_fundamentals(ticker)
 
         # Stock info
+        # Columns: ticker, name, sector, industry, market_cap, exchange, is_active, created_at, updated_at
         stock_rows = reg._db.execute(
             "SELECT name, sector, industry, market_cap FROM invest.stocks WHERE ticker = %s",
             (ticker,),
@@ -46,6 +47,8 @@ class ReportService:
         stock = stock_rows[0] if stock_rows else {}
 
         # Quant gate results
+        # Columns: id, run_id, ticker, earnings_yield, roic, ey_rank, roic_rank,
+        #          combined_rank, piotroski_score, altman_z_score, created_at, composite_score, altman_zone
         qg_rows = reg._db.execute(
             "SELECT combined_rank, piotroski_score, altman_z_score, altman_zone, "
             "composite_score, earnings_yield, roic "
@@ -56,30 +59,41 @@ class ReportService:
         quant_gate = qg_rows[0] if qg_rows else None
 
         # Agent signals
+        # Columns: id, ticker, agent_name, model, signals, confidence, reasoning,
+        #          token_usage, latency_ms, run_id, created_at
         signal_rows = reg._db.execute(
-            "SELECT agent_name, confidence, target_price, reasoning, created_at "
+            "SELECT agent_name, confidence, reasoning, created_at "
             "FROM invest.agent_signals WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT 20",
             (ticker,),
         )
 
         # Verdict
+        # Columns: id, ticker, verdict, confidence, consensus_score, reasoning, agent_stances,
+        #          risk_flags, auditor_override, munger_override, created_at, ...
         verdict_rows = reg._db.execute(
-            "SELECT verdict, confidence, reasoning, target_price, created_at "
+            "SELECT verdict, confidence, reasoning, consensus_score, created_at "
             "FROM invest.verdicts WHERE ticker = %s "
             "ORDER BY created_at DESC LIMIT 1",
             (ticker,),
         )
         verdict = verdict_rows[0] if verdict_rows else None
 
-        # Adversarial content
-        adversarial_rows = reg._db.execute(
-            "SELECT content_type, content FROM invest.adversarial_content "
-            "WHERE ticker = %s ORDER BY created_at DESC LIMIT 5",
-            (ticker,),
-        )
+        # Adversarial result is stored as JSONB in verdicts.adversarial_result
+        adversarial = None
+        if verdict:
+            adv_rows = reg._db.execute(
+                "SELECT adversarial_result FROM invest.verdicts WHERE ticker = %s "
+                "AND adversarial_result IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                (ticker,),
+            )
+            if adv_rows and adv_rows[0].get("adversarial_result"):
+                adversarial = adv_rows[0]["adversarial_result"]
 
         # Position info (if held)
+        # Columns: id, ticker, entry_date, entry_price, current_price, shares, position_type,
+        #          thesis, exit_date, ...
         position_rows = reg._db.execute(
             "SELECT entry_price, shares, current_price, entry_date, position_type, thesis "
             "FROM invest.portfolio_positions WHERE ticker = %s AND exit_date IS NULL "
@@ -89,6 +103,8 @@ class ReportService:
         position = position_rows[0] if position_rows else None
 
         # Decisions history
+        # Columns: id, ticker, decision_type, layer_source, confidence, reasoning, signals,
+        #          metadata, created_at, user_id
         decision_rows = reg._db.execute(
             "SELECT decision_type, confidence, reasoning, created_at "
             "FROM invest.decisions WHERE ticker = %s "
@@ -129,9 +145,9 @@ class ReportService:
         if signal_rows:
             sections.append(self._agent_consensus(signal_rows))
 
-        # 6. Risk Assessment
-        if adversarial_rows:
-            sections.append(self._risk_assessment(adversarial_rows))
+        # 6. Risk Assessment (from adversarial_result JSONB in verdicts)
+        if adversarial:
+            sections.append(self._risk_assessment(adversarial))
 
         # 7. Portfolio Context
         if position and fundamentals:
@@ -165,10 +181,6 @@ class ReportService:
         if verdict:
             summary += f"\n\n**Verdict**: {verdict['verdict']} "
             summary += f"(confidence: {float(verdict['confidence']):.0%})"
-            if verdict.get("target_price"):
-                tp = float(verdict["target_price"])
-                upside = ((tp - price) / price * 100) if price > 0 else 0
-                summary += f". Target: ${tp:.2f} ({upside:+.1f}%)"
 
         return {"title": "Executive Summary", "content": summary}
 
@@ -183,13 +195,12 @@ class ReportService:
         if decisions:
             parts.append("\n**Recent Decision History**:")
             for d in decisions[:3]:
-                parts.append(
-                    f"- {d['decision_type']} ({d['created_at'].strftime('%Y-%m-%d')}): "
-                    f"{d['reasoning'][:200]}..."
-                    if len(d.get("reasoning", "")) > 200
-                    else f"- {d['decision_type']} ({d['created_at'].strftime('%Y-%m-%d')}): "
-                    f"{d.get('reasoning', 'N/A')}"
-                )
+                reasoning = d.get("reasoning") or "N/A"
+                date_str = d["created_at"].strftime("%Y-%m-%d") if d.get("created_at") else "N/A"
+                if len(reasoning) > 200:
+                    parts.append(f"- {d['decision_type']} ({date_str}): {reasoning[:200]}...")
+                else:
+                    parts.append(f"- {d['decision_type']} ({date_str}): {reasoning}")
 
         return {
             "title": "Investment Thesis",
@@ -254,13 +265,12 @@ class ReportService:
                 seen.add(s["agent_name"])
                 unique.append(s)
 
-        table = "| Agent | Confidence | Target | Summary |\n"
-        table += "|-------|-----------|--------|--------|\n"
+        table = "| Agent | Confidence | Summary |\n"
+        table += "|-------|-----------|--------|\n"
         for s in unique:
             conf = f"{float(s['confidence']):.0%}" if s.get("confidence") else "N/A"
-            tp = f"${float(s['target_price']):.2f}" if s.get("target_price") else "—"
-            reason = (s.get("reasoning") or "")[:100]
-            table += f"| {s['agent_name']} | {conf} | {tp} | {reason} |\n"
+            reason = (s.get("reasoning") or "")[:120]
+            table += f"| {s['agent_name']} | {conf} | {reason} |\n"
 
         # Consensus tier
         confidences = [float(s["confidence"]) for s in unique if s.get("confidence")]
@@ -271,18 +281,24 @@ class ReportService:
 
         return {"title": "Agent Consensus", "content": table}
 
-    def _risk_assessment(self, adversarial: list[dict]) -> dict:
-        parts = []
-        for row in adversarial:
-            ct = row.get("content_type", "unknown")
-            content = row.get("content", "")
-            if isinstance(content, dict):
-                content = content.get("summary", str(content)[:500])
-            parts.append(f"**{ct}**: {str(content)[:500]}")
-
+    def _risk_assessment(self, adversarial) -> dict:
+        """Build risk section from adversarial_result JSONB stored in verdicts."""
+        if isinstance(adversarial, dict):
+            parts = []
+            for key in ["summary", "risk_level", "key_risks", "bias_flags"]:
+                val = adversarial.get(key)
+                if val:
+                    if isinstance(val, list):
+                        parts.append(f"**{key.replace('_', ' ').title()}**:\n" + "\n".join(f"- {v}" for v in val))
+                    else:
+                        parts.append(f"**{key.replace('_', ' ').title()}**: {val}")
+            return {
+                "title": "Risk Assessment",
+                "content": "\n\n".join(parts) if parts else str(adversarial)[:1000],
+            }
         return {
             "title": "Risk Assessment",
-            "content": "\n\n".join(parts) if parts else "No adversarial review data.",
+            "content": str(adversarial)[:1000],
         }
 
     def _portfolio_context(self, position: dict, fund) -> dict:
@@ -304,8 +320,8 @@ class ReportService:
     def _recommendation(self, verdict: dict) -> dict:
         content = f"**Verdict**: {verdict['verdict']}\n"
         content += f"**Confidence**: {float(verdict['confidence']):.0%}\n"
-        if verdict.get("target_price"):
-            content += f"**Target Price**: ${float(verdict['target_price']):.2f}\n"
+        if verdict.get("consensus_score"):
+            content += f"**Consensus Score**: {float(verdict['consensus_score']):.0%}\n"
         if verdict.get("reasoning"):
             content += f"\n{verdict['reasoning']}"
         return {"title": "Recommendation", "content": content}
