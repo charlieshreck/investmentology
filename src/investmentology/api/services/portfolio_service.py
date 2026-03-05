@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import OrderedDict
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from investmentology.advisory.performance import PerformanceCalculator
@@ -239,6 +240,17 @@ class PortfolioService:
             day_change_per_share = (cur_price - prev) if prev and prev > 0 else 0.0
             day_change_pct = (day_change_per_share / prev * 100) if prev and prev > 0 else 0.0
             day_change_total = day_change_per_share * float(a["shares"])
+
+            # For positions opened today, "today" should match "since buy" —
+            # using prev_close (yesterday) vs entry_price (today) creates a
+            # confusing discrepancy.
+            entry_date = a.get("entry_date")
+            bought_today = entry_date and str(entry_date) == str(datetime.now(tz=None).date())
+            if bought_today:
+                day_change_pct = unrealised_pct
+                day_change_total = unrealised
+                day_change_per_share = float(cur_price - a["entry_price"])
+
             total_day_pnl += day_change_total
 
             items.append({
