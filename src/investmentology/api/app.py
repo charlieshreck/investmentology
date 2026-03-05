@@ -53,10 +53,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup/shutdown of DB, gateway, and dependent services."""
     config = load_config()
 
-    # Database
+    # Database (sync — used by existing routes and services)
     db = Database(config.db_dsn)
     db.connect()
     registry = Registry(db)
+
+    # Async database (for gradual route migration to async)
+    from investmentology.registry.db import AsyncDatabase
+
+    async_db = AsyncDatabase(config.db_dsn)
+    try:
+        await async_db.connect()
+    except Exception:
+        logger.warning("AsyncDatabase init failed — async routes disabled", exc_info=True)
+        async_db = None
 
     # LLM Gateway
     gateway = LLMGateway.from_config(config)
@@ -90,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Populate shared state
     app_state.config = config
     app_state.db = db
+    app_state.async_db = async_db
     app_state.registry = registry
     app_state.gateway = gateway
     app_state.decision_logger = decision_logger
@@ -111,6 +122,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown
     await gateway.close()
+    if async_db:
+        await async_db.close()
     db.close()
     logger.info("API shutdown complete")
 

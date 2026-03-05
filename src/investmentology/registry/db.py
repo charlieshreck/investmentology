@@ -178,6 +178,76 @@ class Database:
         self.close()
 
 
+class AsyncDatabase:
+    """Async PostgreSQL database wrapper using psycopg3 AsyncConnectionPool.
+
+    Provides the same interface as Database but with async methods.
+    Can run alongside the sync Database during gradual migration.
+    """
+
+    def __init__(self, dsn: str) -> None:
+        self._dsn = dsn
+        self._pool = None  # psycopg_pool.AsyncConnectionPool
+
+    async def connect(self) -> None:
+        """Create an async connection pool."""
+        try:
+            from psycopg_pool import AsyncConnectionPool
+        except ImportError:
+            logger.warning("psycopg_pool not available — AsyncDatabase disabled")
+            return
+
+        self._pool = AsyncConnectionPool(
+            self._dsn,
+            min_size=2,
+            max_size=10,
+            timeout=30.0,
+            max_lifetime=3600,
+            kwargs={"row_factory": dict_row},
+        )
+        await self._pool.wait()
+        logger.info("Async connection pool established")
+
+    async def close(self) -> None:
+        """Close the async connection pool."""
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
+
+    async def execute(self, query: str, params: tuple | None = None) -> list[dict]:
+        """Execute a query and return rows as dicts."""
+        if self._pool is None:
+            raise RuntimeError("AsyncDatabase not connected")
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, params)
+                if cur.description is not None:
+                    rows = await cur.fetchall()
+                    return [dict(row) for row in rows]
+                return []
+
+    async def execute_many(self, query: str, params_seq: list[tuple]) -> int:
+        """Batch execute a query, return affected row count."""
+        if self._pool is None:
+            raise RuntimeError("AsyncDatabase not connected")
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                count = 0
+                for params in params_seq:
+                    await cur.execute(query, params)
+                    count += cur.rowcount if cur.rowcount >= 0 else 0
+                return count
+
+    async def health_check(self) -> bool:
+        """Check database connectivity."""
+        try:
+            result = await self.execute("SELECT 1 AS ok")
+            return len(result) > 0 and result[0].get("ok") == 1
+        except Exception:
+            logger.exception("Async health check failed")
+            return False
+
+
 class _TransactionProxy:
     """Wraps a single connection for use inside Database.transaction().
 

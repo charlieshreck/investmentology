@@ -8,7 +8,7 @@ from investmentology.learning.calibration import CalibrationEngine
 from investmentology.learning.predictions import PredictionManager
 from investmentology.learning.registry import DecisionLogger
 from investmentology.orchestrator import AnalysisOrchestrator
-from investmentology.registry.db import Database
+from investmentology.registry.db import AsyncDatabase, Database
 from investmentology.registry.queries import Registry
 
 
@@ -18,6 +18,7 @@ class AppState:
     def __init__(self) -> None:
         self.config: AppConfig | None = None
         self.db: Database | None = None
+        self.async_db: AsyncDatabase | None = None
         self.registry: Registry | None = None
         self.gateway: LLMGateway | None = None
         self.decision_logger: DecisionLogger | None = None
@@ -34,6 +35,12 @@ def get_db() -> Database:
     if app_state.db is None:
         raise RuntimeError("Database not initialised")
     return app_state.db
+
+
+def get_async_db() -> AsyncDatabase:
+    if app_state.async_db is None:
+        raise RuntimeError("AsyncDatabase not initialised")
+    return app_state.async_db
 
 
 def get_registry() -> Registry:
