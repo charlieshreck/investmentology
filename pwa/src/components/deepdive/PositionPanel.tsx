@@ -7,12 +7,12 @@ export function PositionPanel({ position, onSell }: {
   position: PositionData;
   onSell: () => void;
 }) {
-  const pnlColor = position.pnl >= 0 ? "var(--color-success)" : "var(--color-error)";
+  const pnlColor = (position.pnl ?? 0) >= 0 ? "var(--color-success)" : "var(--color-error)";
   const daysHeld = position.entryDate
     ? Math.floor((Date.now() - new Date(position.entryDate).getTime()) / 86400000)
     : null;
 
-  const preview = `${position.shares.toFixed(2)} shares | ${position.pnl >= 0 ? "+" : ""}$${position.pnl.toFixed(2)} (${position.pnlPct >= 0 ? "+" : ""}${position.pnlPct.toFixed(1)}%)`;
+  const preview = `${(position.shares ?? 0).toFixed(2)} shares | ${(position.pnl ?? 0) >= 0 ? "+" : ""}$${(position.pnl ?? 0).toFixed(2)} (${(position.pnlPct ?? 0) >= 0 ? "+" : ""}${(position.pnlPct ?? 0).toFixed(1)}%)`;
 
   return (
     <CollapsiblePanel
@@ -25,12 +25,12 @@ export function PositionPanel({ position, onSell }: {
       }
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "var(--space-md)" }}>
-        <Metric label="Shares" value={position.shares.toFixed(2)} mono />
-        <Metric label="Entry" value={`$${position.entryPrice.toFixed(2)}`} mono />
-        <Metric label="Current" value={`$${(position.currentPrice ?? position.entryPrice).toFixed(2)}`} mono />
+        <Metric label="Shares" value={(position.shares ?? 0).toFixed(2)} mono />
+        <Metric label="Entry" value={`$${(position.entryPrice ?? 0).toFixed(2)}`} mono />
+        <Metric label="Current" value={`$${(position.currentPrice ?? position.entryPrice ?? 0).toFixed(2)}`} mono />
         <Metric label="P&L" value={
           <span style={{ color: pnlColor }}>
-            {position.pnl >= 0 ? "+" : ""}${position.pnl.toFixed(2)} ({position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%)
+            {(position.pnl ?? 0) >= 0 ? "+" : ""}${(position.pnl ?? 0).toFixed(2)} ({(position.pnlPct ?? 0) >= 0 ? "+" : ""}{(position.pnlPct ?? 0).toFixed(1)}%)
           </span>
         } />
         {position.weight != null && <Metric label="Weight" value={`${(position.weight * 100).toFixed(1)}%`} mono />}

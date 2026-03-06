@@ -528,10 +528,10 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           title="Position"
           preview={
             <span style={{ fontFamily: "var(--font-mono)" }}>
-              {data.position.shares.toFixed(2)} shares · {data.position.pnl >= 0 ? "+" : ""}${data.position.pnl.toFixed(2)} ({data.position.pnlPct >= 0 ? "+" : ""}{data.position.pnlPct.toFixed(1)}%)
+              {(data.position.shares ?? 0).toFixed(2)} shares · {(data.position.pnl ?? 0) >= 0 ? "+" : ""}${(data.position.pnl ?? 0).toFixed(2)} ({(data.position.pnlPct ?? 0) >= 0 ? "+" : ""}{(data.position.pnlPct ?? 0).toFixed(1)}%)
             </span>
           }
-          variant={data.position.pnl >= 0 ? "accent" : "warning"}
+          variant={(data.position.pnl ?? 0) >= 0 ? "accent" : "warning"}
           defaultOpen
         >
           <PositionTile position={data.position} />

@@ -489,7 +489,7 @@ function RecCard({
               fontSize: 10, fontFamily: "var(--font-mono)",
               color: rec.heldPosition.pnlPct >= 0 ? "var(--color-success)" : "var(--color-error)",
             }}>
-              {rec.heldPosition.pnlPct >= 0 ? "+" : ""}{rec.heldPosition.pnlPct.toFixed(1)}%
+              {(rec.heldPosition.pnlPct ?? 0) >= 0 ? "+" : ""}{(rec.heldPosition.pnlPct ?? 0).toFixed(1)}%
             </span>
             {rec.heldPosition.entryThesis && (
               <span style={{

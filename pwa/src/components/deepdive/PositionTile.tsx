@@ -2,7 +2,7 @@ import { BentoCard } from "../shared/BentoCard";
 import type { PositionData } from "../../views/StockDeepDive";
 
 export function PositionTile({ position }: { position: PositionData }) {
-  const pnlColor = position.pnl >= 0 ? "var(--color-success)" : "var(--color-error)";
+  const pnlColor = (position.pnl ?? 0) >= 0 ? "var(--color-success)" : "var(--color-error)";
   const daysHeld = position.entryDate
     ? Math.floor((Date.now() - new Date(position.entryDate).getTime()) / 86400000)
     : null;
@@ -20,7 +20,7 @@ export function PositionTile({ position }: { position: PositionData }) {
           color: "var(--color-text-muted)",
           fontWeight: 600,
         }}>
-          {position.shares.toFixed(2)} shares
+          {(position.shares ?? 0).toFixed(2)} shares
         </div>
         <div style={{
           fontFamily: "var(--font-mono)",
@@ -28,9 +28,9 @@ export function PositionTile({ position }: { position: PositionData }) {
           fontSize: "var(--text-sm)",
           color: pnlColor,
         }}>
-          {position.pnl >= 0 ? "+" : ""}${position.pnl.toFixed(2)}
+          {(position.pnl ?? 0) >= 0 ? "+" : ""}${(position.pnl ?? 0).toFixed(2)}
           <span style={{ fontSize: "var(--text-xs)", marginLeft: 4 }}>
-            ({position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%)
+            ({(position.pnlPct ?? 0) >= 0 ? "+" : ""}{(position.pnlPct ?? 0).toFixed(1)}%)
           </span>
         </div>
         {daysHeld != null && (

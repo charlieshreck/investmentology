@@ -184,7 +184,7 @@ function PriorityActionRow({ item, onTicker }: { item: PriorityItem; onTicker: (
                       fontSize: 10, fontFamily: "var(--font-mono)",
                       color: "var(--color-text-muted)", marginLeft: 2,
                     }}>
-                      cs:{item.action.consensus_score > 0 ? "+" : ""}{item.action.consensus_score.toFixed(2)}
+                      cs:{(item.action.consensus_score ?? 0) > 0 ? "+" : ""}{(item.action.consensus_score ?? 0).toFixed(2)}
                     </span>
                   )}
                 </div>
@@ -283,7 +283,7 @@ function ThesisHealthDots({
           onClick={() => onTicker(p.ticker)}
           whileHover={{ scale: 1.2 }}
           whileTap={{ scale: 0.9 }}
-          title={`${p.ticker}: ${p.thesis_health} (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct.toFixed(1)}%)`}
+          title={`${p.ticker}: ${p.thesis_health} (${p.pnl_pct >= 0 ? "+" : ""}${(p.pnl_pct ?? 0).toFixed(1)}%)`}
           style={{
             display: "flex",
             flexDirection: "column",
@@ -528,7 +528,7 @@ export function Today() {
                       fontFamily: "var(--font-mono)",
                       color: dayPnlPct >= 0 ? "var(--color-success)" : "var(--color-error)",
                     }}>
-                      ({dayPnlPct >= 0 ? "+" : ""}{dayPnlPct.toFixed(2)}%)
+                      ({dayPnlPct >= 0 ? "+" : ""}{(dayPnlPct ?? 0).toFixed(2)}%)
                     </span>
                   </div>
                 </div>
@@ -588,7 +588,7 @@ export function Today() {
                         fontSize: 9, fontFamily: "var(--font-mono)",
                         color: briefing.sizingMultiplier < 1 ? "var(--color-warning)" : "var(--color-success)",
                       }}>
-                        sizing: {(briefing.sizingMultiplier * 100).toFixed(0)}%
+                        sizing: {((briefing.sizingMultiplier ?? 1) * 100).toFixed(0)}%
                       </span>
                     )}
                   </div>
@@ -683,7 +683,7 @@ export function Today() {
                       fontWeight: 600,
                       fontFamily: "var(--font-mono)",
                     }}>
-                      ${rec.currentPrice.toFixed(2)}
+                      ${(rec.currentPrice ?? 0).toFixed(2)}
                     </div>
                     {rec.changePct != null && (
                       <div style={{

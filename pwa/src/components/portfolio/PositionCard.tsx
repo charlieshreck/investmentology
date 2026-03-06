@@ -111,7 +111,7 @@ export function PositionCard({
             </div>
           )}
           <div style={{ fontSize: 9, color: "var(--color-text-muted)", fontWeight: 500, marginTop: 1 }}>
-            {p.shares}sh · {p.weight.toFixed(1)}%
+            {p.shares}sh · {(p.weight ?? 0).toFixed(1)}%
           </div>
         </div>
 
@@ -217,11 +217,11 @@ export function PositionCard({
               alignContent: "center",
             }}>
               {[
-                { label: "Avg Cost", value: `$${p.avgCost.toFixed(2)}` },
+                { label: "Avg Cost", value: `$${(p.avgCost ?? 0).toFixed(2)}` },
                 { label: "Basis", value: formatCurrency(costBasis) },
                 { label: "P&L $", value: formatCurrency(p.unrealizedPnl), color: pnlColor(p.unrealizedPnl) },
                 { label: "Shares", value: p.shares.toLocaleString() },
-                { label: "Weight", value: `${p.weight.toFixed(1)}%` },
+                { label: "Weight", value: `${(p.weight ?? 0).toFixed(1)}%` },
                 { label: daysHeld != null ? "Held" : "Type", value: daysHeld != null ? `${daysHeld}d` : (p.positionType || "—") },
               ].map((m) => (
                 <div key={m.label} style={{ textAlign: "center" }}>

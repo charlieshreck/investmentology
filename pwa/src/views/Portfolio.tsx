@@ -1233,9 +1233,9 @@ export function Portfolio() {
                       </span>
                       <span style={{
                         fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
-                        color: tp.pnl_pct >= 0 ? "var(--color-success)" : "var(--color-error)",
+                        color: (tp.pnl_pct ?? 0) >= 0 ? "var(--color-success)" : "var(--color-error)",
                       }}>
-                        {tp.pnl_pct >= 0 ? "+" : ""}{tp.pnl_pct.toFixed(1)}%
+                        {(tp.pnl_pct ?? 0) >= 0 ? "+" : ""}{(tp.pnl_pct ?? 0).toFixed(1)}%
                       </span>
                     </div>
 
@@ -1300,8 +1300,8 @@ export function Portfolio() {
               {/* Key metrics row */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-sm)" }}>
                 {[
-                  { label: "Top Weight", value: `${riskData.top_position_weight.toFixed(1)}%`, warn: riskData.top_position_weight > 20 },
-                  { label: "Health Score", value: `${(riskData.avg_thesis_health_score * 100).toFixed(0)}%`, warn: riskData.avg_thesis_health_score < 0.7 },
+                  { label: "Top Weight", value: `${(riskData.top_position_weight ?? 0).toFixed(1)}%`, warn: (riskData.top_position_weight ?? 0) > 20 },
+                  { label: "Health Score", value: `${((riskData.avg_thesis_health_score ?? 0) * 100).toFixed(0)}%`, warn: (riskData.avg_thesis_health_score ?? 0) < 0.7 },
                   { label: "Positions", value: `${riskData.position_count}`, warn: false },
                 ].map((m) => (
                   <div key={m.label} style={{
@@ -1405,13 +1405,13 @@ export function Portfolio() {
                             <span style={{
                               fontSize: 10, color: "var(--color-text-muted)", flex: 1,
                             }}>
-                              {p.weight_pct.toFixed(1)}% weight
+                              {(p.weight_pct ?? 0).toFixed(1)}% weight
                             </span>
                             <span style={{
                               fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
-                              color: p.pnl_pct >= 0 ? "var(--color-success)" : "var(--color-error)",
+                              color: (p.pnl_pct ?? 0) >= 0 ? "var(--color-success)" : "var(--color-error)",
                             }}>
-                              {p.pnl_pct >= 0 ? "+" : ""}{p.pnl_pct.toFixed(1)}%
+                              {(p.pnl_pct ?? 0) >= 0 ? "+" : ""}{(p.pnl_pct ?? 0).toFixed(1)}%
                             </span>
                           </div>
                         );
