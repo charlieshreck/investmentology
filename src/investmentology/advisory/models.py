@@ -1,8 +1,9 @@
 """Data models for the Advisory Board (L5.5) and CIO Synthesis (L6).
 
-The Advisory Board consists of 8 legendary investor personas that review
-the L5 verdict through their unique analytical lenses. The CIO narrates
-the board's vote outcome into a coherent investment thesis.
+The Advisory Board consists of 6 functional roles (Risk Officer, Valuation
+Analyst, Macro Strategist, Devil's Advocate, Portfolio Constructor, Thesis
+Integrity Reviewer) that review the L5 verdict. The CIO narrates the
+board's vote outcome into a coherent investment thesis.
 """
 
 from __future__ import annotations

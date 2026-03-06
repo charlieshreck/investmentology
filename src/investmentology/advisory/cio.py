@@ -13,11 +13,10 @@ The CIO can suggest a ±1 adjustment as a recommendation, but only when:
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import time
 
+from investmentology.advisory.board import _extract_json
 from investmentology.advisory.models import (
     BoardNarrative,
     BoardResult,
@@ -84,6 +83,14 @@ class CIOSynthesizer:
 def _build_cio_system_prompt() -> str:
     return """You are the Chief Investment Officer synthesizing an advisory board's decision into a coherent investment narrative. You are a NARRATOR, not a decision-maker — the board has already voted.
 
+The board consists of 6 functional roles:
+- **Risk Officer**: Portfolio risk, VaR, concentration, stress tests
+- **Valuation Analyst**: DCF cross-check, relative valuation, margin of safety
+- **Macro Strategist**: Regime alignment, cycle positioning, monetary policy
+- **Devil's Advocate**: Bias detection, groupthink challenge, inversion analysis
+- **Portfolio Constructor**: Position fit, sizing, sector balance, correlation
+- **Thesis Integrity Reviewer**: Original thesis vs current evidence, catalyst tracking
+
 Your job:
 1. Write a compelling headline summarizing the board's recommendation
 2. Write 3-4 paragraphs explaining WHY the board voted this way, reconciling disagreements
@@ -91,16 +98,21 @@ Your job:
 4. Write a pre-mortem ("If this goes badly, it will be because...")
 5. Explain how competing advisor views were reconciled
 
+## Position Type Framing
+When a position type is specified, frame the narrative accordingly:
+- **Permanent**: "This is a generational holding. The question is whether the moat endures..."
+- **Core**: "This is a multi-year competitive advantage play. The key is..."
+- **Tactical**: "This is a defined-horizon opportunity. The catalyst window closes in..."
+
 ## Conflict Resolution Patterns
 Use these when advisors disagree:
-- **Value Trap**: Fundamental analysts bullish but technicals in freefall → HOLD, wait for stabilization
-- **Growth Mispriced**: Value analysts say expensive but growth metrics say PEG < 1 → Growth justifies premium
-- **Thin Margin**: Most bullish but margin of safety is tight → Smaller position (ACCUMULATE vs BUY)
-- **Asymmetric Setup**: Mixed signals but risk/reward is highly skewed → Let asymmetry decide
-- **Regime Mismatch**: Company-level bullish but macro late-cycle → Accumulate with caution
-- **Complexity Warning**: Strong thesis but too complex to explain simply → Downgrade to WATCHLIST
-- **Forensic Veto**: Agents bullish but accounting red flags detected → AVOID (hard override)
-- **Reflexivity Break**: Narrative self-reinforcing but momentum still strong → Add stop-loss note
+- **Risk vs Opportunity**: Risk Officer flags concentration but Valuation Analyst sees deep value → Size down, don't skip
+- **Macro vs Micro**: Macro Strategist bearish on regime but company-level thesis is strong → Accumulate with caution
+- **Thesis Drift**: Thesis Integrity flags degradation but Portfolio Constructor sees diversification value → Time-bound hold with review trigger
+- **Valuation Gap**: Valuation Analyst and agents disagree on fair value → Use reverse DCF, show what's priced in
+- **Consensus Too Uniform**: Devil's Advocate challenges and agents agree → Investigate the unaddressed bear case
+- **Portfolio Fit**: Great stock but Portfolio Constructor flags concentration → Trim existing, then add
+- **Forensic Veto**: Agents bullish but Risk Officer flags accounting concerns → AVOID (hard override)
 
 Respond with ONLY valid JSON (no markdown fences):
 {
@@ -114,7 +126,7 @@ Respond with ONLY valid JSON (no markdown fences):
 }
 
 verdict_adjustment: -1 (more bearish), 0 (no change), or +1 (more bullish).
-Only suggest adjustment when advisors are split (4-4 or near-tie). Never override VETOs."""
+Only suggest adjustment when advisors are split (3-3 near-tie). Never override VETOs."""
 
 
 def _build_cio_user_prompt(
@@ -179,14 +191,9 @@ def _parse_cio_response(
     latency_ms: int,
 ) -> BoardNarrative:
     """Parse CIO LLM response into BoardNarrative."""
-    raw = resp.content.strip()
-    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
-    raw = re.sub(r"\n?```\s*$", "", raw)
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("CIO response not valid JSON, using fallback: %s...", raw[:200])
+    data = _extract_json(resp.content)
+    if data is None:
+        logger.warning("CIO response not valid JSON, using fallback: %s...", resp.content[:200])
         return _fallback_narrative(verdict, board_result, latency_ms)
 
     # Build consensus summary

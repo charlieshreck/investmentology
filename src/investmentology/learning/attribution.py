@@ -11,16 +11,20 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# Default agent weights — must match AGENT_WEIGHTS in verdict.py
-DEFAULT_WEIGHTS = {
-    "warren": 0.20,
-    "soros": 0.15,
-    "simons": 0.10,
-    "auditor": 0.20,
-    "marks": 0.15,
-    "forensic": 0.10,
-    "bogle": 0.10,
-}
+# Agent weights derived from SKILLS registry (single source of truth).
+def _get_default_weights() -> dict[str, float]:
+    try:
+        from investmentology.agents.skills import SKILLS
+        return {
+            name: skill.base_weight
+            for name, skill in SKILLS.items()
+            if skill.base_weight > 0
+        }
+    except ImportError:
+        return {}
+
+
+DEFAULT_WEIGHTS = _get_default_weights()
 
 
 @dataclass

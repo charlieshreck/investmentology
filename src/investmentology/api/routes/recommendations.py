@@ -194,6 +194,47 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
     if held_info:
         result["heldPosition"] = held_info
 
+    # Verdict math (Batch 8 enrichment)
+    verdict_margin = row.get("verdict_margin")
+    conviction_gap = row.get("conviction_gap")
+    headcount_summary = row.get("headcount_summary")
+    if verdict_margin is not None or conviction_gap is not None:
+        result["verdictMath"] = {
+            "sentiment": cons_score,
+            "confidence": float(row["confidence"]) if row.get("confidence") else None,
+            "marginToBoundary": float(verdict_margin) if verdict_margin is not None else None,
+            "convictionGap": conviction_gap,
+            "headcountSummary": headcount_summary,
+        }
+
+    # Agent contributions (weight x confidence per agent)
+    agent_contribs = row.get("agent_contributions")
+    if agent_contribs and isinstance(agent_contribs, list):
+        result["agentContributions"] = agent_contribs
+
+    # Position type classification
+    pos_type = row.get("position_type") or (held_info or {}).get("positionType")
+    if pos_type:
+        result["positionType"] = {
+            "type": pos_type,
+            "classificationSource": "portfolio" if held_info else "inferred",
+        }
+
+    # Regime context
+    regime = row.get("regime_label")
+    if regime:
+        result["regimeContext"] = {
+            "currentRegime": regime,
+        }
+
+    # Watchlist metadata
+    watchlist_reason = row.get("watchlist_reason")
+    if watchlist_reason:
+        result["watchlistMeta"] = {
+            "reason": watchlist_reason,
+            "graduationTrigger": row.get("watchlist_graduation_trigger"),
+        }
+
     return result
 
 

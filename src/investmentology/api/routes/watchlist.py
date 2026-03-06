@@ -23,12 +23,34 @@ def _format_watch_item(row: dict) -> dict:
     # Price history for sparkline: [{date, price}, ...]
     history = row.get("price_history") or []
 
-    return {
+    # Days on watchlist
+    added_at_str = str(row.get("watchlist_entered") or row.get("created_at") or "")
+    days_on_watchlist = None
+    if added_at_str:
+        try:
+            from datetime import datetime, date
+            added_date = datetime.fromisoformat(added_at_str[:10]).date()
+            days_on_watchlist = (date.today() - added_date).days
+        except (ValueError, TypeError):
+            pass
+
+    # Conviction trend from verdict history
+    conviction_trend = row.get("_conviction_trend")
+
+    # Target entry price and distance
+    target_entry = row.get("target_entry_price")
+    distance_to_entry = None
+    if target_entry and current_price > 0:
+        distance_to_entry = round(
+            (current_price - float(target_entry)) / current_price * 100, 2,
+        )
+
+    result = {
         "ticker": row["ticker"],
         "name": row.get("name") or row["ticker"],
         "sector": row.get("sector") or "",
         "state": row.get("watchlist_state") or "WATCHLIST",
-        "addedAt": str(row.get("watchlist_entered") or row["created_at"]),
+        "addedAt": added_at_str,
         "lastAnalysis": str(row["created_at"]) if row.get("created_at") else None,
         "priceAtAdd": entry_price,
         "currentPrice": current_price,
@@ -51,7 +73,59 @@ def _format_watch_item(row: dict) -> dict:
         "notes": None,
         "successProbability": _success_probability(row),
         "priceHistory": history,
+        # Batch 8 enrichment
+        "daysOnWatchlist": days_on_watchlist,
+        "convictionTrend": conviction_trend,
+        "targetEntryPrice": float(target_entry) if target_entry else None,
+        "distanceToEntry": distance_to_entry,
     }
+
+    # Watchlist sub-type metadata
+    watchlist_reason = row.get("watchlist_reason")
+    if watchlist_reason:
+        result["watchlistMeta"] = {
+            "reason": watchlist_reason,
+            "graduationTrigger": row.get("watchlist_graduation_trigger"),
+        }
+
+    # QG rank improvement since entry
+    qg_rank = row.get("_qg_rank")
+    if qg_rank is not None:
+        result["qgRank"] = qg_rank
+
+    # Next catalyst date
+    catalyst_date = row.get("_next_catalyst_date")
+    if catalyst_date:
+        result["nextCatalystDate"] = str(catalyst_date)
+
+    return result
+
+
+def _compute_conviction_trend(ticker: str, registry: Registry) -> str | None:
+    """Compute conviction trend from last 3-5 verdicts: declining/stable/improving."""
+    try:
+        rows = registry._db.execute(
+            """SELECT confidence FROM invest.verdicts
+               WHERE ticker = %s ORDER BY created_at DESC LIMIT 5""",
+            (ticker,),
+        )
+        if not rows or len(rows) < 2:
+            return None
+        confs = [float(r["confidence"]) for r in rows if r.get("confidence")]
+        if len(confs) < 2:
+            return None
+        # Compare average of recent half vs older half
+        mid = len(confs) // 2
+        recent_avg = sum(confs[:mid]) / mid
+        older_avg = sum(confs[mid:]) / (len(confs) - mid)
+        diff = recent_avg - older_avg
+        if diff > 0.05:
+            return "improving"
+        if diff < -0.05:
+            return "declining"
+        return "stable"
+    except Exception:
+        return None
 
 
 @router.get("/watchlist")
@@ -62,6 +136,13 @@ def get_watchlist(registry: Registry = Depends(get_registry)) -> dict:
     for a sparkline chart.
     """
     rows = registry.get_watch_verdicts_enriched()
+
+    # Enrich with conviction trend
+    for row in rows:
+        ticker = row.get("ticker")
+        if ticker:
+            row["_conviction_trend"] = _compute_conviction_trend(ticker, registry)
+
     items = [_format_watch_item(r) for r in rows]
 
     # Sort by success probability descending

@@ -3,10 +3,15 @@
 Computes calibration metrics (ECE, Brier score) from settled predictions,
 generates weekly calibration reports, and adjusts confidence thresholds
 based on historical accuracy.
+
+Also includes:
+- CalibrationTracker: Records every verdict with price snapshot for settlement.
+- AgentCalibrator: Per-agent isotonic calibration (when sufficient data exists).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -246,3 +251,449 @@ class CalibrationEngine:
                 # Adjustment should move predicted confidence toward actual accuracy
                 adjustments[key] = round(gap, 3)
         return adjustments
+
+
+# ---------------------------------------------------------------------------
+# Verdict correctness evaluation
+# ---------------------------------------------------------------------------
+
+# Verdicts that predict positive price movement
+_POSITIVE_VERDICTS = {"STRONG_BUY", "BUY", "ACCUMULATE"}
+# Verdicts that predict negative price movement
+_NEGATIVE_VERDICTS = {"SELL", "AVOID", "REDUCE"}
+# Neutral verdicts — correctness is ambiguous, but we evaluate as "no large move"
+_NEUTRAL_VERDICTS = {"HOLD", "WATCHLIST"}
+
+
+def _evaluate_verdict_correctness(
+    verdict: str, actual_return: float,
+) -> bool:
+    """Determine if a verdict was correct given actual price return."""
+    if verdict in _POSITIVE_VERDICTS:
+        return actual_return > 0.0
+    if verdict in _NEGATIVE_VERDICTS:
+        return actual_return < 0.0
+    # Neutral: correct if price didn't move more than 10% in either direction
+    return abs(actual_return) < 0.10
+
+
+# ---------------------------------------------------------------------------
+# CalibrationTracker — records verdicts for later settlement
+# ---------------------------------------------------------------------------
+
+class CalibrationTracker:
+    """Records every verdict with a price snapshot for multi-horizon settlement.
+
+    Called after every verdict synthesis. Stores the prediction for settlement
+    at 30, 90, 180, and 365-day horizons.
+    """
+
+    # Settlement horizons in days
+    HORIZONS = [30, 90, 180, 365]
+
+    def __init__(self, registry: Registry) -> None:
+        self._db = registry._db
+
+    def record_verdict(
+        self,
+        ticker: str,
+        verdict: str,
+        sentiment: float | None,
+        confidence: float | None,
+        price_at_verdict: float,
+        agent_contributions: list[dict] | None = None,
+        position_type: str | None = None,
+        regime_label: str | None = None,
+    ) -> int | None:
+        """Record a verdict prediction for later settlement.
+
+        Returns the prediction ID, or None if recording failed.
+        """
+        try:
+            rows = self._db.execute(
+                """INSERT INTO invest.calibration_predictions
+                   (ticker, verdict_date, verdict, sentiment, confidence,
+                    price_at_verdict, agent_contributions, position_type,
+                    regime_label)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (
+                    ticker, date.today(), verdict,
+                    sentiment, confidence, price_at_verdict,
+                    json.dumps(agent_contributions) if agent_contributions else None,
+                    position_type, regime_label,
+                ),
+            )
+            pred_id = rows[0]["id"] if rows else None
+            logger.debug(
+                "Recorded calibration prediction %s for %s: %s @ $%.2f",
+                pred_id, ticker, verdict, price_at_verdict,
+            )
+            return pred_id
+        except Exception:
+            logger.debug("Could not record calibration prediction for %s", ticker)
+            return None
+
+    def record_agent_data(
+        self,
+        agent_name: str,
+        ticker: str,
+        raw_confidence: float,
+        sentiment: float,
+        price_at_verdict: float,
+    ) -> None:
+        """Record per-agent data for isotonic calibration training."""
+        try:
+            self._db.execute(
+                """INSERT INTO invest.agent_calibration_data
+                   (agent_name, ticker, verdict_date, raw_confidence,
+                    sentiment, price_at_verdict)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (agent_name, ticker, date.today(), raw_confidence,
+                 sentiment, price_at_verdict),
+            )
+        except Exception:
+            logger.debug(
+                "Could not record agent calibration data for %s/%s",
+                agent_name, ticker,
+            )
+
+    def settle_predictions(self, lookback_days: int = 90) -> dict:
+        """Settle predictions that have reached their horizon date.
+
+        Run daily (e.g., from overnight pipeline). For each unsettled prediction,
+        checks if enough time has passed and looks up the actual price.
+
+        Returns summary dict with counts of settled predictions per horizon.
+        """
+        from investmentology.learning.auto_settle import lookup_price_on_date
+
+        results = {h: 0 for h in self.HORIZONS}
+        today = date.today()
+
+        for horizon in self.HORIZONS:
+            col_settled = f"settled_{horizon}d"
+            col_price = f"price_{horizon}d"
+            col_return = f"return_{horizon}d"
+            col_correct = f"correct_{horizon}d"
+
+            # Find unsettled predictions where the horizon date has passed
+            try:
+                rows = self._db.execute(
+                    f"""SELECT id, ticker, verdict_date, verdict, price_at_verdict
+                        FROM invest.calibration_predictions
+                        WHERE {col_settled} = FALSE
+                          AND verdict_date + INTERVAL '{horizon} days' <= %s
+                        LIMIT 50""",
+                    (today,),
+                )
+            except Exception:
+                logger.debug("Could not query unsettled predictions for %dd", horizon)
+                continue
+
+            if not rows:
+                continue
+
+            for row in rows:
+                ticker = row["ticker"]
+                verdict_date = row["verdict_date"]
+                if isinstance(verdict_date, str):
+                    verdict_date = date.fromisoformat(verdict_date[:10])
+                settlement_date = verdict_date + timedelta(days=horizon)
+                price_at_verdict = float(row["price_at_verdict"])
+
+                actual_price = lookup_price_on_date(ticker, settlement_date)
+                if actual_price is None:
+                    continue
+
+                actual_return = (
+                    (float(actual_price) - price_at_verdict) / price_at_verdict
+                    if price_at_verdict > 0 else 0.0
+                )
+                was_correct = _evaluate_verdict_correctness(
+                    row["verdict"], actual_return,
+                )
+
+                try:
+                    self._db.execute(
+                        f"""UPDATE invest.calibration_predictions
+                            SET {col_settled} = TRUE,
+                                {col_price} = %s,
+                                {col_return} = %s,
+                                {col_correct} = %s
+                            WHERE id = %s""",
+                        (float(actual_price), round(actual_return, 6),
+                         was_correct, row["id"]),
+                    )
+                    results[horizon] += 1
+                except Exception:
+                    logger.debug(
+                        "Failed to settle prediction %s for %s at %dd",
+                        row["id"], ticker, horizon,
+                    )
+
+        # Also settle per-agent data (90-day horizon only)
+        self._settle_agent_data(today)
+
+        if any(v > 0 for v in results.values()):
+            logger.info("Settled calibration predictions: %s", results)
+        return results
+
+    def _settle_agent_data(self, today: date) -> int:
+        """Settle per-agent calibration data at 90-day horizon."""
+        from investmentology.learning.auto_settle import lookup_price_on_date
+
+        count = 0
+        try:
+            rows = self._db.execute(
+                """SELECT id, ticker, verdict_date, price_at_verdict, sentiment
+                   FROM invest.agent_calibration_data
+                   WHERE settled = FALSE
+                     AND verdict_date + INTERVAL '90 days' <= %s
+                   LIMIT 100""",
+                (today,),
+            )
+        except Exception:
+            return 0
+
+        if not rows:
+            return 0
+
+        for row in rows:
+            ticker = row["ticker"]
+            verdict_date = row["verdict_date"]
+            if isinstance(verdict_date, str):
+                verdict_date = date.fromisoformat(verdict_date[:10])
+            settlement_date = verdict_date + timedelta(days=90)
+            price_at_verdict = float(row["price_at_verdict"])
+
+            actual_price = lookup_price_on_date(ticker, settlement_date)
+            if actual_price is None:
+                continue
+
+            actual_return = (
+                (float(actual_price) - price_at_verdict) / price_at_verdict
+                if price_at_verdict > 0 else 0.0
+            )
+            # For per-agent: bullish sentiment -> correct if price up
+            sentiment = float(row.get("sentiment") or 0)
+            if sentiment > 0.1:
+                was_correct = actual_return > 0.0
+            elif sentiment < -0.1:
+                was_correct = actual_return < 0.0
+            else:
+                was_correct = abs(actual_return) < 0.10
+
+            try:
+                self._db.execute(
+                    """UPDATE invest.agent_calibration_data
+                       SET settled = TRUE, actual_return_90d = %s,
+                           was_correct = %s, settled_at = %s
+                       WHERE id = %s""",
+                    (round(actual_return, 6), was_correct, today, row["id"]),
+                )
+                count += 1
+            except Exception:
+                pass
+
+        return count
+
+    def get_calibration_summary(self) -> dict:
+        """Get calibration summary for API/dashboard.
+
+        Returns per-verdict and per-agent accuracy at multiple horizons.
+        """
+        summary: dict = {
+            "by_verdict": {},
+            "by_agent": {},
+            "total_predictions": 0,
+            "total_settled_90d": 0,
+        }
+
+        try:
+            # Per-verdict accuracy at 90 days
+            rows = self._db.execute(
+                """SELECT verdict,
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN correct_90d THEN 1 ELSE 0 END) AS correct,
+                          AVG(return_90d) AS avg_return
+                   FROM invest.calibration_predictions
+                   WHERE settled_90d = TRUE
+                   GROUP BY verdict
+                   ORDER BY total DESC""",
+            )
+            for row in (rows or []):
+                total = int(row["total"])
+                correct = int(row["correct"])
+                summary["by_verdict"][row["verdict"]] = {
+                    "total": total,
+                    "correct": correct,
+                    "accuracy": round(correct / total, 3) if total > 0 else 0,
+                    "avg_return": round(float(row["avg_return"]), 4) if row["avg_return"] else 0,
+                }
+                summary["total_settled_90d"] += total
+
+            # Total predictions
+            count_rows = self._db.execute(
+                "SELECT COUNT(*) AS cnt FROM invest.calibration_predictions",
+            )
+            if count_rows:
+                summary["total_predictions"] = int(count_rows[0]["cnt"])
+
+            # Per-agent accuracy
+            agent_rows = self._db.execute(
+                """SELECT agent_name,
+                          COUNT(*) AS total,
+                          SUM(CASE WHEN was_correct THEN 1 ELSE 0 END) AS correct,
+                          AVG(raw_confidence) AS avg_confidence
+                   FROM invest.agent_calibration_data
+                   WHERE settled = TRUE
+                   GROUP BY agent_name
+                   ORDER BY total DESC""",
+            )
+            for row in (agent_rows or []):
+                total = int(row["total"])
+                correct = int(row["correct"])
+                summary["by_agent"][row["agent_name"]] = {
+                    "total": total,
+                    "correct": correct,
+                    "accuracy": round(correct / total, 3) if total > 0 else 0,
+                    "avg_confidence": round(float(row["avg_confidence"]), 3) if row["avg_confidence"] else 0,
+                }
+
+        except Exception:
+            logger.debug("Could not generate calibration summary")
+
+        return summary
+
+
+# ---------------------------------------------------------------------------
+# AgentCalibrator — per-agent isotonic calibration
+# ---------------------------------------------------------------------------
+
+# Minimum settled predictions per agent before isotonic calibration activates
+_MIN_ISOTONIC_SAMPLES = 100
+
+
+class AgentCalibrator:
+    """Per-agent isotonic calibration using settled prediction data.
+
+    Replaces the 1.3x sell-side bias correction with data-driven calibration
+    once sufficient data exists (100+ settled predictions per agent).
+
+    Uses isotonic regression to map raw confidence → calibrated confidence.
+    """
+
+    def __init__(self, registry: Registry) -> None:
+        self._db = registry._db
+        self._models: dict[str, object] = {}  # agent_name -> IsotonicRegression
+        self._fitted_agents: set[str] = set()
+
+    def fit_all(self) -> dict[str, int]:
+        """Fit isotonic regression for all agents with sufficient data.
+
+        Returns dict of {agent_name: sample_count} for successfully fitted agents.
+        Run weekly from overnight pipeline.
+        """
+        fitted: dict[str, int] = {}
+
+        try:
+            # Get agents with enough settled data
+            rows = self._db.execute(
+                """SELECT agent_name, COUNT(*) AS cnt
+                   FROM invest.agent_calibration_data
+                   WHERE settled = TRUE
+                   GROUP BY agent_name
+                   HAVING COUNT(*) >= %s""",
+                (_MIN_ISOTONIC_SAMPLES,),
+            )
+        except Exception:
+            logger.debug("Could not query agent calibration data for fitting")
+            return fitted
+
+        if not rows:
+            return fitted
+
+        for row in rows:
+            agent_name = row["agent_name"]
+            count = int(row["cnt"])
+            model = self._fit_agent(agent_name)
+            if model is not None:
+                self._models[agent_name] = model
+                self._fitted_agents.add(agent_name)
+                fitted[agent_name] = count
+                logger.info(
+                    "Isotonic calibration fitted for %s (%d samples)",
+                    agent_name, count,
+                )
+
+        return fitted
+
+    def _fit_agent(self, agent_name: str) -> object | None:
+        """Fit isotonic regression for a single agent."""
+        try:
+            from sklearn.isotonic import IsotonicRegression
+        except ImportError:
+            logger.debug("sklearn not available, isotonic calibration disabled")
+            return None
+
+        try:
+            rows = self._db.execute(
+                """SELECT raw_confidence, was_correct
+                   FROM invest.agent_calibration_data
+                   WHERE agent_name = %s AND settled = TRUE
+                   ORDER BY verdict_date""",
+                (agent_name,),
+            )
+            if not rows or len(rows) < _MIN_ISOTONIC_SAMPLES:
+                return None
+
+            confidences = [float(r["raw_confidence"]) for r in rows]
+            outcomes = [1.0 if r["was_correct"] else 0.0 for r in rows]
+
+            ir = IsotonicRegression(out_of_bounds="clip")
+            ir.fit(confidences, outcomes)
+            return ir
+
+        except Exception:
+            logger.debug("Isotonic fit failed for %s", agent_name, exc_info=True)
+            return None
+
+    def calibrate(self, agent_name: str, raw_confidence: Decimal) -> Decimal:
+        """Calibrate a raw confidence value using the fitted model.
+
+        Falls back to the raw confidence if no model is available.
+        """
+        model = self._models.get(agent_name)
+        if model is None:
+            return raw_confidence
+
+        try:
+            calibrated = model.predict([float(raw_confidence)])[0]
+            return Decimal(str(round(calibrated, 3)))
+        except Exception:
+            return raw_confidence
+
+    def is_calibrated(self, agent_name: str) -> bool:
+        """Check if an agent has a fitted calibration model."""
+        return agent_name in self._fitted_agents
+
+    def get_calibration_curves(self) -> dict[str, list[dict]]:
+        """Get calibration curve data for all fitted agents (for PWA dashboard).
+
+        Returns {agent_name: [{raw, calibrated}, ...]} for plotting.
+        """
+        curves: dict[str, list[dict]] = {}
+        test_points = [i / 20.0 for i in range(1, 20)]  # 0.05, 0.10, ..., 0.95
+
+        for agent_name, model in self._models.items():
+            try:
+                calibrated = model.predict(test_points)
+                curves[agent_name] = [
+                    {"raw": round(raw, 2), "calibrated": round(float(cal), 3)}
+                    for raw, cal in zip(test_points, calibrated)
+                ]
+            except Exception:
+                pass
+
+        return curves

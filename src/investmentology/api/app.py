@@ -367,6 +367,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         backtest,
         decisions,
         learning,
+        calibration,
         pipeline,
         portfolio,
         push,
@@ -396,6 +397,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(thesis.router, prefix=prefix, tags=["thesis"])
     app.include_router(pipeline.router, prefix=prefix, tags=["pipeline"])
     app.include_router(push.router, prefix=prefix, tags=["push"])
+    app.include_router(calibration.router, prefix=prefix, tags=["calibration"])
     app.include_router(ws.router, prefix=prefix, tags=["websocket"])
 
     return app

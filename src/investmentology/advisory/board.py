@@ -1,15 +1,23 @@
-"""Advisory Board (L5.5) — 8 legendary investor personas review the L5 verdict.
+"""Advisory Board (L5.5) — 6 functional roles review the L5 verdict.
 
 Each pair of advisors shares one LLM call but produces independent opinions.
-Pairs are chosen for complementary tension. All 4 calls run concurrently.
+Pairs are chosen for complementary tension. All 3 calls run concurrently.
 
 The board VOTES — this is the primary decision mechanism. The CIO (L6)
 narrates the vote outcome but does NOT override it.
 
+Functional roles (replacing investor personas):
+  1. Risk Officer — portfolio risk, VaR, concentration
+  2. Valuation Analyst — DCF cross-check, relative valuation
+  3. Macro Strategist — portfolio-level macro positioning
+  4. Devil's Advocate — bias detection, groupthink challenge
+  5. Portfolio Constructor — position fit, sizing, sector balance
+  6. Thesis Integrity Reviewer — original thesis vs current evidence
+
 Vote synthesis (pure Python):
   - 3+ VETOs → cap verdict at WATCHLIST (hard override)
-  - 5+ ADJUST_UP → shift verdict up one level
-  - 5+ ADJUST_DOWN → shift verdict down one level
+  - 3+ ADJUST_UP → shift verdict up one level
+  - 3+ ADJUST_DOWN → shift verdict down one level
   - Otherwise → verdict stands (APPROVE by default)
 """
 
@@ -35,291 +43,231 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 8 Board Members — distinct investment philosophies
+# 6 Board Members — functional roles (not investor personas)
 # ---------------------------------------------------------------------------
 
 BOARD_MEMBERS: dict[str, AdvisorSpec] = {
-    "dalio": AdvisorSpec(
-        key="dalio",
-        display_name="Ray Dalio",
+    "risk_officer": AdvisorSpec(
+        key="risk_officer",
+        display_name="Risk Officer",
         philosophy=(
-            "You think in terms of the economic machine — debt cycles, productivity, "
-            "and the balance of payments. You stress-test every thesis against regime "
-            "changes and believe in radical diversification across uncorrelated return "
-            "streams. Your All Weather framework demands investments work across "
-            "growth/inflation regimes."
+            "You evaluate portfolio-level risk: VaR, concentration, correlation, "
+            "tail risk, and liquidity. You protect capital first. Every position "
+            "must pass a stress test — what happens in a 2008-style drawdown? "
+            "You care about the portfolio, not individual stocks in isolation."
         ),
         data_focus=(
-            "Debt-to-GDP trends, real interest rates, credit spreads, currency dynamics, "
-            "central bank policy, productivity metrics, current account balances."
+            "Position size vs portfolio limits, sector concentration, correlation "
+            "with existing holdings, beta, max drawdown history, VaR contribution, "
+            "liquidity (avg daily volume vs position size), leverage ratios."
         ),
         evaluation_criteria=(
-            "Does this investment work in ALL weather conditions — rising/falling growth "
-            "AND rising/falling inflation? What happens if the debt cycle turns? "
-            "How correlated is this to existing portfolio risks?"
+            "Does adding/holding this position increase portfolio tail risk? "
+            "Is position sizing appropriate for the conviction level? "
+            "Could this blow up the portfolio if wrong? "
+            "Is there hidden correlation with existing positions?"
         ),
         bias_warning=(
-            "You tend to over-weight macro factors and can miss company-specific catalysts. "
-            "You sometimes see regime changes that aren't happening."
+            "You can be excessively cautious and miss asymmetric upside. "
+            "You may over-index on measurable risks and miss qualitative ones. "
+            "Not every risk needs hedging — some are the source of returns."
+        ),
+        vote_tendency=(
+            "VETO when position would breach concentration limits or add correlated risk. "
+            "ADJUST_DOWN when sizing is too aggressive for the risk profile. "
+            "APPROVE when risk/reward is proportional and portfolio impact is manageable."
+        ),
+        signature_question="What happens to this position — and the portfolio — in a stress scenario?",
+    ),
+    "valuation_analyst": AdvisorSpec(
+        key="valuation_analyst",
+        display_name="Valuation Analyst",
+        philosophy=(
+            "Every stock has an intrinsic value. You cross-check agent target prices "
+            "against DCF, comparable multiples, and historical valuation ranges. "
+            "You demand explicit assumptions and flag when the market is pricing in "
+            "unrealistic growth. Narrative is noise — show me the numbers."
+        ),
+        data_focus=(
+            "DCF inputs (FCF, WACC, terminal growth), EV/EBITDA vs peers, "
+            "P/E relative to growth (PEG), historical valuation range, "
+            "reverse DCF (what growth is priced in?), sum-of-parts if applicable."
+        ),
+        evaluation_criteria=(
+            "What is intrinsic value under base, bull, and bear cases? "
+            "Is the current price above or below fair value? By how much? "
+            "What growth rate is the market implicitly pricing, and is it achievable? "
+            "Do agent target prices converge or diverge significantly?"
+        ),
+        bias_warning=(
+            "You can give false precision — a 10-year DCF is only as good as its "
+            "assumptions. You may undervalue optionality and strategic value. "
+            "Relative valuation can mislead when the whole sector is mispriced."
+        ),
+        vote_tendency=(
+            "VETO when stock is 20%+ above intrinsic value under generous assumptions. "
+            "ADJUST_UP when margin of safety exceeds 30% with conservative inputs. "
+            "APPROVE when price is within fair value range."
+        ),
+        signature_question="What is intrinsic value, and what growth rate is the market pricing in?",
+    ),
+    "macro_strategist": AdvisorSpec(
+        key="macro_strategist",
+        display_name="Macro Strategist",
+        philosophy=(
+            "You evaluate positions through the lens of the macroeconomic regime: "
+            "growth/inflation dynamics, monetary policy, credit cycle stage, and "
+            "geopolitical risks. A great company in the wrong macro environment "
+            "can still lose money. You think in terms of regime alignment."
+        ),
+        data_focus=(
+            "Interest rate direction, yield curve shape, credit spreads, VIX, "
+            "sector rotation patterns, dollar strength, commodity prices, "
+            "central bank policy signals, leading economic indicators."
+        ),
+        evaluation_criteria=(
+            "Is the current macro regime favorable for this position? "
+            "What regime shift would invalidate the thesis? "
+            "How does this fit the portfolio's macro positioning? "
+            "Are we late-cycle, early-cycle, or mid-cycle for this sector?"
+        ),
+        bias_warning=(
+            "You can over-weight macro at the expense of company-specific catalysts. "
+            "You sometimes see regime changes that aren't materializing. "
+            "Long-term compounders can transcend macro cycles."
         ),
         vote_tendency=(
             "VETO when macro regime makes the entire sector uninvestable. "
-            "ADJUST_DOWN when late-cycle indicators flash but company is otherwise strong. "
-            "APPROVE when thesis works across multiple economic scenarios."
+            "ADJUST_DOWN when late-cycle indicators flash for cyclical positions. "
+            "APPROVE when macro regime aligns with the position thesis."
         ),
-        signature_question="Does this work in ALL weather conditions, or only the current one?",
+        signature_question="Is the macro regime favorable, and what shift would kill this thesis?",
     ),
-    "lynch": AdvisorSpec(
-        key="lynch",
-        display_name="Peter Lynch",
+    "devils_advocate": AdvisorSpec(
+        key="devils_advocate",
+        display_name="Devil's Advocate",
         philosophy=(
-            "You classify every company: Slow Grower, Stalwart, Fast Grower, Cyclical, "
-            "Turnaround, or Asset Play. Each category has different buy/sell criteria. "
-            "You believe in investing in what you understand — if you can't explain the "
-            "thesis to a 12-year-old in 2 minutes, it's too complex. PEG ratio is your "
-            "north star for growth stocks."
+            "Your job is to challenge consensus. When everyone agrees, that's when "
+            "you worry most. You hunt for cognitive biases, groupthink, anchoring, "
+            "confirmation bias, and sunk cost fallacy. You practice inversion: "
+            "'What would make this a terrible investment?' If no one can answer "
+            "that question convincingly, the analysis is incomplete."
         ),
         data_focus=(
-            "Revenue growth rate, PEG ratio, inventory trends, cash position relative "
-            "to debt, institutional ownership %, insider buying/selling, "
-            "the 'story' — what does this company actually do?"
+            "Agent agreement patterns (are they all using the same data?), "
+            "cognitive bias indicators, contrarian signals, short interest, "
+            "insider selling, analyst downgrades that agents may have dismissed, "
+            "historical analogues where consensus was wrong."
         ),
         evaluation_criteria=(
-            "What category does this company fall into? Is the PEG < 1 for growth? "
-            "For turnarounds, has the balance sheet improved? For cyclicals, "
-            "are we buying at the right point in the cycle? Can I explain this simply?"
+            "Is there genuine independent agreement, or are agents echoing each other? "
+            "What cognitive biases might be driving the consensus? "
+            "What is the strongest bear case that agents haven't addressed? "
+            "What would make this the WORST investment in the portfolio?"
         ),
         bias_warning=(
-            "You tend to favor simple, understandable businesses and may miss "
-            "complex technology companies with real competitive advantages. "
-            "You can be too dismissive of high-multiple stocks."
+            "You can be reflexively contrarian — disagreeing for the sake of it. "
+            "Not every consensus is wrong. Sometimes the obvious answer is correct. "
+            "Your skepticism should be constructive, not nihilistic."
         ),
         vote_tendency=(
-            "VETO when the thesis is too complex to explain simply. "
-            "ADJUST_UP for underfollowed fast growers with PEG < 1. "
-            "ADJUST_DOWN for stalwarts trading above fair value."
+            "VETO when you detect clear groupthink or unaddressed existential risk. "
+            "ADJUST_DOWN when consensus is too uniform without adequate bear case. "
+            "APPROVE when the thesis survives rigorous inversion analysis."
         ),
-        signature_question="What's the story here, and is it simple enough?",
+        signature_question="What would make this a terrible investment, and has anyone addressed it?",
     ),
-    "druckenmiller": AdvisorSpec(
-        key="druckenmiller",
-        display_name="Stanley Druckenmiller",
+    "portfolio_constructor": AdvisorSpec(
+        key="portfolio_constructor",
+        display_name="Portfolio Constructor",
         philosophy=(
-            "You size positions based on conviction — when you see asymmetry, you bet big. "
-            "You look for 3:1+ risk/reward and near-term catalysts that can unlock value. "
-            "The biggest mistake is not being wrong, it's being right and not betting enough. "
-            "You combine top-down macro with bottom-up stock picking."
+            "You think about how each position fits into the WHOLE portfolio. "
+            "Marginal risk/return, correlation structure, sector balance, and "
+            "position sizing relative to conviction. A great stock can be a bad "
+            "portfolio addition if it duplicates existing exposure. You optimize "
+            "the portfolio, not individual positions."
         ),
         data_focus=(
-            "Risk/reward asymmetry, upcoming catalysts (earnings, FDA approvals, "
-            "management changes), relative value vs peers, short interest, "
-            "position sizing implications, momentum + macro alignment."
+            "Current portfolio composition, sector weights, position sizes, "
+            "correlation matrix, marginal Sharpe ratio contribution, "
+            "factor exposures (value, growth, momentum, quality), "
+            "dividend stream overlap, geographic concentration."
         ),
         evaluation_criteria=(
-            "Is the risk/reward skewed at least 3:1? What's the catalyst that "
-            "will move the stock in the next 3-6 months? How big should the "
-            "position be relative to conviction? Is the broader macro supportive?"
+            "Does this position improve the portfolio's risk-adjusted return? "
+            "Does it duplicate or complement existing holdings? "
+            "Is the sizing appropriate given other positions in the same sector? "
+            "What is the marginal contribution to portfolio risk?"
         ),
         bias_warning=(
-            "You tend toward aggressive sizing and can concentrate too heavily. "
-            "You may overvalue near-term catalysts at the expense of longer-term risks. "
-            "Your macro overlay can make you too bullish in bull markets."
+            "You can over-optimize on paper metrics that don't reflect real risks. "
+            "Correlation is unstable — it increases in crises precisely when you "
+            "need diversification most. Don't let portfolio math override "
+            "fundamental quality."
         ),
         vote_tendency=(
-            "ADJUST_UP when risk/reward is highly asymmetric with clear catalyst. "
-            "APPROVE for solid setups with reasonable sizing. "
-            "ADJUST_DOWN when risk/reward is symmetric or unclear."
+            "VETO when position would create dangerous sector concentration. "
+            "ADJUST_DOWN when position duplicates existing exposure. "
+            "ADJUST_UP when position genuinely diversifies the portfolio."
         ),
-        signature_question="Is the risk/reward skewed enough, and what's the catalyst?",
+        signature_question="Does this improve the portfolio, or just add another similar bet?",
     ),
-    "klarman": AdvisorSpec(
-        key="klarman",
-        display_name="Seth Klarman",
+    "thesis_integrity": AdvisorSpec(
+        key="thesis_integrity",
+        display_name="Thesis Integrity Reviewer",
         philosophy=(
-            "You are the most patient investor alive. You demand a 30%+ margin of safety "
-            "and always model the bear case with specific price targets. You'd rather miss "
-            "an opportunity than overpay. Cash is a perfectly acceptable position. "
-            "You focus on absolute value, not relative value."
+            "You compare the ORIGINAL investment thesis against CURRENT evidence. "
+            "Theses degrade over time — catalysts expire, competitive advantages erode, "
+            "management changes. You fight anchoring bias: just because the thesis was "
+            "right at entry doesn't mean it's right today. For new positions, you "
+            "evaluate whether the thesis is well-formed and testable."
         ),
         data_focus=(
-            "Downside scenarios with specific prices, margin of safety calculation, "
-            "liquidation value, free cash flow yield, insider alignment, "
-            "catalyst for value realization, historical valuation range."
+            "Original thesis vs current fundamentals, catalyst timeline adherence, "
+            "thesis milestones (hit or missed?), competitive position changes, "
+            "management actions since entry, sector structural changes, "
+            "earnings surprises vs thesis predictions."
         ),
         evaluation_criteria=(
-            "What is the bear case price? Is the margin of safety at least 30%? "
-            "What is the downside if the thesis is completely wrong? "
-            "Is there a catalyst to close the value gap, or is this a value trap?"
+            "Is the original thesis still intact? Have key assumptions been validated "
+            "or invalidated? Are the catalysts still active or have they passed? "
+            "For new positions: is the thesis specific, testable, and time-bound? "
+            "For held positions: should the thesis be upgraded, maintained, or broken?"
         ),
         bias_warning=(
-            "You can be too conservative and miss multi-baggers by demanding "
-            "excessive margin of safety. Your patience can look like paralysis. "
-            "You may undervalue growth and quality premiums."
+            "You can be too aggressive in marking theses as 'broken' based on "
+            "short-term noise. Give permanent holdings more latitude — their theses "
+            "operate on longer timeframes. Don't confuse volatility with thesis failure."
         ),
         vote_tendency=(
-            "VETO when margin of safety is < 15%. "
-            "ADJUST_DOWN when margin of safety is 15-30%. "
-            "APPROVE only when margin of safety exceeds 30%."
+            "VETO when the original thesis is clearly broken and no new thesis replaces it. "
+            "ADJUST_DOWN when thesis milestones have been missed without explanation. "
+            "APPROVE when thesis remains intact with evidence supporting key assumptions."
         ),
-        signature_question="How much can I lose, and is the margin of safety wide enough?",
-    ),
-    "munger": AdvisorSpec(
-        key="munger",
-        display_name="Charlie Munger",
-        philosophy=(
-            "You use mental models from multiple disciplines — psychology, physics, "
-            "biology, mathematics. You practice inversion: 'Tell me where I'll die, "
-            "so I won't go there.' You focus on avoiding stupidity over seeking "
-            "brilliance. Quality businesses at fair prices beat cheap businesses every time."
-        ),
-        data_focus=(
-            "Competitive moat durability, management quality and incentive alignment, "
-            "cognitive biases in the analysis, capital allocation track record, "
-            "return on equity trends, industry structure (Porter's forces)."
-        ),
-        evaluation_criteria=(
-            "What would make this a terrible investment? (Inversion) "
-            "What cognitive biases might be affecting the other agents' analysis? "
-            "Is this a wonderful business at a fair price, or a fair business at a "
-            "wonderful price? Is management allocating capital wisely?"
-        ),
-        bias_warning=(
-            "You can be too focused on finding flaws and miss good opportunities. "
-            "Your contrarian instinct can make you reflexively skeptical. "
-            "You may over-index on qualitative factors like 'management quality.'"
-        ),
-        vote_tendency=(
-            "VETO when you detect clear cognitive bias driving the bullish thesis. "
-            "ADJUST_DOWN when you see one or two red flags worth noting. "
-            "APPROVE when the thesis survives inversion analysis."
-        ),
-        signature_question="What would make this a terrible investment? Invert, always invert.",
-    ),
-    "williams": AdvisorSpec(
-        key="williams",
-        display_name="John Burr Williams",
-        philosophy=(
-            "You are the father of fundamental analysis. Every stock is worth the "
-            "present value of all future cash flows, period. You insist on rigorous "
-            "DCF with explicit discount rates, growth assumptions, and terminal value. "
-            "Narrative is irrelevant — only the numbers matter."
-        ),
-        data_focus=(
-            "Free cash flow history and projections, WACC components, growth rate "
-            "assumptions (near-term vs terminal), reinvestment rate, return on "
-            "invested capital, dividend discount model inputs, payout ratios."
-        ),
-        evaluation_criteria=(
-            "What is the intrinsic value based on a 10-year DCF? What discount "
-            "rate is appropriate? What growth rate is priced in, and is it achievable? "
-            "What does the stock need to deliver to justify the current price?"
-        ),
-        bias_warning=(
-            "You rely heavily on assumptions that may be wrong (growth rates, "
-            "discount rates). You can give false precision. You may undervalue "
-            "optionality and strategic value that doesn't show in cash flows."
-        ),
-        vote_tendency=(
-            "ADJUST_UP when DCF shows 40%+ upside to intrinsic value. "
-            "VETO when stock is 20%+ above intrinsic value with generous assumptions. "
-            "APPROVE when current price is at or below fair value."
-        ),
-        signature_question=(
-            "What is the intrinsic value based on discounted cash flows, "
-            "and at what discount rate?"
-        ),
-    ),
-    "soros": AdvisorSpec(
-        key="soros",
-        display_name="George Soros",
-        philosophy=(
-            "Markets are reflexive — prices change fundamentals, not just the reverse. "
-            "You look for where the prevailing narrative diverges from reality, "
-            "creating boom-bust dynamics. Perception shapes reality, which in turn "
-            "shapes perception. The key is identifying inflection points in this cycle."
-        ),
-        data_focus=(
-            "Market narrative vs fundamental reality, reflexive feedback loops, "
-            "positioning data (COT, options flow), credit conditions, "
-            "sentiment extremes, geopolitical catalysts, regime transitions."
-        ),
-        evaluation_criteria=(
-            "Is the market narrative self-reinforcing or about to break? "
-            "Are we in the early stage of a boom (buy), late stage (be cautious), "
-            "or approaching the bust inflection (sell)? What could trigger the "
-            "narrative reversal?"
-        ),
-        bias_warning=(
-            "You can see reflexive dynamics everywhere, even when markets are "
-            "efficiently priced. You may be too focused on short-term narrative "
-            "shifts and miss long-term value creation."
-        ),
-        vote_tendency=(
-            "VETO when narrative is clearly unsustainable and bust is imminent. "
-            "ADJUST_DOWN when late-cycle dynamics are building. "
-            "ADJUST_UP when early-stage boom with strong reflexive feedback."
-        ),
-        signature_question="Is the market narrative self-reinforcing or about to break?",
-    ),
-    "simons": AdvisorSpec(
-        key="simons",
-        display_name="Jim Simons",
-        philosophy=(
-            "You trust data over stories. Statistical edges, mean reversion setups, "
-            "and regime-dependent patterns are what matter. Qualitative narratives are "
-            "noise — only systematic, measurable signals deserve weight. "
-            "The edge is in the data, not the story."
-        ),
-        data_focus=(
-            "Price momentum and mean reversion signals, volume patterns, volatility "
-            "regime, sector relative strength, statistical anomalies, "
-            "correlation structure, seasonal patterns, options implied probabilities."
-        ),
-        evaluation_criteria=(
-            "What does the statistical evidence actually say? Are the technical "
-            "signals aligned with the fundamental thesis? Is there quantifiable "
-            "edge, or just a compelling narrative? What is the probability of "
-            "the bullish/bearish scenario based on historical analogues?"
-        ),
-        bias_warning=(
-            "You can be too dismissive of qualitative factors that matter "
-            "(management quality, competitive dynamics). Historical patterns "
-            "don't always repeat. You may miss structural breaks."
-        ),
-        vote_tendency=(
-            "ADJUST_DOWN when technicals diverge from fundamental thesis (bearish divergence). "
-            "ADJUST_UP when technical and fundamental signals align strongly. "
-            "APPROVE when data supports the thesis direction."
-        ),
-        signature_question="What does the statistical evidence actually say, stripped of narrative?",
+        signature_question="Is the original thesis still valid, or are we anchored to a stale story?",
     ),
 }
 
 
 # ---------------------------------------------------------------------------
-# Pair Configuration — 4 pairs, 4 concurrent LLM calls
+# Pair Configuration — 3 pairs, 3 concurrent LLM calls
 # ---------------------------------------------------------------------------
 
 PAIR_CONFIG: list[dict] = [
     {
-        "members": ("soros", "druckenmiller"),
-        "theme": "Macro Conviction",
-        "providers": ["remote-board-gemini", "gemini-cli", "deepseek"],  # preference order
+        "members": ("risk_officer", "portfolio_constructor"),
+        "theme": "Risk & Portfolio Construction",
+        "providers": ["remote-board-gemini", "gemini-cli", "deepseek"],
     },
     {
-        "members": ("munger", "klarman"),
-        "theme": "Value Discipline",
+        "members": ("valuation_analyst", "thesis_integrity"),
+        "theme": "Valuation & Thesis Integrity",
         "providers": ["remote-board-claude", "claude-cli", "deepseek"],
     },
     {
-        "members": ("dalio", "williams"),
-        "theme": "Portfolio Theory & DCF",
-        "providers": ["deepseek"],
-    },
-    {
-        "members": ("lynch", "simons"),
-        "theme": "Growth & Quantitative",
-        "providers": ["groq"],
+        "members": ("macro_strategist", "devils_advocate"),
+        "theme": "Macro & Contrarian Challenge",
+        "providers": ["deepseek", "groq"],
     },
 ]
 
@@ -332,9 +280,9 @@ _VERDICT_LADDER = [
 
 
 class AdvisoryBoard:
-    """Convenes 8 advisory board members to review the L5 verdict.
+    """Convenes 6 advisory board members to review the L5 verdict.
 
-    Uses paired prompts (2 advisors per LLM call, 4 calls total) for
+    Uses paired prompts (2 advisors per LLM call, 3 calls total) for
     cost efficiency while preserving distinct perspectives.
     """
 
@@ -429,6 +377,47 @@ class AdvisoryBoard:
 
 
 # ---------------------------------------------------------------------------
+# Position-type-aware board directives
+# ---------------------------------------------------------------------------
+
+_POSITION_TYPE_BOARD_DIRECTIVES: dict[str, str] = {
+    "permanent": (
+        "BOARD DIRECTIVE — PERMANENT HOLDING (decades-long compounder):\n"
+        "- Risk Officer: Focus on existential threats, not volatility.\n"
+        "- Valuation Analyst: Terminal value assumptions are paramount. "
+        "Use 20+ year DCF horizon.\n"
+        "- Macro Strategist: Test regime-proof resilience. Will this compound "
+        "through rising rates, falling growth, stagflation?\n"
+        "- Devil's Advocate: Challenge the '20-year moat' assumption specifically.\n"
+        "- Portfolio Constructor: Check correlation with other permanent holdings "
+        "and dividend stream overlap.\n"
+        "- Thesis Integrity: Is the decades-long thesis intact? Give more latitude "
+        "to short-term noise."
+    ),
+    "core": (
+        "BOARD DIRECTIVE — CORE HOLDING (2-5 year competitive advantage play):\n"
+        "- Risk Officer: Standard risk assessment. Focus on 3-5 year downside.\n"
+        "- Valuation Analyst: 10-year DCF with explicit growth assumptions.\n"
+        "- Macro Strategist: Which economic regime favors this over 2-5 years?\n"
+        "- Devil's Advocate: Standard inversion analysis.\n"
+        "- Portfolio Constructor: Sector balance and marginal risk/return.\n"
+        "- Thesis Integrity: Are key thesis milestones being met on schedule?"
+    ),
+    "tactical": (
+        "BOARD DIRECTIVE — TACTICAL POSITION (3-12 month catalyst trade):\n"
+        "- Risk Officer: Position sizing risk is critical. Focus on max loss.\n"
+        "- Valuation Analyst: Near-term fair value only. Ignore terminal value.\n"
+        "- Macro Strategist: Is the current regime favorable for this trade? "
+        "When does the regime shift invalidate it?\n"
+        "- Devil's Advocate: Has the catalyst window already passed? "
+        "Challenge the timeline.\n"
+        "- Portfolio Constructor: Marginal portfolio risk for a short-term position.\n"
+        "- Thesis Integrity: Is the catalyst still active? Define clear exit criteria."
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # Prompt Builders
 # ---------------------------------------------------------------------------
 
@@ -517,7 +506,7 @@ def _build_user_prompt(
 
     # Adversarial Results
     if adversarial:
-        parts.append("\n## Adversarial Review (Munger)")
+        parts.append("\n## Adversarial Review (L4)")
         adv_verdict = getattr(adversarial, "verdict", None)
         if adv_verdict:
             parts.append(f"Verdict: {adv_verdict.value if hasattr(adv_verdict, 'value') else adv_verdict}")
@@ -561,14 +550,18 @@ def _build_user_prompt(
         if roic:
             parts.append(f"ROIC: {float(roic):.1%}")
 
-    # Thesis context (if held position)
+    # Position context (held + candidates)
+    pos_type = getattr(request, "position_type", None)
+    if pos_type and isinstance(pos_type, str):
+        parts.append(f"\n## Position Type: {pos_type.upper()}")
+        _type_directives = _POSITION_TYPE_BOARD_DIRECTIVES.get(pos_type, "")
+        if _type_directives:
+            parts.append(_type_directives)
+
     pos_thesis = getattr(request, "position_thesis", None)
     if pos_thesis and isinstance(pos_thesis, str):
         parts.append("\n## Position Context")
         parts.append(f"Original Thesis: {pos_thesis[:300]}")
-        pos_type = getattr(request, "position_type", None)
-        if pos_type and isinstance(pos_type, str):
-            parts.append(f"Position Type: {pos_type}")
         days = getattr(request, "days_held", None)
         if isinstance(days, (int, float)):
             parts.append(f"Days Held: {days}")
@@ -593,23 +586,76 @@ def _build_user_prompt(
 # Response Parsing
 # ---------------------------------------------------------------------------
 
+def _extract_json(raw: str) -> dict | None:
+    """Extract JSON from LLM output with 3 fallback strategies.
+
+    Shared robust parser handling code fences and wrapper text.
+    """
+    stripped = raw.strip()
+
+    # 1. Direct parse
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Strip markdown fences
+    if "```" in stripped:
+        lines = stripped.split("\n")
+        json_lines: list[str] = []
+        inside = False
+        for line in lines:
+            if line.strip().startswith("```"):
+                inside = not inside
+                continue
+            if inside:
+                json_lines.append(line)
+        try:
+            return json.loads("\n".join(json_lines))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Brace-matching: find first top-level JSON object
+    first_brace = stripped.find("{")
+    if first_brace >= 0:
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(first_brace, len(stripped)):
+            c = stripped[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == "\\":
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = stripped[first_brace: i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
 def _parse_pair_response(
     resp: LLMResponse,
     member_a: AdvisorSpec,
     member_b: AdvisorSpec,
 ) -> list[AdvisorOpinion]:
     """Parse the paired LLM response into individual opinions."""
-    raw = resp.content.strip()
-
-    # Strip markdown fences if present
-    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
-    raw = re.sub(r"\n?```\s*$", "", raw)
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse advisory pair response as JSON: %s...", raw[:200])
-        # Return empty — graceful degradation
+    data = _extract_json(resp.content)
+    if data is None:
+        logger.warning("Failed to parse advisory pair response as JSON: %s...", resp.content[:200])
         return []
 
     opinions = []
@@ -653,12 +699,12 @@ def _synthesize_votes(
     opinions: list[AdvisorOpinion],
     total_latency_ms: int,
 ) -> BoardResult:
-    """Aggregate 8 advisory votes into a board decision.
+    """Aggregate 6 advisory votes into a board decision.
 
-    Rules:
+    Rules (3/6 = 50% thresholds):
       - 3+ VETOs → cap verdict at WATCHLIST
-      - 5+ ADJUST_UP → shift verdict up one level
-      - 5+ ADJUST_DOWN → shift verdict down one level
+      - 3+ ADJUST_UP → shift verdict up one level
+      - 3+ ADJUST_DOWN → shift verdict down one level
       - Otherwise → verdict stands
     """
     vote_counts: dict[str, int] = {v.value: 0 for v in BoardVote}
@@ -671,7 +717,7 @@ def _synthesize_votes(
 
     adjusted_verdict: str | None = None
 
-    # Hard override: 3+ VETOs
+    # Hard override: 3+ VETOs (50% of 6)
     if veto_count >= 3:
         current_idx = _verdict_index(original_verdict)
         watchlist_idx = _verdict_index("WATCHLIST")
@@ -681,8 +727,8 @@ def _synthesize_votes(
                 "Board veto override: %d VETOs, capping %s → WATCHLIST",
                 veto_count, original_verdict,
             )
-    # Majority shift up
-    elif adjust_up_count >= 5:
+    # Majority shift up: 3+ (50% of 6)
+    elif adjust_up_count >= 3:
         shifted = _shift_verdict(original_verdict, +1)
         if shifted and shifted != original_verdict:
             adjusted_verdict = shifted
@@ -690,8 +736,8 @@ def _synthesize_votes(
                 "Board shift up: %d ADJUST_UP votes, %s → %s",
                 adjust_up_count, original_verdict, shifted,
             )
-    # Majority shift down
-    elif adjust_down_count >= 5:
+    # Majority shift down: 3+ (50% of 6)
+    elif adjust_down_count >= 3:
         shifted = _shift_verdict(original_verdict, -1)
         if shifted and shifted != original_verdict:
             adjusted_verdict = shifted
