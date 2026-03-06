@@ -269,6 +269,12 @@ class EnrichedRepo:
                 entry.price AS entry_price,
                 w.state AS watchlist_state,
                 w.entered_at AS watchlist_entered,
+                w.watchlist_reason,
+                w.watchlist_blocking_factors,
+                w.watchlist_graduation_criteria,
+                w.target_entry_price,
+                w._next_catalyst_date,
+                w._qg_rank,
                 ph.history AS price_history
             FROM latest_watchlist_verdicts lw
             LEFT JOIN invest.stocks s ON s.ticker = lw.ticker
@@ -287,7 +293,13 @@ class EnrichedRepo:
                 ORDER BY fc.fetched_at DESC LIMIT 1
             ) entry ON TRUE
             LEFT JOIN LATERAL (
-                SELECT state, entered_at
+                SELECT state, entered_at,
+                       reason AS watchlist_reason,
+                       blocking_factors AS watchlist_blocking_factors,
+                       graduation_criteria AS watchlist_graduation_criteria,
+                       target_entry_price,
+                       next_catalyst_date AS _next_catalyst_date,
+                       qg_rank AS _qg_rank
                 FROM invest.watchlist wl
                 WHERE wl.ticker = lw.ticker
                 ORDER BY wl.updated_at DESC LIMIT 1

@@ -162,6 +162,25 @@ export interface WatchlistVerdict {
   boardAdjustedVerdict?: string | null;
 }
 
+export interface WatchlistBlockingFactor {
+  tag: string;
+  label: string;
+  source: string;
+}
+
+export interface WatchlistGraduationCriteria {
+  tag: string;
+  label: string;
+  met: boolean;
+}
+
+export interface WatchlistMeta {
+  reason: string | null;
+  blockingFactors: WatchlistBlockingFactor[];
+  graduationCriteria: WatchlistGraduationCriteria[];
+  graduationTrigger: string | null;
+}
+
 export interface WatchlistItem {
   ticker: string;
   name: string;
@@ -182,6 +201,13 @@ export interface WatchlistItem {
   successProbability: number | null;
   changePct?: number;
   priceHistory?: { date: string; price: number }[];
+  watchlistMeta?: WatchlistMeta;
+  targetEntryPrice?: number | null;
+  qgRank?: number | null;
+  nextCatalystDate?: string | null;
+  daysOnWatchlist?: number | null;
+  convictionTrend?: string | null;
+  distanceToEntry?: number | null;
 }
 
 export interface QuantGateResult {

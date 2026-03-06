@@ -11,7 +11,7 @@ import { useStore } from "../stores/useStore";
 import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
 import { ChevronDown } from "lucide-react";
 
-import type { WatchlistItem, AgentStance } from "../types/models";
+import type { WatchlistItem, AgentStance, WatchlistBlockingFactor, WatchlistGraduationCriteria } from "../types/models";
 
 function formatCap(cap: number): string {
   if (!cap) return "";
@@ -121,18 +121,34 @@ function Sparkline({ data, changePct }: { data: { date: string; price: number }[
   );
 }
 
+/* ── Blocking factor chip color by category ── */
+function blockingChipColor(tag: string): { bg: string; fg: string } {
+  const valuation = ["OVERVALUED", "RSI_OVERBOUGHT"];
+  const quality = ["ACCOUNTING_RED_FLAG", "GOVERNANCE_CONCERN", "EARNINGS_QUALITY_LOW", "BALANCE_SHEET_WEAK", "CAPITAL_ALLOCATION_POOR", "LEVERAGE_HIGH"];
+  const timing = ["MOMENTUM_WEAK", "BREAKDOWN_CONFIRMED", "RESISTANCE_NEAR", "DEATH_CROSS", "TREND_DOWNTREND", "SECTOR_ROTATION_OUT", "GEOPOLITICAL_RISK"];
+
+  if (valuation.includes(tag)) return { bg: "rgba(248, 113, 113, 0.15)", fg: "var(--color-error)" };
+  if (quality.includes(tag)) return { bg: "rgba(251, 191, 36, 0.15)", fg: "var(--color-warning)" };
+  if (timing.includes(tag)) return { bg: "rgba(96, 165, 250, 0.15)", fg: "var(--color-accent-bright)" };
+  return { bg: "rgba(148, 163, 184, 0.12)", fg: "var(--color-text-muted)" };
+}
+
 /* ── Entry Trigger Checklist ── */
 function EntryTriggerChecklist({ item }: { item: WatchlistItem }) {
+  const meta = item.watchlistMeta;
+  const blockingFactors: WatchlistBlockingFactor[] = meta?.blockingFactors || [];
+  const graduationCriteria: WatchlistGraduationCriteria[] = meta?.graduationCriteria || [];
+  const changePct = item.changePct ?? 0;
+  const targetEntry = item.targetEntryPrice;
+  const distanceToEntry = item.distanceToEntry;
+
+  // Legacy checklist (when no structured metadata)
   const v = item.verdict;
   const verdict = v?.recommendation || "WATCHLIST";
   const rank = item.combinedRank;
   const buyVerdicts = ["STRONG_BUY", "BUY", "ACCUMULATE"];
   const verdictMet = buyVerdicts.includes(verdict);
   const rankMet = rank != null && rank <= 50;
-  const hasNote = !!item.notes;
-
-  // Since-added price movement
-  const changePct = item.changePct ?? 0;
 
   const checks: { label: string; detail: string; met: boolean | null }[] = [
     {
@@ -145,11 +161,6 @@ function EntryTriggerChecklist({ item }: { item: WatchlistItem }) {
       detail: rank != null ? `#${rank}${rankMet ? "" : ", need top 50"}` : "Not ranked",
       met: rank != null ? rankMet : null,
     },
-    {
-      label: "Catalyst note",
-      detail: item.notes || "No catalyst set",
-      met: hasNote ? true : null,
-    },
   ];
 
   const metCount = checks.filter((c) => c.met === true).length;
@@ -161,7 +172,84 @@ function EntryTriggerChecklist({ item }: { item: WatchlistItem }) {
       background: "var(--color-surface-1)",
       borderTop: "1px solid var(--glass-border)",
     }}>
-      {/* Progress indicator */}
+      {/* Blocking factors as chips */}
+      {blockingFactors.length > 0 && (
+        <div style={{ marginBottom: "var(--space-sm)" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-secondary)", display: "block", marginBottom: 4 }}>
+            What's holding it back
+          </span>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {blockingFactors.map((f) => {
+              const colors = blockingChipColor(f.tag);
+              return (
+                <span key={f.tag} style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "2px 8px", borderRadius: 99,
+                  fontSize: 9, fontWeight: 600,
+                  background: colors.bg, color: colors.fg,
+                  whiteSpace: "nowrap",
+                }} title={`Source: ${f.source}`}>
+                  {f.label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Graduation criteria as checklist */}
+      {graduationCriteria.length > 0 && (
+        <div style={{ marginBottom: "var(--space-sm)" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-secondary)", display: "block", marginBottom: 4 }}>
+            What it needs to graduate
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {graduationCriteria.map((c) => (
+              <div key={c.tag} style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}>
+                <span style={{
+                  fontSize: 10, width: 14, textAlign: "center",
+                  color: c.met ? "var(--color-success)" : "var(--color-text-muted)",
+                }}>
+                  {c.met ? "\u2713" : "\u25CB"}
+                </span>
+                <span style={{
+                  fontSize: 10, color: "var(--color-text-muted)", flex: 1,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {c.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Target entry price */}
+      {targetEntry != null && targetEntry > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: "var(--space-sm)",
+          marginBottom: "var(--space-sm)",
+          padding: "4px 8px", borderRadius: "var(--radius-sm)",
+          background: "var(--color-surface-2)",
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-secondary)" }}>
+            Target entry
+          </span>
+          <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--color-text-primary)" }}>
+            ${targetEntry.toFixed(2)}
+          </span>
+          {distanceToEntry != null && (
+            <span style={{
+              fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
+              color: distanceToEntry > 0 ? "var(--color-error)" : "var(--color-success)",
+            }}>
+              ({distanceToEntry > 0 ? "+" : ""}{distanceToEntry.toFixed(1)}% away)
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Entry readiness progress bar */}
       <div style={{
         display: "flex", alignItems: "center", gap: "var(--space-sm)",
         marginBottom: "var(--space-sm)",
@@ -175,7 +263,7 @@ function EntryTriggerChecklist({ item }: { item: WatchlistItem }) {
         }}>
           <div style={{
             height: "100%", borderRadius: 2,
-            width: `${(metCount / totalChecks) * 100}%`,
+            width: `${totalChecks > 0 ? (metCount / totalChecks) * 100 : 0}%`,
             background: metCount === totalChecks ? "var(--color-success)" :
               metCount >= 1 ? "var(--color-warning)" : "var(--color-surface-2)",
             transition: "width 0.3s ease",

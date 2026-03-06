@@ -80,15 +80,19 @@ def _format_watch_item(row: dict) -> dict:
         "distanceToEntry": distance_to_entry,
     }
 
-    # Watchlist sub-type metadata
+    # Watchlist structured metadata (blocking factors, graduation criteria)
+    blocking_factors = row.get("watchlist_blocking_factors") or []
+    graduation_criteria = row.get("watchlist_graduation_criteria") or []
     watchlist_reason = row.get("watchlist_reason")
-    if watchlist_reason:
-        result["watchlistMeta"] = {
-            "reason": watchlist_reason,
-            "graduationTrigger": row.get("watchlist_graduation_trigger"),
-        }
 
-    # QG rank improvement since entry
+    result["watchlistMeta"] = {
+        "reason": watchlist_reason or _derive_reason_from_verdict(row),
+        "blockingFactors": blocking_factors if isinstance(blocking_factors, list) else [],
+        "graduationCriteria": graduation_criteria if isinstance(graduation_criteria, list) else [],
+        "graduationTrigger": _summarize_graduation(graduation_criteria),
+    }
+
+    # QG rank
     qg_rank = row.get("_qg_rank")
     if qg_rank is not None:
         result["qgRank"] = qg_rank
@@ -99,6 +103,24 @@ def _format_watch_item(row: dict) -> dict:
         result["nextCatalystDate"] = str(catalyst_date)
 
     return result
+
+
+def _derive_reason_from_verdict(row: dict) -> str | None:
+    """Derive a reason string from the verdict reasoning when no explicit reason is stored."""
+    reasoning = row.get("reasoning")
+    if reasoning:
+        return reasoning[:200]
+    return None
+
+
+def _summarize_graduation(criteria: list | None) -> str | None:
+    """Summarize graduation criteria into a single trigger sentence."""
+    if not criteria or not isinstance(criteria, list):
+        return None
+    labels = [c.get("label", "") for c in criteria[:3] if isinstance(c, dict) and c.get("label")]
+    if not labels:
+        return None
+    return "; ".join(labels)
 
 
 def _compute_conviction_trend(ticker: str, registry: Registry) -> str | None:

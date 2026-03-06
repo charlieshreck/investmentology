@@ -608,33 +608,59 @@ class PipelineController:
                 },
             )
 
-            # Phase 2: LLM quality check (portfolio tickers only)
-            # Data Analyst is now an API agent (DeepSeek, ~2-5s) not CLI (~38s)
-            if ticker in self._portfolio_tickers:
+            # Phase 2: LLM Data Analyst (ALL tickers, hard gate)
+            runner = self._runners.get("data_analyst")
+            if not runner:
+                # Data Analyst not configured — deterministic-only is sufficient
+                state.mark_completed(self.db, step_id)
+                logger.info("Data validation for %s passed (deterministic only)", ticker)
+                return
+
+            try:
+                request = self._build_request(ticker)
+                response = await runner.analyze(request)
+            except Exception:
+                # First attempt failed — retry once
                 try:
-                    runner = self._runners.get("data_analyst")
-                    if runner:
-                        request = self._build_request(ticker)
-                        response = await runner.analyze(request)
-                        if response and hasattr(response, "signal_set"):
-                            conf = response.signal_set.confidence
-                            if conf < 0.5:
-                                logger.warning(
-                                    "Data Analyst flagged %s (conf=%.2f): %s",
-                                    ticker, conf,
-                                    response.summary or "low quality",
-                                )
-                            # Save Data Analyst result to cache (informational)
-                            state.store_data_cache(
-                                self.db, cycle_id, ticker, "data_analyst_review", {
-                                    "confidence": conf,
-                                    "summary": response.summary or "",
-                                },
-                            )
+                    response = await runner.analyze(request)
                 except Exception:
-                    logger.debug(
-                        "LLM data validation failed for %s, continuing",
-                        ticker, exc_info=True,
+                    state.mark_failed(
+                        self.db, step_id,
+                        "Data Analyst unavailable after 2 attempts",
+                    )
+                    return
+
+            if response and hasattr(response, "signal_set"):
+                reasoning = response.signal_set.reasoning or ""
+                conf = float(response.signal_set.confidence)
+
+                if "[DATA_REJECTED]" in reasoning:
+                    state.mark_failed(
+                        self.db, step_id,
+                        f"Data Analyst REJECTED: {reasoning[:200]}",
+                    )
+                    return
+
+                if "[DATA_SUSPICIOUS]" in reasoning and conf < 0.4:
+                    state.mark_failed(
+                        self.db, step_id,
+                        f"Data Analyst SUSPICIOUS (conf={conf:.2f}): {reasoning[:200]}",
+                    )
+                    return
+
+                # VALIDATED or SUSPICIOUS with decent confidence — proceed
+                status_tag = "VALIDATED" if "[DATA_VALIDATED]" in reasoning else "SUSPICIOUS"
+                state.store_data_cache(
+                    self.db, cycle_id, ticker, "data_analyst_review", {
+                        "status": status_tag,
+                        "confidence": conf,
+                        "summary": reasoning[:500],
+                    },
+                )
+                if status_tag == "SUSPICIOUS":
+                    logger.warning(
+                        "Data Analyst flagged %s as SUSPICIOUS (conf=%.2f): %s",
+                        ticker, conf, reasoning[:200],
                     )
 
             state.mark_completed(self.db, step_id)
@@ -1398,6 +1424,32 @@ class PipelineController:
                 board_result.adjusted_verdict if board_result else None,
                 verdict_id,
             )
+
+            # 7a. Watchlist enrichment — store blocking factors & graduation criteria
+            if effective_verdict == "WATCHLIST":
+                try:
+                    from investmentology.pipeline.watchlist_enrichment import (
+                        extract_watchlist_metadata,
+                        upsert_watchlist_entry,
+                    )
+                    raw_fund = state.get_data_cache(
+                        self.db, cycle_id, ticker, "fundamentals",
+                    )
+                    synthesis_data = {
+                        "reasoning": verdict_result.reasoning,
+                        "board_narrative": board_narrative_dict,
+                    }
+                    wl_metadata = extract_watchlist_metadata(
+                        ticker, signal_rows, synthesis_data, raw_fund,
+                    )
+                    upsert_watchlist_entry(
+                        self.db, ticker, wl_metadata, verdict_id,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Watchlist enrichment failed for %s, continuing",
+                        ticker, exc_info=True,
+                    )
 
             # 7b. Record calibration prediction for feedback loop
             try:
