@@ -16,14 +16,28 @@ logger = logging.getLogger(__name__)
 # Minimum primary agent agreement for skipping debate
 CONSENSUS_THRESHOLD = 0.75
 
-# Action tags that indicate overall sentiment
+# Tags that indicate overall sentiment — expanded to include fundamentals
 _BULLISH_TAGS = frozenset({
+    # Action
     SignalTag.BUY_NEW, SignalTag.BUY_ADD, SignalTag.HOLD_STRONG,
     SignalTag.WATCHLIST_ADD, SignalTag.WATCHLIST_PROMOTE,
+    # Fundamental
+    SignalTag.UNDERVALUED, SignalTag.DEEP_VALUE,
+    SignalTag.MOAT_WIDENING, SignalTag.MOAT_STABLE,
+    SignalTag.REVENUE_ACCELERATING, SignalTag.MARGIN_EXPANDING,
+    SignalTag.BALANCE_SHEET_STRONG,
+    SignalTag.CAPITAL_ALLOCATION_EXCELLENT, SignalTag.DIVIDEND_GROWING,
+    SignalTag.BUYBACK_ACTIVE, SignalTag.INSIDER_CLUSTER_BUY,
 })
 _BEARISH_TAGS = frozenset({
+    # Action
     SignalTag.SELL_FULL, SignalTag.SELL_PARTIAL, SignalTag.TRIM,
     SignalTag.REJECT, SignalTag.REJECT_HARD,
+    # Fundamental
+    SignalTag.OVERVALUED, SignalTag.MOAT_NARROWING,
+    SignalTag.REVENUE_DECELERATING, SignalTag.MARGIN_COMPRESSING,
+    SignalTag.BALANCE_SHEET_WEAK, SignalTag.LEVERAGE_HIGH,
+    SignalTag.INSIDER_CLUSTER_SELL, SignalTag.ACCOUNTING_RED_FLAG,
 })
 _NEUTRAL_TAGS = frozenset({
     SignalTag.HOLD, SignalTag.NO_ACTION,

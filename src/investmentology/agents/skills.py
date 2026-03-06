@@ -43,6 +43,7 @@ class AgentSkill:
 _STANDARD_OUTPUT = """\
 Return your analysis as JSON with this exact structure:
 {
+    "reasoning": "Step-by-step: (1) Business quality... (2) Data assessment... (3) Framework application... (4) Risks...",
     "signals": [
         {"tag": "TAG_NAME", "strength": "strong|moderate|weak", "detail": "Explanation..."}
     ],
@@ -52,8 +53,14 @@ Return your analysis as JSON with this exact structure:
 }
 
 Rules:
+- "reasoning" is your step-by-step analytical process (mandatory, 2-4 sentences)
 - "strength" must be one of: "strong", "moderate", "weak"
-- "confidence" is a float between 0.0 and 1.0
+- "confidence" is a float between 0.0 and 1.0 — calibrate carefully:
+  0.80-1.00: Multiple independent data points converge. Rarely justified.
+  0.60-0.80: Clear thesis with supporting data but 1-2 uncertainties.
+  0.40-0.60: Mixed signals. Reasonable case for both bull and bear.
+  0.20-0.40: Weak thesis. Data insufficient or contradictory.
+  0.00-0.20: No basis for opinion. Missing critical data.
 - "target_price" is your estimate of fair value per share (number or null)
 - CRITICAL: Use ONLY the signal tags listed above. Do NOT invent new tag names.
 - Return ONLY valid JSON. No markdown, no code fences, no commentary outside the JSON."""
@@ -229,6 +236,7 @@ change your mind quickly is more important than being right initially.""",
     optional_data=[
         "macro_context", "market_snapshot", "news_context",
         "portfolio_context", "previous_verdict", "social_sentiment",
+        "position_type", "position_thesis", "thesis_health",
     ],
     allowed_tags=[
         # Macro
@@ -253,7 +261,7 @@ change your mind quickly is more important than being right initially.""",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
         "WATCHLIST_PROMOTE", "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.14,
+    base_weight=0.10,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -329,6 +337,7 @@ data or extreme conflict. MUST include at least one cautionary signal.""",
     optional_data=[
         "technical_indicators", "social_sentiment",
         "portfolio_context", "previous_verdict",
+        "position_type",
     ],
     allowed_tags=[
         # Technical
@@ -349,7 +358,7 @@ data or extreme conflict. MUST include at least one cautionary signal.""",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
         "WATCHLIST_PROMOTE", "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.08,
+    base_weight=0.07,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=60,
     prompt_opener=(
@@ -443,13 +452,12 @@ Examine related-party transactions for size and rationale.""",
         # Special
         "INSIDER_CLUSTER_BUY", "INSIDER_CLUSTER_SELL",
         "MANAGEMENT_CHANGE", "REGULATORY_CHANGE",
-        # Action
-        "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL", "SELL_PARTIAL",
-        "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
-        "WATCHLIST_PROMOTE", "REJECT", "REJECT_HARD", "NO_ACTION",
+        # Action — Auditor is RISK-ONLY, no buy-side tags
+        "HOLD", "HOLD_STRONG", "TRIM", "SELL_PARTIAL", "SELL_FULL",
+        "REJECT", "REJECT_HARD", "NO_ACTION",
         "REVIEW_REQUIRED", "CONFLICT_FLAG",
     ],
-    base_weight=0.14,
+    base_weight=0.17,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -533,6 +541,7 @@ conviction and acknowledge what you do NOT know.""",
         "macro_context", "market_snapshot", "technical_indicators",
         "news_context", "institutional_context", "portfolio_context",
         "previous_verdict",
+        "position_type", "position_thesis", "thesis_health",
     ],
     allowed_tags=[
         # Macro
@@ -635,6 +644,7 @@ should slope upward consistently, not look like a seismograph.""",
     optional_data=[
         "news_context", "insider_context", "institutional_context",
         "technical_indicators", "portfolio_context", "previous_verdict",
+        "position_type", "position_thesis", "thesis_health",
     ],
     allowed_tags=[
         # Fundamental
@@ -656,7 +666,7 @@ should slope upward consistently, not look like a seismograph.""",
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "REJECT", "NO_ACTION",
     ],
-    base_weight=0.08,
+    base_weight=0.07,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=120,
     prompt_opener=(
@@ -726,6 +736,7 @@ Define exit conditions before entry. If wrong, cut immediately.""",
         "portfolio_context", "previous_verdict",
         "pnl_pct", "entry_price",
         "analyst_ratings", "short_interest", "research_briefing",
+        "position_type", "position_thesis", "thesis_health",
     ],
     allowed_tags=[
         # Macro
@@ -752,7 +763,7 @@ Define exit conditions before entry. If wrong, cut immediately.""",
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "REJECT", "NO_ACTION",
     ],
-    base_weight=0.12,
+    base_weight=0.11,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -821,6 +832,7 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         "technical_indicators", "filing_context", "insider_context",
         "institutional_context", "news_context", "previous_verdict",
         "pnl_pct", "entry_price",
+        "position_type", "position_thesis", "thesis_health",
     ],
     allowed_tags=[
         # Fundamental
@@ -840,24 +852,27 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         "VOLATILITY_HIGH", "VOLATILITY_LOW", "LIQUIDITY_LOW",
         # Special
         "INSIDER_CLUSTER_BUY", "INSIDER_CLUSTER_SELL",
-        "ACTIVIST_INVOLVED", "SPINOFF_ANNOUNCED", "POST_BANKRUPTCY",
+        "ACTIVIST_INVOLVED", "SPINOFF_ANNOUNCED", "POST_BANKRUPTCY", "RIGHTS_OFFERING",
         # Action
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD",
         "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.14,
+    base_weight=0.12,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
         "Assess the margin of safety and downside risk for "
         "{ticker} ({sector} / {industry}). Begin with the bear case, "
         "determine intrinsic value using conservative NPV and liquidation "
-        "value, and calculate margin of safety percentage."
+        "value, and calculate margin of safety percentage. "
+        "If special situation data is available (spinoffs, distressed, activist), "
+        "evaluate structural discounts creating asymmetric opportunity."
     ),
     signature_question=(
-        "ANSWER: How much can I lose, and is the margin of safety wide "
-        "enough to compensate for everything I cannot predict?"
+        "ANSWER: Is there a specific catalyst or structural discount creating "
+        "asymmetric upside within 12-18 months? If not, is the margin of safety "
+        "wide enough to compensate for everything I cannot predict?"
     ),
     sector_overlays={
         "Healthcare": (
@@ -1181,6 +1196,181 @@ Return ONLY valid JSON. No markdown, no code fences.""",
 
 
 # ---------------------------------------------------------------------------
+# Income Analyst — evaluates dividend sustainability and income generation
+# ---------------------------------------------------------------------------
+
+INCOME_ANALYST = AgentSkill(
+    name="income_analyst",
+    display_name="Income Analyst",
+    philosophy=(
+        "You evaluate dividend sustainability and income generation quality. "
+        "A dividend is only as good as the cash flow that supports it. "
+        "Yield traps destroy capital — never recommend buying solely for yield."
+    ),
+    role="scout",
+    provider_preference=["deepseek", "groq"],
+    default_model="deepseek-reasoner",
+    cli_screen=None,
+    methodology="""\
+1. DIVIDEND COVERAGE: FCF / Total Dividends should exceed 1.5x minimum. Below 1.0x
+   means the company is borrowing to pay dividends — flag PAYOUT_UNSUSTAINABLE.
+2. PAYOUT RATIO TREND: Track 3-year payout ratio. Rising toward 80%+ (non-REITs) is
+   a red flag. REITs and MLPs use AFFO-based payout — separate threshold.
+3. DIVIDEND GROWTH: Compare 3-year dividend CAGR vs earnings CAGR. Dividend growth
+   exceeding earnings growth is unsustainable. Below inflation for 3+ years = AT_RISK.
+4. YIELD RELATIVE VALUE: Compare current yield to 10Y Treasury. If spread < 150bps,
+   equity risk premium is inadequate — investor can get comparable yield risk-free.
+5. BALANCE SHEET TEST: Debt/EBITDA > 4x with high payout = DIVIDEND_CUT_LIKELY.
+   Companies need balance sheet fortress to maintain dividends through downturns.""",
+    critical_rules=[
+        "1. NEVER recommend buying solely for yield — yield traps destroy capital.",
+        "2. Payout ratio >80% for non-REITs is a red flag. Flag PAYOUT_UNSUSTAINABLE.",
+        "3. If dividend growth < inflation for 3+ years, flag DIVIDEND_AT_RISK.",
+        "4. Compare yield to 10Y Treasury. If spread < 150bps, equity risk premium is inadequate.",
+        "5. For PERMANENT positions: focus on 10-year sustainability. For TACTICAL: income is secondary.",
+    ],
+    required_data=["fundamentals"],
+    optional_data=["earnings_context", "position_type", "position_thesis", "thesis_health"],
+    allowed_tags=[
+        "DIVIDEND_GROWING", "DIVIDEND_STABLE", "DIVIDEND_AT_RISK",
+        "DIVIDEND_CUT_LIKELY", "BUYBACK_ACTIVE", "PAYOUT_UNSUSTAINABLE",
+        "YIELD_ATTRACTIVE", "YIELD_TRAP",
+        "HOLD", "NO_ACTION",
+    ],
+    base_weight=0.06,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=120,
+    prompt_opener=(
+        "Evaluate dividend sustainability and income generation quality for "
+        "{ticker} ({sector} / {industry}). Focus on cash flow coverage, "
+        "payout ratio trends, and yield attractiveness relative to risk-free alternatives."
+    ),
+    signature_question=(
+        "Is this dividend sustainable for the next 10 years, and is the yield "
+        "attractive relative to risk-free alternatives? ANSWER:"
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Sector Specialist — dynamic skill activated for specialized sectors
+# ---------------------------------------------------------------------------
+
+# Sector-specific configurations for the dynamic specialist
+SECTOR_SPECIALIST_CONFIGS: dict[str, dict] = {
+    "Healthcare": {
+        "methodology": (
+            "Drug pipeline probability-weighting: Phase 1 = 10%, Phase 2 = 30%, "
+            "Phase 3 = 60%, Filed/Approved = 90%. Patent cliff analysis — identify "
+            "drugs losing exclusivity within 5 years and revenue at risk. "
+            "Evaluate biosimilar competition and pricing pressure."
+        ),
+        "extra_tags": ["PIPELINE_STRONG", "PIPELINE_WEAK", "PATENT_CLIFF", "FDA_RISK"],
+        "critical_rules": [
+            "Weight pipeline by phase probability, not count of candidates.",
+            "Patent cliffs within 3 years that affect >20% revenue = automatic flag.",
+        ],
+    },
+    "Financial Services": {
+        "methodology": (
+            "Capital adequacy: CET1 > 10% is strong, 8-10% adequate, <8% weak. "
+            "Net interest margin trend (3 quarters). Credit loss reserves vs "
+            "delinquency rates. Stress test results. Fee income diversification."
+        ),
+        "extra_tags": ["CAPITAL_ADEQUATE", "CAPITAL_WEAK", "NIM_EXPANDING", "CREDIT_RISK_RISING"],
+        "critical_rules": [
+            "CET1 below 8% is automatic REJECT flag for banks.",
+            "Rising delinquencies + declining reserves = CREDIT_RISK_RISING.",
+        ],
+    },
+    "Energy": {
+        "methodology": (
+            "Reserve replacement ratio (>100% = sustaining production). "
+            "Breakeven oil/gas prices vs current commodity prices. "
+            "Transition risk assessment — capex allocation to renewables. "
+            "Debt maturity profile relative to commodity cycle."
+        ),
+        "extra_tags": ["RESERVES_STRONG", "RESERVES_DEPLETING", "BREAKEVEN_LOW", "TRANSITION_RISK"],
+        "critical_rules": [
+            "Breakeven price above current commodity price = caution.",
+            "Reserve replacement <80% for 2+ years = RESERVES_DEPLETING.",
+        ],
+    },
+    "Real Estate": {
+        "methodology": (
+            "FFO/AFFO-based valuation (NOT P/E). NAV discount/premium. "
+            "Occupancy rates and lease duration. Cap rates vs comparable "
+            "properties. Debt maturity profile and variable rate exposure."
+        ),
+        "extra_tags": ["NAV_DISCOUNT", "OCCUPANCY_STRONG", "OCCUPANCY_WEAK", "RATE_SENSITIVE"],
+        "critical_rules": [
+            "Use AFFO, not earnings, for REIT valuation.",
+            "Variable rate debt >30% of total in rising rate environment = flag.",
+        ],
+    },
+    "Technology": {
+        "methodology": (
+            "Semiconductor cycle timing — design wins pipeline, fab utilization, "
+            "inventory levels. For software: net revenue retention, rule of 40, "
+            "gross margin trajectory. AI capex cycle positioning."
+        ),
+        "extra_tags": ["DESIGN_WINS_STRONG", "CYCLE_PEAK", "CYCLE_TROUGH", "AI_BENEFICIARY"],
+        "critical_rules": [
+            "Semiconductor inventory builds >20% QoQ = cycle peak warning.",
+            "Software NRR <100% = churn problem, flag regardless of growth.",
+        ],
+    },
+}
+
+
+def build_sector_specialist(sector: str) -> AgentSkill | None:
+    """Build a dynamic Sector Specialist skill for the given sector.
+
+    Returns None if no specialist config exists for this sector.
+    """
+    config = SECTOR_SPECIALIST_CONFIGS.get(sector)
+    if config is None:
+        return None
+
+    base_tags = [
+        "HOLD", "NO_ACTION", "REVIEW_REQUIRED",
+        "BUY_NEW", "BUY_ADD", "TRIM", "SELL_PARTIAL", "REJECT",
+    ]
+    all_tags = base_tags + config.get("extra_tags", [])
+
+    return AgentSkill(
+        name="sector_specialist",
+        display_name=f"Sector Specialist ({sector})",
+        philosophy=(
+            f"You are a domain expert in {sector}. You apply sector-specific "
+            f"metrics and frameworks that generalist agents miss. Your analysis "
+            f"supplements — not replaces — the primary agent consensus."
+        ),
+        role="scout",
+        provider_preference=["deepseek", "groq"],
+        default_model="deepseek-reasoner",
+        cli_screen=None,
+        methodology=config["methodology"],
+        critical_rules=config.get("critical_rules", []),
+        required_data=["fundamentals"],
+        optional_data=["earnings_context", "position_type"],
+        allowed_tags=all_tags,
+        base_weight=0.05,
+        output_format=_STANDARD_OUTPUT,
+        timeout_seconds=120,
+        prompt_opener=(
+            f"As a {sector} sector specialist, analyze {{ticker}} "
+            f"({{sector}} / {{industry}}). Apply sector-specific metrics "
+            f"and frameworks."
+        ),
+        signature_question=(
+            f"What sector-specific risks or opportunities do generalist "
+            f"analysts typically miss for this {sector} company? ANSWER:"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Skills Registry
 # ---------------------------------------------------------------------------
 SKILLS: dict[str, AgentSkill] = {
@@ -1197,6 +1387,7 @@ SKILLS: dict[str, AgentSkill] = {
     "growth_momentum_screener": GROWTH_MOMENTUM_SCREENER,
     "quality_position_screener": QUALITY_POSITION_SCREENER,
     "data_analyst": DATA_ANALYST,
+    "income_analyst": INCOME_ANALYST,
 }
 
 # Convenience subsets

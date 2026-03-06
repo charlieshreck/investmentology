@@ -84,7 +84,7 @@ def _score_all(db: Database, candidates: list[str]) -> list[ScoredTicker]:
 
         # Factor 1: Held position with health issues (50 pts max)
         if pos:
-            score += 20  # Base score for held positions
+            score += 25  # Base score for held positions (raised from 20)
             reasons.append("held_position")
 
             health = pos.get("thesis_health", "INTACT")
@@ -98,14 +98,27 @@ def _score_all(db: Database, candidates: list[str]) -> list[ScoredTicker]:
                 score += 20
                 reasons.append("thesis_UNDER_REVIEW")
 
-            # Drawdown urgency
+            # Drawdown urgency (position-type-aware thresholds)
             pnl = pos.get("pnl_pct", 0) or 0
-            if pnl < -15:
+            p_type = pos.get("position_type", "core")
+            drawdown_threshold = -15 if p_type == "tactical" else -20
+            if pnl < drawdown_threshold:
+                score += 40  # Hard reanalysis trigger — bypasses normal queue
+                reasons.append(f"MANDATORY_drawdown_{pnl:.0f}%")
+            elif pnl < -10:
                 score += 15
                 reasons.append(f"drawdown_{pnl:.0f}%")
-            elif pnl < -10:
+            elif pnl < -5:
                 score += 8
                 reasons.append(f"drawdown_{pnl:.0f}%")
+
+            # Stale held position: >90 days without reanalysis
+            days_held = pos.get("days_held", 0) or 0
+            last_verdict = verdict_data.get(ticker)
+            days_since_verdict = (last_verdict or {}).get("days_since", 999)
+            if days_held > 90 and days_since_verdict > 90:
+                score += 15
+                reasons.append("stale_held_90d+")
 
         # Factor 2: Earnings proximity (25 pts)
         if has_earnings_soon:
@@ -128,13 +141,20 @@ def _score_all(db: Database, candidates: list[str]) -> list[ScoredTicker]:
                 score += 5
                 reasons.append(f"aging_{days_since}d")
 
-        # Factor 4: Quant gate rank (up to 10 pts — higher rank = more promising)
+        # Factor 4: Quant gate rank (tiered scoring)
         if qg_rank is not None:
-            # Rank 1 = 10 pts, rank 50 = 5 pts, rank 100 = 0 pts
-            rank_score = max(0, 10 - (qg_rank / 10))
-            score += rank_score
-            if qg_rank <= 20:
-                reasons.append(f"qg_top20(#{qg_rank})")
+            if qg_rank <= 10:
+                score += 20
+                reasons.append(f"qg_top10(#{qg_rank})")
+            elif qg_rank <= 25:
+                score += 12
+                reasons.append(f"qg_top25(#{qg_rank})")
+            elif qg_rank <= 50:
+                score += 8
+                reasons.append(f"qg_top50(#{qg_rank})")
+            else:
+                rank_score = max(0, 5 - (qg_rank / 20))
+                score += rank_score
 
         results.append(ScoredTicker(ticker=ticker, score=score, reasons=reasons))
 

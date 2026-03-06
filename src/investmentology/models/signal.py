@@ -196,3 +196,4 @@ class AgentSignalSet:
     token_usage: dict | None = None
     latency_ms: int | None = None
     parse_failed: bool = False
+    metadata: dict = field(default_factory=dict)  # Agent-specific structured fields

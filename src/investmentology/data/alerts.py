@@ -237,6 +237,20 @@ class AlertEngine:
 
         return alerts
 
+    @staticmethod
+    def circuit_breaker_level(vix: Decimal, spy_drawdown_pct: Decimal) -> int:
+        """Return circuit breaker level (0=none, 1=warning, 2=error, 3=critical).
+
+        Used as a hard gate: L2+ blocks new BUY verdicts, L3 forces portfolio review.
+        """
+        if vix > 45 or spy_drawdown_pct > 15:
+            return 3
+        if vix > 35 or spy_drawdown_pct > 10:
+            return 2
+        if vix > 25 or spy_drawdown_pct > 5:
+            return 1
+        return 0
+
     def evaluate_all(
         self,
         positions: list[PortfolioPosition],

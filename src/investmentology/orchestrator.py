@@ -48,13 +48,36 @@ from investmentology.models.lifecycle import WatchlistState
 from investmentology.models.signal import AgentSignalSet
 from investmentology.registry.queries import Registry
 from investmentology.timing.sizing import PositionSizer, SizingResult
-from investmentology.verdict import VerdictResult, VotingMethod, synthesize as synthesize_verdict
+from investmentology.verdict import VerdictResult, synthesize as synthesize_verdict
 
 # Type for optional progress callback: (ticker, stage, step_index, total_steps) -> None
 ProgressCallback = Callable[[str, str, int, int], Awaitable[None]]
 TOTAL_PIPELINE_STEPS = 11
 
 logger = logging.getLogger(__name__)
+
+
+def infer_candidate_position_type(fundamentals) -> str:
+    """Heuristic classification for candidates not yet in portfolio.
+
+    Returns a PositionType string value. Classification is advisory —
+    agents and board can override.
+    """
+    market_cap = getattr(fundamentals, "market_cap", 0) or 0
+    beta = getattr(fundamentals, "beta", 1.0) or 1.0
+    dividend_yield = getattr(fundamentals, "dividend_yield", 0) or 0
+    roic = getattr(fundamentals, "roic", 0) or 0
+
+    # Permanent signals: mega-cap, low beta, meaningful dividend
+    if market_cap > 100e9 and beta < 0.9 and dividend_yield > 1.5:
+        return "permanent"
+
+    # Core signals: strong fundamentals, established company
+    if roic > 12 and market_cap > 10e9:
+        return "core"
+
+    # Tactical: everything else (catalyst-driven, turnarounds, high-growth)
+    return "tactical"
 
 
 @dataclass
@@ -251,6 +274,22 @@ class AnalysisOrchestrator:
                         }
                         break
 
+        # Assess thesis health for held positions (before agents see the request)
+        if held_position and thesis_context.get("position_type"):
+            try:
+                from investmentology.advisory.thesis_health import assess_thesis_health
+                th_assessment = assess_thesis_health(
+                    ticker, self._registry, thesis_context["position_type"],
+                )
+                thesis_context["thesis_health"] = th_assessment.health.value
+                logger.debug(
+                    "Thesis health for %s: %s (bearish_ratio=%.2f, consecutive=%d)",
+                    ticker, th_assessment.health.value,
+                    th_assessment.bearish_ratio, th_assessment.consecutive_bearish,
+                )
+            except Exception:
+                logger.warning("Failed to assess thesis health for %s", ticker)
+
         # Fetch fundamentals — try DB cache first, then on-demand yfinance
         fundamentals = self._registry.get_latest_fundamentals(ticker)
         yf_data: dict | None = None
@@ -320,6 +359,11 @@ class AnalysisOrchestrator:
         stock_info = next((s for s in stocks if s.ticker == ticker), None)
         sector = stock_info.sector if stock_info else ""
         industry = stock_info.industry if stock_info else ""
+
+        # Infer position type for non-held candidates from fundamentals
+        if not held_position and fundamentals:
+            thesis_context["position_type"] = infer_candidate_position_type(fundamentals)
+            logger.debug("Inferred position type for %s: %s", ticker, thesis_context["position_type"])
 
         # --- L2: Competence Filter + Moat ---
         await _emit("Competence", 2)
@@ -415,6 +459,7 @@ class AnalysisOrchestrator:
             market_snapshot=market_snapshot,
             position_thesis=thesis_context.get("position_thesis"),
             position_type=thesis_context.get("position_type"),
+            thesis_health=thesis_context.get("thesis_health"),
             days_held=thesis_context.get("days_held"),
             entry_price=thesis_context.get("entry_price"),
             pnl_pct=thesis_context.get("pnl_pct"),
@@ -549,26 +594,15 @@ class AnalysisOrchestrator:
                 verdict_weights = _regime_weights(regime_label, active_agents)
                 logger.debug("Using regime-aware weights (%s): %s", regime_label, verdict_weights)
 
-        # First pass with weighted vote to determine direction
-        initial_verdict = synthesize_verdict(
+        # Single-pass confidence-weighted consensus (replaces double-pass supermajority)
+        analysis.verdict = synthesize_verdict(
             agent_signals=analysis.agent_signal_sets,
             compatibility=analysis.compatibility,
             adversarial=analysis.adversarial,
-            method=VotingMethod.WEIGHTED_VOTE,
             weights=verdict_weights,
+            position_type=thesis_context.get("position_type"),
+            regime_label=regime_label,
         )
-
-        # Use supermajority for BUY/STRONG_BUY (higher bar for strong actions)
-        if initial_verdict.verdict.value in ("STRONG_BUY", "BUY", "ACCUMULATE"):
-            analysis.verdict = synthesize_verdict(
-                agent_signals=analysis.agent_signal_sets,
-                compatibility=analysis.compatibility,
-                adversarial=analysis.adversarial,
-                method=VotingMethod.SUPERMAJORITY,
-                weights=verdict_weights,
-            )
-        else:
-            analysis.verdict = initial_verdict
 
         # Attach regime label to verdict result
         if analysis.verdict:

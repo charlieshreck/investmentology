@@ -28,6 +28,7 @@ from investmentology.agents.skills import (
     SCOUT_SKILLS,
     SCREENER_SKILLS,
     SKILLS,
+    build_sector_specialist,
 )
 from investmentology.pipeline import state
 from investmentology.pipeline.convergence import should_debate, synthesis_ready
@@ -47,11 +48,18 @@ PRIMARY_AGENT_NAMES = list(PRIMARY_SKILLS.keys())
 SCOUT_AGENT_NAMES = list(SCOUT_SKILLS.keys())
 SCREENER_AGENT_NAMES = list(SCREENER_SKILLS.keys())
 ALL_AGENT_NAMES = list(SKILLS.keys())
-# Analysis agents = all except data_analyst and screeners
+# Analysis agents = all except data_analyst, screeners, and conditional agents
+_CONDITIONAL_AGENTS = {"income_analyst"}
 ANALYSIS_AGENT_NAMES = [
     n for n in ALL_AGENT_NAMES
     if n != "data_analyst" and n not in SCREENER_AGENT_NAMES
+    and n not in _CONDITIONAL_AGENTS
 ]
+
+# Sectors that get a specialist agent
+_SECTOR_SPECIALIST_SECTORS = {
+    "Healthcare", "Financial Services", "Energy", "Real Estate", "Technology",
+}
 
 # Action tags that indicate a REJECT decision from screeners
 _REJECT_TAGS = {"REJECT", "REJECT_HARD"}
@@ -145,6 +153,55 @@ class PipelineController:
         except Exception:
             logger.warning("Failed to create ReAct tool catalog", exc_info=True)
             return None
+
+    def _get_agents_for_ticker(self, ticker: str) -> list[str]:
+        """Compute agent list for a ticker, adding conditional agents as needed.
+
+        Always includes ANALYSIS_AGENT_NAMES. Conditionally adds:
+        - income_analyst: for dividend-paying stocks or PERMANENT positions
+        - sector_specialist: for stocks in specialist-covered sectors
+        """
+        agents = list(ANALYSIS_AGENT_NAMES)
+
+        # Check if income_analyst should be activated
+        try:
+            fundamentals = self._yf_client.get_fundamentals(ticker)
+            dividend_yield = getattr(fundamentals, "dividend_yield", 0) or 0
+
+            # Check position type from DB
+            position_type = None
+            try:
+                rows = self.db.execute(
+                    "SELECT position_type FROM invest.portfolio_positions "
+                    "WHERE ticker = %s AND is_closed = false LIMIT 1",
+                    (ticker,),
+                )
+                if rows:
+                    position_type = rows[0].get("position_type")
+            except Exception:
+                pass
+
+            if dividend_yield > 1.5 or position_type == "permanent":
+                agents.append("income_analyst")
+
+            # Check if sector specialist should be activated
+            sector = getattr(fundamentals, "sector", "") or ""
+            if sector in _SECTOR_SPECIALIST_SECTORS:
+                spec_name = f"sector_specialist_{sector.lower().replace(' ', '_')}"
+                if spec_name not in self._runners:
+                    specialist_skill = build_sector_specialist(sector)
+                    if specialist_skill:
+                        self._runners[spec_name] = AgentRunner(
+                            specialist_skill, self.gateway,
+                        )
+                        logger.info("Created sector specialist runner for %s", sector)
+                if spec_name in self._runners:
+                    agents.append(spec_name)
+
+        except Exception:
+            logger.debug("Could not evaluate conditional agents for %s", ticker)
+
+        return agents
 
     async def start(self) -> None:
         """Start the controller and its workers."""
@@ -561,11 +618,16 @@ class PipelineController:
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
         """Ticker passed the gate — create Phase 2 analysis steps."""
+        agent_names = self._get_agents_for_ticker(ticker)
         state.create_analysis_steps(
-            self.db, cycle_id, ticker, ANALYSIS_AGENT_NAMES,
+            self.db, cycle_id, ticker, agent_names,
         )
         state.mark_completed(self.db, step_id)
-        logger.info("Gate PASS for %s — created analysis steps", ticker)
+        logger.info(
+            "Gate PASS for %s — created %d analysis steps (conditional: %s)",
+            ticker, len(agent_names),
+            [a for a in agent_names if a not in ANALYSIS_AGENT_NAMES] or "none",
+        )
 
     def _gate_fail(
         self, cycle_id: UUID, ticker: str, step_id: int,
@@ -605,11 +667,14 @@ class PipelineController:
             return
 
         skill = SKILLS.get(agent_name)
+        runner = self._runners.get(agent_name)
+
+        # Sector specialists and other dynamic agents may not be in SKILLS
+        if not skill and runner:
+            skill = runner.skill
         if not skill:
             state.mark_failed(self.db, step_id, f"Unknown agent: {agent_name}")
             return
-
-        runner = self._runners.get(agent_name)
         if not runner:
             state.mark_failed(self.db, step_id, f"No runner for: {agent_name}")
             return
@@ -944,14 +1009,30 @@ class PipelineController:
                 for name, skill in SKILLS.items()
                 if skill.base_weight > 0
             }
+            # Include weights for dynamically-created agents (sector specialists)
+            for ss in agent_signal_sets:
+                if ss.agent_name not in weights and ss.agent_name in self._runners:
+                    runner = self._runners[ss.agent_name]
+                    weights[ss.agent_name] = Decimal(str(runner.skill.base_weight))
             weights = self._apply_calibration_weights(weights)
 
             # 3. Verdict synthesis (deterministic vote aggregation)
-            from investmentology.verdict import VotingMethod, synthesize
+            # Optionally apply isotonic calibration if fitted models exist
+            agent_calibrator = None
+            try:
+                from investmentology.learning.calibration import AgentCalibrator
+                from investmentology.registry.queries import Registry as _Reg
+                _reg = _Reg(self.db)
+                agent_calibrator = AgentCalibrator(_reg)
+                agent_calibrator.fit_all()
+            except Exception:
+                pass
+
+            from investmentology.verdict import synthesize
             verdict_result = synthesize(
                 agent_signal_sets,
-                method=VotingMethod.WEIGHTED_VOTE,
                 weights=weights,
+                calibrator=agent_calibrator,
             )
             logger.info(
                 "Verdict for %s: %s (conf=%.2f, consensus=%.2f)",
@@ -1082,6 +1163,54 @@ class PipelineController:
                 board_result.adjusted_verdict if board_result else None,
                 verdict_id,
             )
+
+            # 7b. Record calibration prediction for feedback loop
+            try:
+                from investmentology.learning.calibration import CalibrationTracker
+                cal_tracker = CalibrationTracker(registry)
+
+                # Get current price for snapshot
+                request = self._build_request(ticker)
+                current_price = float(
+                    getattr(request.fundamentals, "current_price", 0)
+                    or getattr(request.fundamentals, "price", 0) or 0
+                )
+                if current_price > 0:
+                    # Build agent contributions for snapshot
+                    agent_contribs = [
+                        {
+                            "name": s.name,
+                            "sentiment": s.sentiment,
+                            "confidence": float(s.confidence),
+                            "weight": float(weights.get(s.name, 0)),
+                        }
+                        for s in verdict_result.agent_stances
+                    ]
+                    cal_tracker.record_verdict(
+                        ticker=ticker,
+                        verdict=effective_verdict,
+                        sentiment=verdict_result.consensus_score,
+                        confidence=float(verdict_result.confidence),
+                        price_at_verdict=current_price,
+                        agent_contributions=agent_contribs,
+                        position_type=getattr(
+                            verdict_result, "position_type", None,
+                        ),
+                        regime_label=getattr(
+                            verdict_result, "regime_label", None,
+                        ),
+                    )
+                    # Per-agent calibration data
+                    for s in verdict_result.agent_stances:
+                        cal_tracker.record_agent_data(
+                            agent_name=s.name,
+                            ticker=ticker,
+                            raw_confidence=float(s.confidence),
+                            sentiment=s.sentiment,
+                            price_at_verdict=current_price,
+                        )
+            except Exception:
+                logger.debug("Calibration recording failed for %s", ticker)
 
             # 8. Create reentry blocks for negative verdicts
             negative_verdicts = {"AVOID", "DISCARD", "SELL", "REDUCE"}

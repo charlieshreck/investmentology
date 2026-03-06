@@ -4,6 +4,27 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 
 
+# Position-type-aware sizing bands
+_SIZING_BANDS: dict[str, dict[str, Decimal]] = {
+    "permanent": {
+        "target": Decimal("0.06"),
+        "kelly_cap": Decimal("0.08"),
+        "pendulum_sensitivity": Decimal("0.3"),
+    },
+    "core": {
+        "target": Decimal("0.04"),
+        "kelly_cap": Decimal("0.06"),
+        "pendulum_sensitivity": Decimal("0.5"),
+    },
+    "tactical": {
+        "target": Decimal("0.025"),
+        "kelly_cap": Decimal("0.04"),
+        "pendulum_sensitivity": Decimal("0.8"),
+    },
+}
+_DEFAULT_BAND = _SIZING_BANDS["core"]
+
+
 @dataclass
 class SizingResult:
     ticker: str
@@ -60,9 +81,11 @@ class KellyCalculator:
         kelly = (p * b - q * a) / b if b > 0 else 0.0
         return max(0.0, kelly)
 
-    def half_kelly(self) -> float:
-        """Half-Kelly for conservatism. Capped at 4% per position."""
-        return min(self.calculate() / 2, 0.04)
+    def half_kelly(self, position_type: str = "core") -> float:
+        """Half-Kelly for conservatism. Capped per position type."""
+        band = _SIZING_BANDS.get(position_type, _DEFAULT_BAND)
+        cap = float(band["kelly_cap"])
+        return min(self.calculate() / 2, cap)
 
 
 class PositionSizer:
@@ -92,12 +115,13 @@ class PositionSizer:
         current_position_count: int,
         pendulum_multiplier: Decimal = Decimal("1.0"),
         ticker: str = "",
+        position_type: str = "core",
     ) -> SizingResult:
         """Calculate position size for a new buy.
 
-        1. Base size from equal weight
-        2. Apply pendulum multiplier
-        3. Cap at max_single_position_pct
+        1. Base size from position-type target weight
+        2. Apply pendulum multiplier (scaled by type sensitivity)
+        3. Cap at type-specific target weight
         4. Calculate shares (round down to whole shares)
         5. Check against max_positions limit
         """
@@ -110,23 +134,29 @@ class PositionSizer:
                 rationale=f"At max positions limit ({self.config.max_positions})",
             )
 
+        band = _SIZING_BANDS.get(position_type, _DEFAULT_BAND)
+        target_weight = band["target"]
+        sensitivity = band["pendulum_sensitivity"]
+
         # Determine sizing method
         sizing_method = "equal_weight"
         if self._kelly:
-            kelly_fraction = self._kelly.half_kelly()
+            kelly_fraction = self._kelly.half_kelly(position_type)
             if kelly_fraction > 0:
                 kelly_base = portfolio_value * Decimal(str(kelly_fraction))
-                equal_base = self.calculate_base_size(portfolio_value, current_position_count)
-                # Use Kelly if it gives a different size, but cap at equal weight
-                base = min(kelly_base, equal_base)
+                type_base = portfolio_value * target_weight
+                base = min(kelly_base, type_base)
                 sizing_method = "kelly_half"
             else:
-                base = self.calculate_base_size(portfolio_value, current_position_count)
+                base = portfolio_value * target_weight
         else:
-            base = self.calculate_base_size(portfolio_value, current_position_count)
+            base = portfolio_value * target_weight
 
-        adjusted = base * pendulum_multiplier
-        max_dollar = portfolio_value * self.config.max_single_position_pct
+        # Scale pendulum effect by position-type sensitivity
+        # sensitivity=0.3 (permanent) means only 30% of the pendulum swing applies
+        effective_multiplier = Decimal("1.0") + (pendulum_multiplier - Decimal("1.0")) * sensitivity
+        adjusted = base * effective_multiplier
+        max_dollar = portfolio_value * target_weight
         dollar_amount = min(adjusted, max_dollar)
 
         shares = int((dollar_amount / price).to_integral_value(rounding=ROUND_DOWN))
@@ -144,9 +174,10 @@ class PositionSizer:
             Decimal("0.01"), rounding=ROUND_DOWN
         )
 
-        parts = [f"{sizing_method}_base=${base:.2f}"]
+        parts = [f"{position_type}_{sizing_method}_base=${base:.2f}"]
         if pendulum_multiplier != Decimal("1.0"):
-            parts.append(f"pendulum_mult={pendulum_multiplier}")
+            parts.append(f"pendulum_mult={pendulum_multiplier}×{sensitivity}sens")
+        parts.append(f"target={target_weight:.1%}")
         parts.append(f"{shares} shares @ ${price}")
 
         return SizingResult(

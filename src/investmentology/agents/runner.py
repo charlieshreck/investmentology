@@ -22,6 +22,42 @@ logger = logging.getLogger(__name__)
 
 _VALID_TAGS = ALL_DOMAIN_TAGS
 
+# Position-type-aware guidance injected into user prompts per (agent, type)
+_TYPE_GUIDANCE: dict[tuple[str, str], str] = {
+    # Warren
+    ("warren", "permanent"): "This is a PERMANENT holding — a decades-long compounder. Focus on durable competitive advantages, management succession depth, and whether the business model will survive 20+ years of disruption. Higher bar for quality; lower bar for current valuation.",
+    ("warren", "core"): "This is a CORE holding — a multi-year competitive advantage play. Evaluate sustainable ROIC above cost of capital, reinvestment runway, and 3-5 year earnings power.",
+    ("warren", "tactical"): "This is a TACTICAL position — a 3-12 month catalyst trade. Focus on specific catalysts, risk/reward asymmetry, and clear exit criteria. Your role: confirm the business isn't fundamentally broken.",
+    # Auditor
+    ("auditor", "permanent"): "PERMANENT position — survival risk assessment is paramount. Focus on existential threats: secular disruption, regulatory capture, governance decay, balance sheet fortress quality.",
+    ("auditor", "core"): "CORE position — standard forensic review. Evaluate accounting quality, governance, and balance sheet for 3-5 year holding period.",
+    ("auditor", "tactical"): "TACTICAL position — focus on near-term risk events. Earnings manipulation, short-seller reports, pending litigation, debt maturities within 12 months.",
+    # Klarman
+    ("klarman", "permanent"): "PERMANENT position — evaluate whether the current price offers a margin of safety for DECADES of compounding. Bear case should assume prolonged low-growth periods.",
+    ("klarman", "core"): "CORE position — standard margin-of-safety analysis. Demand 30% discount to conservative intrinsic value.",
+    ("klarman", "tactical"): "TACTICAL position — evaluate special situation dynamics. Catalyst path, structural discount, forced-selling opportunity, defined exit.",
+    # Soros
+    ("soros", "permanent"): "PERMANENT position — assess long-term reflexivity risks. Can the narrative around this company sustain itself for decades, or is there a hidden feedback loop that will unwind?",
+    ("soros", "core"): "CORE position — identify the dominant narrative driving this stock over 2-5 years. Where are we in the reflexive cycle?",
+    ("soros", "tactical"): "TACTICAL position — narrative momentum is everything. Is the market's self-reinforcing belief strengthening or about to break? Define the bust trigger.",
+    # Druckenmiller
+    ("druckenmiller", "permanent"): "PERMANENT position — sizing and entry timing matter less. Focus on: is this the RIGHT time to add/trim? Macro headwinds that could create better entry?",
+    ("druckenmiller", "core"): "CORE position — evaluate catalyst calendar and asymmetric risk/reward over 2-5 year horizon.",
+    ("druckenmiller", "tactical"): "TACTICAL position — this is your core domain. Define the catalyst, the timeline, the risk/reward ratio, and the stop-loss. Be precise on sizing conviction.",
+    # Dalio
+    ("dalio", "permanent"): "PERMANENT position — evaluate through all 4 economic quadrants. Will this company compound through rising rates, falling growth, stagflation? All-weather resilience is the test.",
+    ("dalio", "core"): "CORE position — which quadrant are we in, and does this position benefit? Evaluate regime alignment over 2-5 years.",
+    ("dalio", "tactical"): "TACTICAL position — regime timing is critical. Is the current macro regime favorable for this trade? When does the regime shift invalidate the thesis?",
+    # Simons
+    ("simons", "permanent"): "PERMANENT position — long-term technical trends. Multi-year uptrend? Volume patterns suggesting institutional accumulation.",
+    ("simons", "core"): "CORE position — medium-term technical analysis. Trend strength, support/resistance levels, momentum indicators.",
+    ("simons", "tactical"): "TACTICAL position — short-term technical signals are paramount. Entry timing, pattern recognition, volume confirmation.",
+    # Lynch
+    ("lynch", "permanent"): "PERMANENT position — GARP: likely Stalwart or Slow Grower. Focus on consistent earnings growth, fair PEG ratio, and whether growth rate justifies decades of holding.",
+    ("lynch", "core"): "CORE position — GARP classification critical. Fast Grower or Stalwart most appropriate. PEG ratio, earnings acceleration, institutional neglect.",
+    ("lynch", "tactical"): "TACTICAL position — likely Cyclical or Turnaround. Focus on cycle timing, sector rotation signals, and whether the growth inflection is near.",
+}
+
 
 class AgentRunner:
     """Generic agent that builds prompts and routes calls via AgentSkill."""
@@ -159,6 +195,13 @@ class AgentRunner:
         if "position_thesis" in opt and request.position_thesis:
             parts.extend(self._fmt_thesis(request))
 
+        # Position-type-aware guidance
+        if "position_type" in opt and request.position_type:
+            guidance = _TYPE_GUIDANCE.get((self.skill.name, request.position_type))
+            if guidance:
+                parts.append("")
+                parts.append(f"POSITION TYPE GUIDANCE: {guidance}")
+
         # Similar past situations (Qdrant semantic memory)
         if request.similar_situations:
             parts.extend(self._fmt_similar_situations(request.similar_situations))
@@ -251,13 +294,35 @@ class AgentRunner:
                     detail="No technical indicators available — cannot assess",
                 ))
 
+        # Data gate: macro-dependent agents capped at 0.20 without macro_context
+        _MACRO_REQUIRED_AGENTS = {"soros", "druckenmiller", "dalio"}
+        if self.skill.name in _MACRO_REQUIRED_AGENTS and not request.macro_context:
+            confidence = min(confidence, Decimal("0.20"))
+
+        # Confidence cap: non-held positions max 0.90, held max 0.95
+        is_held = request.entry_price is not None
+        if is_held:
+            confidence = min(confidence, Decimal("0.95"))
+        else:
+            confidence = min(confidence, Decimal("0.90"))
+
+        # Extract agent-specific structured fields
+        metadata: dict = {}
+        if self.skill.name == "dalio" and data.get("regime_quadrant"):
+            metadata["regime_quadrant"] = data["regime_quadrant"]
+        elif self.skill.name == "soros" and data.get("reflexivity_phase"):
+            metadata["reflexivity_phase"] = data["reflexivity_phase"]
+        elif self.skill.name == "lynch" and data.get("garp_classification"):
+            metadata["garp_classification"] = data["garp_classification"]
+
         return AgentSignalSet(
             agent_name=self.skill.name,
             model=self.skill.default_model,
             signals=SignalSet(signals=signals),
             confidence=confidence,
-            reasoning=data.get("summary", ""),
+            reasoning=data.get("reasoning", data.get("summary", "")),
             target_price=target_price,
+            metadata=metadata,
         )
 
     def _parse_validator_response(self, data: dict) -> AgentSignalSet:

@@ -161,22 +161,43 @@ class PendulumReader:
 
 # -- Regime-aware weight adjustments --
 
-_BASE_WEIGHTS: dict[str, Decimal] = {
-    "warren": Decimal("0.20"),
-    "soros": Decimal("0.15"),
-    "simons": Decimal("0.10"),
-    "auditor": Decimal("0.20"),
-    "marks": Decimal("0.15"),
-    "forensic": Decimal("0.10"),
-    "bogle": Decimal("0.10"),
-}
+# Base weights derived from SKILLS registry (single source of truth).
+_base_weights_cache: dict[str, Decimal] | None = None
 
+
+def _get_base_weights() -> dict[str, Decimal]:
+    """Return agent weights derived from SKILLS base_weight values."""
+    global _base_weights_cache
+    if _base_weights_cache is None:
+        from investmentology.agents.skills import SKILLS
+        _base_weights_cache = {
+            name: Decimal(str(skill.base_weight))
+            for name, skill in SKILLS.items()
+            if skill.base_weight > 0
+        }
+    return _base_weights_cache
+
+
+# Regime-aware weight adjustments for current agents.
+# Mapped to pendulum labels (extreme_fear/fear/neutral/greed/extreme_greed).
 _REGIME_BOOSTS: dict[str, dict[str, Decimal]] = {
-    "extreme_fear": {"auditor": Decimal("0.05"), "marks": Decimal("0.05"), "soros": Decimal("0.05")},
-    "fear": {"auditor": Decimal("0.03"), "marks": Decimal("0.03")},
+    "extreme_fear": {
+        "auditor": Decimal("0.06"), "dalio": Decimal("0.03"),
+        "lynch": Decimal("-0.04"), "simons": Decimal("-0.03"), "soros": Decimal("-0.02"),
+    },
+    "fear": {
+        "auditor": Decimal("0.04"), "dalio": Decimal("0.02"),
+        "soros": Decimal("-0.03"), "druckenmiller": Decimal("-0.03"),
+    },
     "neutral": {},
-    "greed": {"simons": Decimal("0.03"), "warren": Decimal("0.03")},
-    "extreme_greed": {"forensic": Decimal("0.05"), "bogle": Decimal("0.05")},
+    "greed": {
+        "soros": Decimal("0.03"), "druckenmiller": Decimal("0.02"),
+        "auditor": Decimal("-0.03"), "warren": Decimal("-0.02"),
+    },
+    "extreme_greed": {
+        "soros": Decimal("0.03"), "druckenmiller": Decimal("0.02"),
+        "auditor": Decimal("-0.03"), "warren": Decimal("-0.02"),
+    },
 }
 
 
@@ -193,7 +214,7 @@ def regime_weights(regime: str, agents: list[str] | None = None) -> dict[str, De
     """
     boosts = _REGIME_BOOSTS.get(regime, {})
     raw: dict[str, Decimal] = {}
-    for name, base in _BASE_WEIGHTS.items():
+    for name, base in _get_base_weights().items():
         raw[name] = base + boosts.get(name, Decimal("0"))
 
     # Filter to only requested agents
