@@ -664,12 +664,11 @@ async def trigger_board(
     """Re-evaluate advisory board with existing agent stances."""
     from investmentology.advisory.board import AdvisoryBoard
     from investmentology.advisory.cio import CIOSynthesizer
-    from investmentology.models.signal import AgentStance
     from investmentology.pipeline.builder import (
         build_analysis_request,
         reconstruct_signal_sets,
     )
-    from investmentology.verdict import synthesize
+    from investmentology.verdict import AgentStance, synthesize
 
     ticker = body.ticker.upper()
 
@@ -782,12 +781,11 @@ async def trigger_board_hypothetical(
 
     from investmentology.advisory.board import AdvisoryBoard
     from investmentology.advisory.cio import CIOSynthesizer
-    from investmentology.models.signal import AgentStance
     from investmentology.pipeline.builder import (
         build_analysis_request,
         reconstruct_signal_sets,
     )
-    from investmentology.verdict import synthesize
+    from investmentology.verdict import AgentStance, synthesize
 
     ticker = body.ticker.upper()
 
