@@ -457,7 +457,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         </div>
         <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "var(--space-xs)" }}>
           <MarketStatus />
-          {f && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
+          {f && f.price != null && <div style={{ fontSize: "var(--text-lg)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>${f.price.toFixed(2)}</div>}
           {f && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatCap(f.market_cap)}</div>}
           {p?.employees && <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{p.employees.toLocaleString()} employees</div>}
           <div style={{ display: "flex", gap: "var(--space-sm)", marginTop: "var(--space-xs)" }}>
@@ -563,7 +563,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
       )}
 
       {/* Target Price Range */}
-      {data.targetPriceRange && data.targetPriceRange.prices.length >= 2 && f && (
+      {data.targetPriceRange && data.targetPriceRange.prices.length >= 2 && f && f.price != null && (
         <CollapsiblePanel
           title="Fair Value Range"
           preview={

@@ -33,20 +33,27 @@ class StockService:
         fundamentals = registry.get_latest_fundamentals(ticker)
         fund_data = None
         if fundamentals:
+            def _f(v):
+                """Safely convert to float, returning None for NULL/NaN."""
+                if v is None:
+                    return None
+                fv = float(v)
+                return None if fv != fv else fv  # NaN check
+
             fund_data = {
                 "ticker": fundamentals.ticker,
                 "fetched_at": str(fundamentals.fetched_at),
-                "market_cap": float(fundamentals.market_cap),
-                "operating_income": float(fundamentals.operating_income),
-                "revenue": float(fundamentals.revenue),
-                "net_income": float(fundamentals.net_income),
-                "total_debt": float(fundamentals.total_debt),
-                "cash": float(fundamentals.cash),
+                "market_cap": _f(fundamentals.market_cap),
+                "operating_income": _f(fundamentals.operating_income),
+                "revenue": _f(fundamentals.revenue),
+                "net_income": _f(fundamentals.net_income),
+                "total_debt": _f(fundamentals.total_debt),
+                "cash": _f(fundamentals.cash),
                 "shares_outstanding": fundamentals.shares_outstanding,
-                "price": float(fundamentals.price),
-                "earnings_yield": float(fundamentals.earnings_yield) if fundamentals.earnings_yield else None,
-                "roic": float(fundamentals.roic) if fundamentals.roic else None,
-                "enterprise_value": float(fundamentals.enterprise_value),
+                "price": _f(fundamentals.price),
+                "earnings_yield": _f(fundamentals.earnings_yield),
+                "roic": _f(fundamentals.roic),
+                "enterprise_value": _f(fundamentals.enterprise_value),
             }
 
         # Signals
