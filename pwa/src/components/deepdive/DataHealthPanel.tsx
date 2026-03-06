@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { Badge } from "../shared/Badge";
 import { useDataReport } from "../../hooks/useDataReport";
 import { useTriggerAgent, useTriggerBoard, useTriggerFull } from "../../hooks/usePipelineTrigger";
 import type { DataReportAgentImpact } from "../../types/models";
+
+interface DataHealthPanelProps {
+  ticker: string;
+  /** Called when pipeline activity starts/stops — drives the activity pill */
+  onActivity?: (active: boolean, error?: string | null) => void;
+}
 
 const DATA_LABELS: Record<string, string> = {
   fundamentals: "Fundamentals",
@@ -184,12 +190,61 @@ function AgentRow({
   );
 }
 
-export function DataHealthPanel({ ticker }: { ticker: string }) {
-  const { report, loading } = useDataReport(ticker);
+export function DataHealthPanel({ ticker, onActivity }: DataHealthPanelProps) {
+  const [isActive, setIsActive] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  // Poll faster (5s) when pipeline is active, otherwise 30s
+  const { report, loading } = useDataReport(ticker, isActive ? 5_000 : 30_000);
+
   const triggerAgent = useTriggerAgent();
   const triggerBoard = useTriggerBoard();
   const triggerFull = useTriggerFull();
   const [boardTriggering, setBoardTriggering] = useState(false);
+
+  // Notify parent of activity changes
+  useEffect(() => {
+    onActivity?.(isActive, lastError);
+  }, [isActive, lastError, onActivity]);
+
+  function handleRefreshAll() {
+    setLastError(null);
+    setIsActive(true);
+    onActivity?.(true);
+    triggerFull.mutate(
+      { tickers: [ticker], force_data_refresh: true },
+      {
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : "Trigger failed";
+          setLastError(msg);
+          onActivity?.(true, msg);
+        },
+      },
+    );
+  }
+
+  function handleBoardReeval() {
+    setLastError(null);
+    setIsActive(true);
+    onActivity?.(true);
+    setBoardTriggering(true);
+    triggerBoard.mutate(
+      { ticker },
+      {
+        onSuccess: () => {
+          setBoardTriggering(false);
+          setIsActive(false);
+          onActivity?.(false);
+        },
+        onError: (err) => {
+          setBoardTriggering(false);
+          const msg = err instanceof Error ? err.message : "Board re-evaluation failed";
+          setLastError(msg);
+          onActivity?.(true, msg);
+        },
+      },
+    );
+  }
 
   if (loading || !report) {
     return (
@@ -223,6 +278,34 @@ export function DataHealthPanel({ ticker }: { ticker: string }) {
       variant={report.cappedAgentCount > 0 ? "warning" : "default"}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
+        {/* Error banner */}
+        {lastError && (
+          <div
+            style={{
+              padding: "var(--space-sm) var(--space-md)",
+              borderRadius: "var(--radius-sm)",
+              background: "rgba(248,113,113,0.1)",
+              border: "1px solid rgba(248,113,113,0.2)",
+              color: "var(--color-error)",
+              fontSize: "var(--text-xs)",
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-sm)",
+            }}
+          >
+            <span style={{ flex: 1 }}>{lastError}</span>
+            <button
+              onClick={() => { setLastError(null); setIsActive(false); onActivity?.(false); }}
+              style={{
+                background: "none", border: "none", color: "var(--color-error)",
+                cursor: "pointer", padding: 2, fontSize: "var(--text-xs)",
+              }}
+            >
+              dismiss
+            </button>
+          </div>
+        )}
+
         {/* Section 1: Data Availability */}
         <div>
           <div
@@ -261,8 +344,11 @@ export function DataHealthPanel({ ticker }: { ticker: string }) {
                 <span
                   style={{
                     fontFamily: "var(--font-mono)",
-                    color: "var(--color-text-muted)",
+                    color: report.available[key]
+                      ? "var(--color-text-muted)"
+                      : "var(--color-error)",
                     fontSize: 10,
+                    fontWeight: report.available[key] ? 400 : 500,
                   }}
                 >
                   {report.available[key]
@@ -276,22 +362,34 @@ export function DataHealthPanel({ ticker }: { ticker: string }) {
           </div>
 
           <button
-            onClick={() => triggerFull.mutate({ tickers: [ticker], force_data_refresh: true })}
+            onClick={handleRefreshAll}
             disabled={triggerFull.isPending}
             style={{
               marginTop: "var(--space-md)",
               padding: "var(--space-xs) var(--space-md)",
               borderRadius: "var(--radius-sm)",
-              background: "var(--color-surface-2)",
+              background: triggerFull.isPending
+                ? "var(--color-surface-2)"
+                : isActive
+                  ? "var(--color-surface-2)"
+                  : "var(--color-accent-ghost)",
               border: "none",
-              color: "var(--color-text-secondary)",
+              color: triggerFull.isPending
+                ? "var(--color-text-muted)"
+                : isActive
+                  ? "var(--color-accent-bright)"
+                  : "var(--color-accent-bright)",
               cursor: triggerFull.isPending ? "wait" : "pointer",
               fontSize: "var(--text-xs)",
-              fontWeight: 500,
+              fontWeight: 600,
               width: "100%",
             }}
           >
-            {triggerFull.isPending ? "Refreshing..." : "Refresh All Data"}
+            {triggerFull.isPending
+              ? "Queuing..."
+              : isActive
+                ? "Pipeline Active — Refresh All Data"
+                : "Refresh All Data"}
           </button>
         </div>
 
@@ -335,13 +433,7 @@ export function DataHealthPanel({ ticker }: { ticker: string }) {
           </div>
           <div style={{ display: "flex", gap: "var(--space-sm)" }}>
             <button
-              onClick={() => {
-                setBoardTriggering(true);
-                triggerBoard.mutate(
-                  { ticker },
-                  { onSettled: () => setBoardTriggering(false) },
-                );
-              }}
+              onClick={handleBoardReeval}
               disabled={boardTriggering}
               style={{
                 flex: 1,

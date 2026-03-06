@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../utils/apiClient";
 import type { DataReport } from "../types/models";
 
-export function useDataReport(ticker: string | null) {
+export function useDataReport(ticker: string | null, pollIntervalMs = 30_000) {
   const query = useQuery({
     queryKey: ["pipeline", "data-report", ticker],
     queryFn: () =>
@@ -10,7 +10,7 @@ export function useDataReport(ticker: string | null) {
         `/api/invest/pipeline/data-report/${encodeURIComponent(ticker!)}`,
       ),
     enabled: !!ticker,
-    refetchInterval: 30_000,
+    refetchInterval: pollIntervalMs,
     refetchIntervalInBackground: false,
   });
   return {

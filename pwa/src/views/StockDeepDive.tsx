@@ -27,6 +27,7 @@ import { CollapsiblePanel } from "../components/deepdive/CollapsiblePanel";
 import { VerdictMathPanel } from "../components/deepdive/VerdictMathPanel";
 import { DataHealthPanel } from "../components/deepdive/DataHealthPanel";
 import { EnrichmentPanel } from "../components/deepdive/EnrichmentPanel";
+import { PipelineActivityPill } from "../components/deepdive/PipelineActivityPill";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
 
@@ -283,6 +284,8 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [closeExitPrice, setCloseExitPrice] = useState("");
   const [refetchKey, setRefetchKey] = useState(0);
+  const [pipelineActive, setPipelineActive] = useState(false);
+  const [pipelineTriggerError, setPipelineTriggerError] = useState<string | null>(null);
 
   const refetchStock = useCallback(() => {
     setRefetchKey((k) => k + 1);
@@ -417,6 +420,15 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
         }}>
           {addStatus}
         </div>
+      )}
+
+      {/* Pipeline Activity Pill — sticky at top when active */}
+      {pipelineActive && (
+        <PipelineActivityPill
+          ticker={data.ticker}
+          onDismiss={() => { setPipelineActive(false); setPipelineTriggerError(null); }}
+          triggerError={pipelineTriggerError}
+        />
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -624,7 +636,13 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
 
       {data.verdict && <AgentAnalysisPanel verdict={data.verdict} signalData={data.signals} />}
       {data.verdict && <VerdictMathPanel verdict={data.verdict} />}
-      <DataHealthPanel ticker={data.ticker} />
+      <DataHealthPanel
+        ticker={data.ticker}
+        onActivity={(active, error) => {
+          setPipelineActive(active);
+          setPipelineTriggerError(error ?? null);
+        }}
+      />
       <EnrichmentPanel news={news} buzz={data.buzz} earningsMomentum={data.earningsMomentum} />
       <MetricsPanel profile={p} quantGate={data.quantGate} fundamentals={f} />
       <RiskPanel verdict={data.verdict} competence={data.competence} adversarial={data.verdict?.adversarialResult ?? null} />

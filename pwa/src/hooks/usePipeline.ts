@@ -44,14 +44,14 @@ export function usePipelineTickers(cycleId?: string) {
   };
 }
 
-export function usePipelineTickerDetail(ticker: string | null) {
+export function usePipelineTickerDetail(ticker: string | null, pollIntervalMs = 10_000) {
   const query = useQuery({
     queryKey: ["pipeline", "ticker", ticker],
     queryFn: () => apiFetch<PipelineTickerDetail>(
       `/api/invest/pipeline/ticker/${encodeURIComponent(ticker!)}`,
     ),
     enabled: !!ticker,
-    refetchInterval: 10_000,
+    refetchInterval: pollIntervalMs,
     refetchIntervalInBackground: false,
   });
   return {
