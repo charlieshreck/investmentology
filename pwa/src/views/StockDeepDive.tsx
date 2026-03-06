@@ -24,6 +24,7 @@ import { PositionPanel } from "../components/deepdive/PositionPanel";
 import { CompetencePanel } from "../components/deepdive/CompetencePanel";
 import { ResearchBriefingPanel } from "../components/deepdive/ResearchBriefingPanel";
 import { CollapsiblePanel } from "../components/deepdive/CollapsiblePanel";
+import { VerdictMathPanel } from "../components/deepdive/VerdictMathPanel";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
 
@@ -138,6 +139,21 @@ export interface VerdictData {
   boardAdjustedVerdict: string | null;
   adversarialResult?: AdversarialResult | null;
   createdAt: string | null;
+  // Batch 8: verdict transparency fields
+  verdictMargin?: number | null;
+  convictionGap?: boolean | null;
+  headcountSummary?: string | null;
+  positionType?: string | null;
+  regimeLabel?: string | null;
+  watchlistReason?: string | null;
+  watchlistGraduationTrigger?: string | null;
+  agentContributions?: Array<{
+    name: string;
+    weight: number;
+    confidence: number;
+    sentiment: number;
+    votePower: number;
+  }> | null;
 }
 
 export interface MoatData {
@@ -605,6 +621,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
          ═══════════════════════════════════════════════════════════════════ */}
 
       {data.verdict && <AgentAnalysisPanel verdict={data.verdict} signalData={data.signals} />}
+      {data.verdict && <VerdictMathPanel verdict={data.verdict} />}
       <MetricsPanel profile={p} quantGate={data.quantGate} fundamentals={f} />
       <RiskPanel verdict={data.verdict} competence={data.competence} adversarial={data.verdict?.adversarialResult ?? null} />
       {data.position && (

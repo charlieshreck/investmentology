@@ -84,25 +84,29 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 
 #### Agent Skills Framework
 
-All 8 investment agents + Data Analyst defined as `AgentSkill` dataclass in `agents/skills.py`. A single `AgentRunner` class (`agents/runner.py`) replaces all individual agent classes.
+9 investment agents + Data Analyst + conditional specialists defined as `AgentSkill` dataclass in `agents/skills.py`. A single `AgentRunner` class (`agents/runner.py`) replaces all individual agent classes.
 
 | Agent | Role | Provider | Model | CLI Screen | Weight |
 |-------|------|----------|-------|------------|--------|
 | **Warren** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.18 |
-| **Auditor** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.14 |
-| **Klarman** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.14 |
-| **Soros** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.14 |
-| **Druckenmiller** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.12 |
+| **Auditor** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.17 |
+| **Klarman** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.12 |
+| **Soros** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.10 |
+| **Druckenmiller** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.11 |
 | **Dalio** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.12 |
 | **Data Analyst** | Validator | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.0 |
-| **Simons** | Scout | Groq API | llama-3.3-70b | None (API) | 0.08 |
-| **Lynch** | Scout | DeepSeek API | deepseek-reasoner | None (API) | 0.08 |
+| **Simons** | Scout | Groq API | llama-3.3-70b | None (API) | 0.07 |
+| **Lynch** | Scout | DeepSeek API | deepseek-reasoner | None (API) | 0.07 |
+| **Income Analyst** | Scout | DeepSeek API | deepseek-chat | None (API) | 0.06 |
+| **Sector Specialist** | Conditional | DeepSeek API | deepseek-chat | None (API) | 0.05 |
+
+**Conditional agents**: Income Analyst activates for dividend yield > 1.5% or PERMANENT positions. Sector Specialist activates for Healthcare, Financial Services, Energy, Real Estate, Technology sectors.
 
 #### Pipeline Flow
 
 ```
 Controller (K8s, 60s poll) monitors invest.pipeline_state:
-  data_fetch → data_validate (Data Analyst) → agent:{name} (8 agents)
+  data_fetch → data_validate (Data Analyst) → agent:{name} (9+ agents)
     → debate (if <75% consensus) → synthesis (CIO verdict)
 ```
 

@@ -25,6 +25,7 @@ const Watchlist = lazy(() => import("./views/Watchlist").then(m => ({ default: m
 const Decisions = lazy(() => import("./views/Decisions").then(m => ({ default: m.Decisions })));
 const Analyse = lazy(() => import("./views/Analyse").then(m => ({ default: m.Analyse })));
 const Learning = lazy(() => import("./views/Learning").then(m => ({ default: m.Learning })));
+const Calibration = lazy(() => import("./views/Calibration").then(m => ({ default: m.Calibration })));
 const SystemHealth = lazy(() => import("./views/SystemHealth").then(m => ({ default: m.SystemHealth })));
 const Agents = lazy(() => import("./views/Agents").then(m => ({ default: m.Agents })));
 const Pipeline = lazy(() => import("./views/Pipeline").then(m => ({ default: m.Pipeline })));
@@ -207,6 +208,7 @@ function AppShell({ offline }: { offline: boolean }) {
             <Route path="/log" element={<ViewErrorBoundary viewName="Decisions"><Suspense fallback={<ViewLoader />}><PageTransition><Decisions /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/analyze" element={<ViewErrorBoundary viewName="Analyse"><Suspense fallback={<ViewLoader />}><PageTransition><Analyse /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/learning" element={<ViewErrorBoundary viewName="Learning"><Suspense fallback={<ViewLoader />}><PageTransition><Learning /></PageTransition></Suspense></ViewErrorBoundary>} />
+            <Route path="/calibration" element={<ViewErrorBoundary viewName="Calibration"><Suspense fallback={<ViewLoader />}><PageTransition><Calibration /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/recommendations" element={<ViewErrorBoundary viewName="Recommendations"><Suspense fallback={<ViewLoader />}><PageTransition><Recommendations /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/agents" element={<ViewErrorBoundary viewName="Agents"><Suspense fallback={<ViewLoader />}><PageTransition><Agents /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/pipeline" element={<ViewErrorBoundary viewName="Pipeline"><Suspense fallback={<ViewLoader />}><PageTransition><Pipeline /></PageTransition></Suspense></ViewErrorBoundary>} />
