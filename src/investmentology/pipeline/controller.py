@@ -398,6 +398,9 @@ class PipelineController:
     def _run_enrichment(self, cycle_id: UUID, ticker: str) -> tuple[int, int]:
         """Run all enrichment providers for a ticker, caching results individually.
 
+        Uses a two-tier approach: primary providers (Finnhub/FRED/EDGAR) first,
+        then SearXNG web search fallback for any keys that returned None.
+
         Returns (success_count, failure_count). Each provider failure is logged
         with the specific data key so silent data gaps become visible.
         """
@@ -430,39 +433,117 @@ class PipelineController:
                 ("institutional_context", lambda t=ticker: self._fetch_institutional(t)),
             ])
 
+        # Track which keys got no data from primary providers
+        missing_keys: list[str] = []
+
         for cache_key, fetcher in providers:
             try:
                 result = fetcher()
                 if result is not None:
-                    # Add a fetched_at timestamp for data age tracking
-                    if isinstance(result, dict) and "fetched_at" not in result:
-                        from datetime import datetime, timezone
-                        result["fetched_at"] = datetime.now(timezone.utc).isoformat()
-                    elif isinstance(result, list):
-                        # Wrap lists in a dict with metadata
-                        from datetime import datetime, timezone
-                        result = {
-                            "items": result,
-                            "count": len(result),
-                            "fetched_at": datetime.now(timezone.utc).isoformat(),
-                        }
+                    result = self._stamp_result(result)
                     state.store_data_cache(
                         self.db, cycle_id, ticker, cache_key, result,
                     )
                     ok += 1
                 else:
-                    logger.warning(
-                        "Enrichment %s returned None for %s", cache_key, ticker,
+                    missing_keys.append(cache_key)
+            except Exception as exc:
+                missing_keys.append(cache_key)
+                logger.warning(
+                    "Primary enrichment %s failed for %s: %s",
+                    cache_key, ticker, str(exc)[:200],
+                )
+
+        # ── Web search fallbacks for missing keys ───────────────────
+        if missing_keys:
+            web_ok, web_fail = self._run_web_fallbacks(
+                cycle_id, ticker, missing_keys,
+            )
+            ok += web_ok
+            fail += web_fail
+
+        return ok, fail
+
+    def _run_web_fallbacks(
+        self, cycle_id: UUID, ticker: str, missing_keys: list[str],
+    ) -> tuple[int, int]:
+        """Try SearXNG web search for enrichment keys that primary providers missed.
+
+        Returns (success_count, failure_count).
+        """
+        from investmentology.data.web_search_provider import WebSearchProvider
+
+        ok = 0
+        fail = 0
+
+        try:
+            web = WebSearchProvider()
+        except Exception:
+            logger.warning("WebSearchProvider init failed, skipping fallbacks")
+            return 0, len(missing_keys)
+
+        # Map cache_key → web provider method
+        fallbacks: dict[str, callable] = {
+            "news_context": lambda: web.get_news(ticker),
+            "earnings_context": lambda: web.get_earnings(ticker),
+            "insider_context": lambda: web.get_insider_transactions(ticker),
+            "social_sentiment": lambda: web.get_social_sentiment(ticker),
+            "analyst_ratings": lambda: web.get_analyst_ratings(ticker),
+            "short_interest": lambda: web.get_short_interest(ticker),
+            "filing_context": lambda: web.get_filing_context(ticker),
+        }
+
+        for cache_key in missing_keys:
+            fetcher = fallbacks.get(cache_key)
+            if fetcher is None:
+                # No web fallback for this key (e.g. macro_context, institutional_context)
+                fail += 1
+                logger.warning(
+                    "Enrichment %s returned None for %s (no web fallback)",
+                    cache_key, ticker,
+                )
+                continue
+
+            try:
+                result = fetcher()
+                if result is not None:
+                    result = self._stamp_result(result)
+                    state.store_data_cache(
+                        self.db, cycle_id, ticker, cache_key, result,
                     )
+                    ok += 1
+                    logger.info(
+                        "Web search fallback filled %s for %s", cache_key, ticker,
+                    )
+                else:
                     fail += 1
+                    logger.warning(
+                        "Enrichment %s returned None for %s (web fallback also empty)",
+                        cache_key, ticker,
+                    )
             except Exception as exc:
                 fail += 1
-                logger.error(
-                    "Enrichment %s FAILED for %s: %s",
+                logger.warning(
+                    "Web fallback %s failed for %s: %s",
                     cache_key, ticker, str(exc)[:200],
                 )
 
         return ok, fail
+
+    @staticmethod
+    def _stamp_result(result: object) -> object:
+        """Add fetched_at timestamp and wrap lists in metadata dict."""
+        from datetime import datetime, timezone
+
+        if isinstance(result, dict) and "fetched_at" not in result:
+            result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+        elif isinstance(result, list):
+            result = {
+                "items": result,
+                "count": len(result),
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
+        return result
 
     def _fetch_institutional(self, ticker: str):
         """Fetch institutional holders with dict unwrapping."""
