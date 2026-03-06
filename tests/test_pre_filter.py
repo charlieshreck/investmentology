@@ -5,10 +5,7 @@ Validates each hard cutoff rule, sector exemptions, and edge cases.
 
 from __future__ import annotations
 
-import pytest
-
 from investmentology.pipeline.pre_filter import (
-    PreFilterResult,
     deterministic_pre_filter,
 )
 

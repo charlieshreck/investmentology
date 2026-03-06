@@ -364,15 +364,21 @@ class TestSorosRunner:
         # macro_context is in optional_data but not set on basic_request
 
     def test_parse_response_valid_json(
-        self, runner: AgentRunner, basic_request: AnalysisRequest,
+        self, runner: AgentRunner, request_with_macro: AnalysisRequest,
     ) -> None:
-        result = runner.parse_response(SOROS_RESPONSE, basic_request)
+        result = runner.parse_response(SOROS_RESPONSE, request_with_macro)
         assert isinstance(result, AgentSignalSet)
         assert result.agent_name == "soros"
         assert result.confidence == Decimal("0.72")
         assert len(result.signals.signals) == 3
         assert result.signals.has(SignalTag.REGIME_BULL)
         assert result.signals.has(SignalTag.SECTOR_ROTATION_INTO)
+
+    def test_data_gate_caps_confidence_without_macro(
+        self, runner: AgentRunner, basic_request: AnalysisRequest,
+    ) -> None:
+        result = runner.parse_response(SOROS_RESPONSE, basic_request)
+        assert result.confidence == Decimal("0.20")
 
     def test_analyze_calls_gateway(
         self, runner: AgentRunner, request_with_macro: AnalysisRequest,
@@ -536,7 +542,7 @@ class TestSkillsRegistry:
         expected = {
             "warren", "soros", "simons", "auditor",
             "dalio", "druckenmiller", "klarman", "lynch",
-            "data_analyst",
+            "income_analyst", "data_analyst",
             "financial_health_screener", "valuation_screener",
             "growth_momentum_screener", "quality_position_screener",
         }
@@ -581,14 +587,17 @@ class TestResponseParsing:
     def test_confidence_clamped_high(
         self, runner: AgentRunner, request_with_technicals: AnalysisRequest,
     ) -> None:
-        # Use request_with_technicals to bypass Simons data gate (caps at 0.15 without technicals)
+        # Bypass all data gates: technicals (Simons) + macro (Soros/Druckenmiller/Dalio)
+        request_with_technicals.macro_context = {"cpi": 3.2, "fed_rate": 5.25, "regime": "late_cycle"}
+        # Non-held position: confidence capped at 0.90 after clamping to [0,1]
         data = {"signals": [], "confidence": 1.5, "target_price": None, "summary": "test"}
         result = runner.parse_response(json.dumps(data), request_with_technicals)
-        assert result.confidence == Decimal("1")
+        assert result.confidence == Decimal("0.90")
 
     def test_confidence_clamped_low(
         self, runner: AgentRunner, request_with_technicals: AnalysisRequest,
     ) -> None:
+        request_with_technicals.macro_context = {"cpi": 3.2, "fed_rate": 5.25, "regime": "late_cycle"}
         data = {"signals": [], "confidence": -0.5, "target_price": None, "summary": "test"}
         result = runner.parse_response(json.dumps(data), request_with_technicals)
         assert result.confidence == Decimal("0")

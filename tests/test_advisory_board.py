@@ -66,8 +66,8 @@ def _make_verdict(verdict: str = "BUY", confidence: float = 0.7, score: float = 
 
 
 def _make_opinion(
-    name: str = "dalio",
-    display: str = "Ray Dalio",
+    name: str = "risk_officer",
+    display: str = "Risk Officer",
     vote: BoardVote = BoardVote.APPROVE,
     confidence: float = 0.75,
 ) -> AdvisorOpinion:
@@ -116,7 +116,7 @@ class TestBoardVote:
 class TestAdvisorOpinion:
     def test_construction(self) -> None:
         op = _make_opinion()
-        assert op.advisor_name == "dalio"
+        assert op.advisor_name == "risk_officer"
         assert op.vote == BoardVote.APPROVE
         assert op.confidence == Decimal("0.75")
 
@@ -188,8 +188,8 @@ class TestBoardResult:
 # ---------------------------------------------------------------------------
 
 class TestBoardMembers:
-    def test_eight_members(self) -> None:
-        assert len(BOARD_MEMBERS) == 8
+    def test_six_members(self) -> None:
+        assert len(BOARD_MEMBERS) == 6
 
     def test_all_have_required_fields(self) -> None:
         for key, spec in BOARD_MEMBERS.items():
@@ -203,7 +203,10 @@ class TestBoardMembers:
             assert spec.signature_question
 
     def test_expected_members(self) -> None:
-        expected = {"dalio", "lynch", "druckenmiller", "klarman", "munger", "williams", "soros", "simons"}
+        expected = {
+            "risk_officer", "valuation_analyst", "macro_strategist",
+            "devils_advocate", "portfolio_constructor", "thesis_integrity",
+        }
         assert set(BOARD_MEMBERS.keys()) == expected
 
 
@@ -212,8 +215,8 @@ class TestBoardMembers:
 # ---------------------------------------------------------------------------
 
 class TestPairConfig:
-    def test_four_pairs(self) -> None:
-        assert len(PAIR_CONFIG) == 4
+    def test_three_pairs(self) -> None:
+        assert len(PAIR_CONFIG) == 3
 
     def test_all_members_covered(self) -> None:
         all_members = set()
@@ -240,16 +243,18 @@ class TestPairConfig:
 class TestPromptBuilders:
     def test_system_prompt_contains_both_members(self) -> None:
         prompt = _build_system_prompt(
-            BOARD_MEMBERS["soros"], BOARD_MEMBERS["druckenmiller"], "Macro",
+            BOARD_MEMBERS["risk_officer"], BOARD_MEMBERS["portfolio_constructor"],
+            "Risk & Portfolio Construction",
         )
-        assert "George Soros" in prompt
-        assert "Stanley Druckenmiller" in prompt
-        assert "soros" in prompt
-        assert "druckenmiller" in prompt
+        assert "Risk Officer" in prompt
+        assert "Portfolio Constructor" in prompt
+        assert "risk_officer" in prompt
+        assert "portfolio_constructor" in prompt
 
     def test_system_prompt_contains_json_format(self) -> None:
         prompt = _build_system_prompt(
-            BOARD_MEMBERS["munger"], BOARD_MEMBERS["klarman"], "Value",
+            BOARD_MEMBERS["valuation_analyst"], BOARD_MEMBERS["thesis_integrity"],
+            "Valuation & Thesis Integrity",
         )
         assert "APPROVE" in prompt
         assert "VETO" in prompt
@@ -277,81 +282,93 @@ class TestPromptBuilders:
 class TestParsePairResponse:
     def test_valid_json(self) -> None:
         content = json.dumps({
-            "soros": {
+            "risk_officer": {
                 "vote": "APPROVE",
                 "confidence": 0.8,
-                "assessment": "Macro supportive",
-                "key_concern": "Late cycle",
-                "key_endorsement": "Strong momentum",
-                "reasoning": "Reflexive dynamics favor the bull case."
+                "assessment": "Risk within limits",
+                "key_concern": "Concentration",
+                "key_endorsement": "Low correlation",
+                "reasoning": "Portfolio risk is manageable."
             },
-            "druckenmiller": {
+            "portfolio_constructor": {
                 "vote": "ADJUST_UP",
                 "confidence": 0.85,
-                "assessment": "Asymmetric risk/reward",
+                "assessment": "Good fit for portfolio",
                 "key_concern": None,
-                "key_endorsement": "3:1 upside",
-                "reasoning": "Catalyst imminent, size up."
+                "key_endorsement": "Diversification benefit",
+                "reasoning": "Adds uncorrelated return stream."
             }
         })
         resp = _make_llm_response(content)
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["soros"], BOARD_MEMBERS["druckenmiller"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["risk_officer"], BOARD_MEMBERS["portfolio_constructor"],
+        )
         assert len(opinions) == 2
-        assert opinions[0].advisor_name == "soros"
+        assert opinions[0].advisor_name == "risk_officer"
         assert opinions[0].vote == BoardVote.APPROVE
-        assert opinions[1].advisor_name == "druckenmiller"
+        assert opinions[1].advisor_name == "portfolio_constructor"
         assert opinions[1].vote == BoardVote.ADJUST_UP
 
     def test_markdown_fences(self) -> None:
         inner = json.dumps({
-            "munger": {"vote": "VETO", "confidence": 0.9, "assessment": "Fatal flaw",
-                       "key_concern": "Bias", "key_endorsement": None, "reasoning": "Inversion fails."},
-            "klarman": {"vote": "ADJUST_DOWN", "confidence": 0.7, "assessment": "Thin margin",
-                        "key_concern": "Downside", "key_endorsement": None, "reasoning": "Need 30%."},
+            "valuation_analyst": {"vote": "VETO", "confidence": 0.9, "assessment": "Overvalued",
+                       "key_concern": "DCF gap", "key_endorsement": None, "reasoning": "30% overvalued."},
+            "thesis_integrity": {"vote": "ADJUST_DOWN", "confidence": 0.7, "assessment": "Thesis weakening",
+                        "key_concern": "Catalyst passed", "key_endorsement": None, "reasoning": "Thesis eroding."},
         })
         content = f"```json\n{inner}\n```"
         resp = _make_llm_response(content)
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["munger"], BOARD_MEMBERS["klarman"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["valuation_analyst"], BOARD_MEMBERS["thesis_integrity"],
+        )
         assert len(opinions) == 2
         assert opinions[0].vote == BoardVote.VETO
 
     def test_malformed_json(self) -> None:
         resp = _make_llm_response("This is not JSON at all")
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["dalio"], BOARD_MEMBERS["williams"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["macro_strategist"], BOARD_MEMBERS["devils_advocate"],
+        )
         assert opinions == []
 
     def test_missing_member_key(self) -> None:
         content = json.dumps({
-            "dalio": {"vote": "APPROVE", "confidence": 0.7, "assessment": "ok",
+            "macro_strategist": {"vote": "APPROVE", "confidence": 0.7, "assessment": "ok",
                       "key_concern": None, "key_endorsement": None, "reasoning": "ok"},
-            # williams is missing
+            # devils_advocate is missing
         })
         resp = _make_llm_response(content)
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["dalio"], BOARD_MEMBERS["williams"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["macro_strategist"], BOARD_MEMBERS["devils_advocate"],
+        )
         assert len(opinions) == 1
-        assert opinions[0].advisor_name == "dalio"
+        assert opinions[0].advisor_name == "macro_strategist"
 
     def test_invalid_vote_defaults_to_approve(self) -> None:
         content = json.dumps({
-            "lynch": {"vote": "MAYBE", "confidence": 0.5, "assessment": "Unsure",
+            "risk_officer": {"vote": "MAYBE", "confidence": 0.5, "assessment": "Unsure",
                       "key_concern": None, "key_endorsement": None, "reasoning": "Hmm."},
-            "simons": {"vote": "APPROVE", "confidence": 0.6, "assessment": "Data ok",
-                       "key_concern": None, "key_endorsement": None, "reasoning": "Stats fine."},
+            "portfolio_constructor": {"vote": "APPROVE", "confidence": 0.6, "assessment": "ok",
+                       "key_concern": None, "key_endorsement": None, "reasoning": "Fine."},
         })
         resp = _make_llm_response(content)
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["lynch"], BOARD_MEMBERS["simons"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["risk_officer"], BOARD_MEMBERS["portfolio_constructor"],
+        )
         assert len(opinions) == 2
         assert opinions[0].vote == BoardVote.APPROVE  # "MAYBE" → default APPROVE
 
     def test_confidence_clamped(self) -> None:
         content = json.dumps({
-            "dalio": {"vote": "APPROVE", "confidence": 1.5, "assessment": "Over-confident",
+            "macro_strategist": {"vote": "APPROVE", "confidence": 1.5, "assessment": "Over-confident",
                       "key_concern": None, "key_endorsement": None, "reasoning": "Too sure."},
-            "williams": {"vote": "APPROVE", "confidence": -0.3, "assessment": "Under",
+            "devils_advocate": {"vote": "APPROVE", "confidence": -0.3, "assessment": "Under",
                          "key_concern": None, "key_endorsement": None, "reasoning": "Unsure."},
         })
         resp = _make_llm_response(content)
-        opinions = _parse_pair_response(resp, BOARD_MEMBERS["dalio"], BOARD_MEMBERS["williams"])
+        opinions = _parse_pair_response(
+            resp, BOARD_MEMBERS["macro_strategist"], BOARD_MEMBERS["devils_advocate"],
+        )
         assert opinions[0].confidence == Decimal("1")
         assert opinions[1].confidence == Decimal("0")
 
@@ -362,56 +379,56 @@ class TestParsePairResponse:
 
 class TestVoteSynthesis:
     def test_all_approve(self) -> None:
-        opinions = [_make_opinion(name=f"adv{i}", vote=BoardVote.APPROVE) for i in range(8)]
+        opinions = [_make_opinion(name=f"adv{i}", vote=BoardVote.APPROVE) for i in range(6)]
         result = _synthesize_votes("BUY", opinions, 5000)
         assert result.original_verdict == "BUY"
         assert result.adjusted_verdict is None
         assert not result.verdict_changed
-        assert result.vote_counts["APPROVE"] == 8
+        assert result.vote_counts["APPROVE"] == 6
 
     def test_three_vetos_caps_to_watchlist(self) -> None:
         opinions = [_make_opinion(name=f"v{i}", vote=BoardVote.VETO) for i in range(3)]
-        opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(5)]
+        opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(3)]
         result = _synthesize_votes("BUY", opinions, 5000)
         assert result.adjusted_verdict == "WATCHLIST"
         assert result.veto_count == 3
 
     def test_three_vetos_no_change_if_already_below_watchlist(self) -> None:
         opinions = [_make_opinion(name=f"v{i}", vote=BoardVote.VETO) for i in range(3)]
-        opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(5)]
+        opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(3)]
         result = _synthesize_votes("REDUCE", opinions, 5000)
         # REDUCE is below WATCHLIST on the ladder, so no adjustment
         assert result.adjusted_verdict is None
 
-    def test_five_adjust_up(self) -> None:
-        opinions = [_make_opinion(name=f"u{i}", vote=BoardVote.ADJUST_UP) for i in range(5)]
+    def test_three_adjust_up(self) -> None:
+        # 3/6 = 50% threshold for adjust
+        opinions = [_make_opinion(name=f"u{i}", vote=BoardVote.ADJUST_UP) for i in range(3)]
         opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(3)]
         result = _synthesize_votes("BUY", opinions, 5000)
         assert result.adjusted_verdict == "STRONG_BUY"
 
-    def test_five_adjust_down(self) -> None:
-        opinions = [_make_opinion(name=f"d{i}", vote=BoardVote.ADJUST_DOWN) for i in range(5)]
+    def test_three_adjust_down(self) -> None:
+        opinions = [_make_opinion(name=f"d{i}", vote=BoardVote.ADJUST_DOWN) for i in range(3)]
         opinions += [_make_opinion(name=f"a{i}", vote=BoardVote.APPROVE) for i in range(3)]
         result = _synthesize_votes("BUY", opinions, 5000)
         assert result.adjusted_verdict == "ACCUMULATE"
 
     def test_mixed_no_majority(self) -> None:
+        # 6 members, no vote type reaches 3
         opinions = [
             _make_opinion(name="a1", vote=BoardVote.APPROVE),
             _make_opinion(name="a2", vote=BoardVote.APPROVE),
             _make_opinion(name="u1", vote=BoardVote.ADJUST_UP),
             _make_opinion(name="u2", vote=BoardVote.ADJUST_UP),
             _make_opinion(name="d1", vote=BoardVote.ADJUST_DOWN),
-            _make_opinion(name="d2", vote=BoardVote.ADJUST_DOWN),
             _make_opinion(name="v1", vote=BoardVote.VETO),
-            _make_opinion(name="v2", vote=BoardVote.VETO),
         ]
         result = _synthesize_votes("BUY", opinions, 5000)
         assert result.adjusted_verdict is None  # No majority
 
     def test_veto_takes_priority_over_adjust(self) -> None:
         opinions = [_make_opinion(name=f"v{i}", vote=BoardVote.VETO) for i in range(3)]
-        opinions += [_make_opinion(name=f"u{i}", vote=BoardVote.ADJUST_UP) for i in range(5)]
+        opinions += [_make_opinion(name=f"u{i}", vote=BoardVote.ADJUST_UP) for i in range(3)]
         result = _synthesize_votes("BUY", opinions, 5000)
         # Veto check comes first
         assert result.adjusted_verdict == "WATCHLIST"
@@ -460,8 +477,8 @@ class TestVerdictShift:
 class TestCIOPrompts:
     def test_system_prompt_has_conflict_patterns(self) -> None:
         prompt = _build_cio_system_prompt()
-        assert "Value Trap" in prompt
-        assert "Growth Mispriced" in prompt
+        assert "Risk vs Opportunity" in prompt
+        assert "Macro vs Micro" in prompt
         assert "Forensic Veto" in prompt
 
     def test_user_prompt_has_opinions(self) -> None:
@@ -472,7 +489,7 @@ class TestCIOPrompts:
             vote_counts={"APPROVE": 1},
         )
         prompt = _build_cio_user_prompt(verdict, board_result, verdict.agent_stances, None)
-        assert "Ray Dalio" in prompt
+        assert "Risk Officer" in prompt
         assert "APPROVE" in prompt
 
 
@@ -561,7 +578,7 @@ class TestFallbackNarrative:
 class TestConvene:
     @pytest.mark.asyncio
     async def test_full_convene_success(self) -> None:
-        """All 4 pairs succeed — should get 8 opinions."""
+        """All 3 pairs succeed — should get 6 opinions."""
         gateway = MagicMock()
 
         # Each pair returns valid JSON for its 2 members
@@ -592,16 +609,16 @@ class TestConvene:
 
         result = await board.convene(verdict, verdict.agent_stances, None, request)
 
-        assert len(result.opinions) == 8
+        assert len(result.opinions) == 6
         assert result.original_verdict == "BUY"
         assert all(op.vote == BoardVote.APPROVE for op in result.opinions)
 
     @pytest.mark.asyncio
     async def test_one_pair_failure(self) -> None:
-        """One pair fails — should get 6 opinions, not crash."""
+        """One pair fails — should get 4 opinions, not crash."""
         gateway = MagicMock()
 
-        # Build responses for all 4 pairs; the mock will track which
+        # Build responses for all 3 pairs; the mock will track which
         # system_prompt belongs to which pair via the theme keyword.
         pair_responses: dict[str, str] = {}
         for pair_cfg in PAIR_CONFIG:
@@ -614,7 +631,7 @@ class TestConvene:
             })
             pair_responses[pair_cfg["theme"]] = content
 
-        fail_theme = PAIR_CONFIG[0]["theme"]  # "Macro Conviction"
+        fail_theme = PAIR_CONFIG[0]["theme"]
 
         async def mock_call(**kwargs):
             sp = kwargs.get("system_prompt", "")
@@ -633,8 +650,8 @@ class TestConvene:
 
         result = await board.convene(verdict, verdict.agent_stances, None, request)
 
-        # First pair failed, 3 pairs × 2 = 6 opinions
-        assert len(result.opinions) == 6
+        # First pair failed, 2 pairs × 2 = 4 opinions
+        assert len(result.opinions) == 4
 
     @pytest.mark.asyncio
     async def test_all_pairs_fail(self) -> None:

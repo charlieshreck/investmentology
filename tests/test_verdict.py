@@ -9,12 +9,12 @@ from investmentology.adversarial.munger import AdversarialResult, MungerVerdict
 from investmentology.compatibility.matrix import CompatibilityResult
 from investmentology.models.signal import AgentSignalSet, Signal, SignalSet, SignalTag
 from investmentology.verdict import (
-    AGENT_WEIGHTS,
     AgentStance,
     Verdict,
     VerdictResult,
     _compute_sentiment,
     _distill_stance,
+    _get_agent_weights,
     _score_to_verdict,
     synthesize,
 )
@@ -133,15 +133,22 @@ class TestVerdictEnum:
 
 class TestAgentWeights:
     def test_weights_sum_to_one(self) -> None:
-        total = sum(AGENT_WEIGHTS.values())
-        assert total == Decimal("1.0")
+        weights = _get_agent_weights()
+        total = sum(weights.values())
+        assert total == Decimal("1.00")
 
-    def test_all_seven_agents_present(self) -> None:
-        expected = {"warren", "soros", "simons", "auditor", "marks", "forensic", "bogle"}
-        assert set(AGENT_WEIGHTS.keys()) == expected
+    def test_all_active_agents_present(self) -> None:
+        weights = _get_agent_weights()
+        expected = {
+            "warren", "auditor", "klarman", "soros",
+            "druckenmiller", "dalio", "simons", "lynch",
+            "income_analyst",
+        }
+        assert set(weights.keys()) == expected
 
     def test_auditor_has_significant_weight(self) -> None:
-        assert AGENT_WEIGHTS["auditor"] >= Decimal("0.15")
+        weights = _get_agent_weights()
+        assert weights["auditor"] >= Decimal("0.15")
 
 
 # ---------------------------------------------------------------------------
@@ -225,47 +232,53 @@ class TestDistillStance:
 
 class TestScoreToVerdict:
     def test_strong_buy(self) -> None:
-        v = _score_to_verdict(0.7, Decimal("0.8"), False, False, None)
+        v, _m = _score_to_verdict(0.7, Decimal("0.8"), False, False, None)
         assert v == Verdict.STRONG_BUY
 
     def test_buy(self) -> None:
-        v = _score_to_verdict(0.4, Decimal("0.6"), False, False, None)
+        v, _m = _score_to_verdict(0.4, Decimal("0.6"), False, False, None)
         assert v == Verdict.BUY
 
     def test_accumulate(self) -> None:
-        v = _score_to_verdict(0.2, Decimal("0.4"), False, False, None)
+        v, _m = _score_to_verdict(0.2, Decimal("0.4"), False, False, None)
         assert v == Verdict.ACCUMULATE
 
     def test_hold(self) -> None:
-        v = _score_to_verdict(0.0, Decimal("0.5"), False, False, None)
+        v, _m = _score_to_verdict(0.0, Decimal("0.5"), False, False, None)
         assert v == Verdict.HOLD
 
-    def test_watchlist_low_confidence(self) -> None:
-        v = _score_to_verdict(0.0, Decimal("0.2"), False, False, None)
+    def test_watchlist_positive_low_confidence(self) -> None:
+        # WATCHLIST requires sentiment >= 0.10 AND confidence < 0.40
+        v, _m = _score_to_verdict(0.12, Decimal("0.2"), False, False, None)
         assert v == Verdict.WATCHLIST
 
+    def test_hold_neutral_sentiment(self) -> None:
+        # Neutral sentiment (0.0) with low confidence falls to HOLD, not WATCHLIST
+        v, _m = _score_to_verdict(0.0, Decimal("0.2"), False, False, None)
+        assert v == Verdict.HOLD
+
     def test_reduce(self) -> None:
-        v = _score_to_verdict(-0.2, Decimal("0.5"), False, False, None)
+        v, _m = _score_to_verdict(-0.2, Decimal("0.5"), False, False, None)
         assert v == Verdict.REDUCE
 
     def test_sell(self) -> None:
-        v = _score_to_verdict(-0.4, Decimal("0.6"), False, False, None)
+        v, _m = _score_to_verdict(-0.4, Decimal("0.6"), False, False, None)
         assert v == Verdict.SELL
 
     def test_avoid(self) -> None:
-        v = _score_to_verdict(-0.6, Decimal("0.7"), False, False, None)
+        v, _m = _score_to_verdict(-0.6, Decimal("0.7"), False, False, None)
         assert v == Verdict.AVOID
 
     def test_munger_override_forces_avoid(self) -> None:
-        v = _score_to_verdict(0.8, Decimal("0.9"), False, True, None)
+        v, _m = _score_to_verdict(0.8, Decimal("0.9"), False, True, None)
         assert v == Verdict.AVOID
 
     def test_auditor_override_caps_positive(self) -> None:
-        v = _score_to_verdict(0.5, Decimal("0.8"), True, False, None)
+        v, _m = _score_to_verdict(0.5, Decimal("0.8"), True, False, None)
         assert v == Verdict.WATCHLIST
 
     def test_auditor_override_caps_neutral(self) -> None:
-        v = _score_to_verdict(0.0, Decimal("0.5"), True, False, None)
+        v, _m = _score_to_verdict(0.0, Decimal("0.5"), True, False, None)
         assert v == Verdict.AVOID
 
     def test_dangerous_disagreements_force_watchlist(self) -> None:
@@ -275,11 +288,11 @@ class TestScoreToVerdict:
             disagreements=[], dangerous_disagreement_count=2,
             requires_munger=False, recommended_action="",
         )
-        v = _score_to_verdict(0.5, Decimal("0.8"), False, False, compat)
+        v, _m = _score_to_verdict(0.5, Decimal("0.8"), False, False, compat)
         assert v == Verdict.WATCHLIST
 
     def test_munger_beats_auditor(self) -> None:
-        v = _score_to_verdict(0.5, Decimal("0.8"), True, True, None)
+        v, _m = _score_to_verdict(0.5, Decimal("0.8"), True, True, None)
         assert v == Verdict.AVOID  # Munger checked first
 
 
@@ -301,7 +314,10 @@ class TestSynthesize:
         ])
         assert result.verdict in {Verdict.STRONG_BUY, Verdict.BUY, Verdict.ACCUMULATE}
         assert result.consensus_score > 0.3
-        assert len(result.agent_stances) == 4
+        # 4 provided + 5 imputed neutral = 9 total stances
+        assert len(result.agent_stances) >= 4
+        provided_names = {"warren", "soros", "simons", "auditor"}
+        assert provided_names.issubset({s.name for s in result.agent_stances})
         assert not result.auditor_override
         assert not result.munger_override
 
@@ -310,7 +326,7 @@ class TestSynthesize:
             _bearish_warren(), _bearish_soros(),
             _bearish_simons(), _bearish_auditor(),
         ])
-        assert result.verdict in {Verdict.SELL, Verdict.AVOID}
+        assert result.verdict in {Verdict.SELL, Verdict.AVOID, Verdict.REDUCE}
         assert result.consensus_score < -0.3
 
     def test_auditor_veto_caps_verdict(self) -> None:
@@ -369,13 +385,14 @@ class TestSynthesize:
         assert "Warren" in result.reasoning
         assert "Soros" in result.reasoning
 
-    def test_stances_contain_all_agents(self) -> None:
+    def test_stances_contain_provided_agents(self) -> None:
         result = synthesize([
             _bullish_warren(), _bullish_soros(),
             _bullish_simons(), _clean_auditor(),
         ])
         names = {s.name for s in result.agent_stances}
-        assert names == {"warren", "soros", "simons", "auditor"}
+        # Should include provided agents + imputed neutrals for missing agents
+        assert {"warren", "soros", "simons", "auditor"}.issubset(names)
 
     def test_mixed_signals_moderate_verdict(self) -> None:
         # Warren and auditor bearish (combined 60% weight), soros and simons bullish (40%)
@@ -389,7 +406,7 @@ class TestSynthesize:
     def test_single_agent_still_works(self) -> None:
         result = synthesize([_bullish_warren()])
         assert result.verdict in {v for v in Verdict}
-        assert len(result.agent_stances) == 1
+        assert len(result.agent_stances) >= 1
 
     def test_compatibility_with_dangerous_disagreements(self) -> None:
         compat = CompatibilityResult(

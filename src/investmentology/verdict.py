@@ -567,7 +567,6 @@ def _classify_watchlist(
 ) -> tuple[str, str]:
     """Classify WATCHLIST sub-type and graduation trigger."""
     imputed_count = sum(1 for s in stances if "IMPUTED_NEUTRAL" in s.key_signals)
-    total = len(stances)
 
     # INSUFFICIENT_DATA: too many imputed or very low confidence
     if imputed_count >= 3 or confidence < Decimal("0.35"):

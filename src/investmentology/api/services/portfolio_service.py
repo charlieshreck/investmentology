@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -24,8 +25,6 @@ def _safe_decimal(v: Decimal | None) -> float | None:
     except (InvalidOperation, ValueError, OverflowError):
         return None
 
-
-import re
 
 _NAME_SUFFIXES = re.compile(
     r",?\s*(?:Common\s+(?:Stock|Units?|Shares?)"

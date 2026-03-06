@@ -21,17 +21,18 @@ class TestKellyCalculator:
         assert fraction > 0
 
     def test_half_kelly(self):
-        """Half Kelly should be half of full Kelly."""
+        """Half Kelly should be half of full Kelly, capped by position type."""
         kelly = KellyCalculator(win_rate=0.6, avg_win_pct=10.0, avg_loss_pct=5.0)
         full = kelly.calculate()
-        half = kelly.half_kelly()
-        assert half == pytest.approx(min(full / 2, 0.04), abs=0.001)
+        half = kelly.half_kelly()  # defaults to "core" → 0.06 cap
+        assert half == pytest.approx(min(full / 2, 0.06), abs=0.001)
 
-    def test_half_kelly_capped_at_4pct(self):
-        """Half Kelly should never exceed 4% per position."""
+    def test_half_kelly_capped_by_position_type(self):
+        """Half Kelly cap varies by position type."""
         kelly = KellyCalculator(win_rate=0.9, avg_win_pct=50.0, avg_loss_pct=5.0)
-        half = kelly.half_kelly()
-        assert half <= 0.04
+        assert kelly.half_kelly("tactical") <= 0.04
+        assert kelly.half_kelly("core") <= 0.06
+        assert kelly.half_kelly("permanent") <= 0.08
 
     def test_negative_edge(self):
         """30% win rate with poor ratio → Kelly should be 0."""
