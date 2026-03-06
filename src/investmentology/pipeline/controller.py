@@ -471,26 +471,26 @@ class PipelineController:
 
         Returns (success_count, failure_count).
         """
-        from investmentology.data.web_search_provider import WebSearchProvider
+        from investmentology.data.web_search_provider import FallbackProvider
 
         ok = 0
         fail = 0
 
         try:
-            web = WebSearchProvider()
+            fb = FallbackProvider()
         except Exception:
-            logger.warning("WebSearchProvider init failed, skipping fallbacks")
+            logger.warning("FallbackProvider init failed, skipping fallbacks")
             return 0, len(missing_keys)
 
-        # Map cache_key → web provider method
+        # Map cache_key → fallback method (yfinance first, SearXNG for news/social)
         fallbacks: dict[str, callable] = {
-            "news_context": lambda: web.get_news(ticker),
-            "earnings_context": lambda: web.get_earnings(ticker),
-            "insider_context": lambda: web.get_insider_transactions(ticker),
-            "social_sentiment": lambda: web.get_social_sentiment(ticker),
-            "analyst_ratings": lambda: web.get_analyst_ratings(ticker),
-            "short_interest": lambda: web.get_short_interest(ticker),
-            "filing_context": lambda: web.get_filing_context(ticker),
+            "news_context": lambda: fb.get_news(ticker),
+            "earnings_context": lambda: fb.get_earnings(ticker),
+            "insider_context": lambda: fb.get_insider_transactions(ticker),
+            "social_sentiment": lambda: fb.get_social_sentiment(ticker),
+            "analyst_ratings": lambda: fb.get_analyst_ratings(ticker),
+            "short_interest": lambda: fb.get_short_interest(ticker),
+            "filing_context": lambda: fb.get_filing_context(ticker),
         }
 
         for cache_key in missing_keys:
