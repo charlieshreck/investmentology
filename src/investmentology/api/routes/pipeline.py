@@ -485,6 +485,11 @@ class TriggerVerdictRequest(BaseModel):
     signal_source: str = "latest"  # "latest" or "cycle"
 
 
+class TriggerDataRequest(BaseModel):
+    ticker: str
+    data_keys: list[str]  # e.g. ["analyst_ratings", "short_interest"]
+
+
 class TriggerFullRequest(BaseModel):
     tickers: list[str]
     force_data_refresh: bool = False
@@ -938,6 +943,149 @@ async def trigger_verdict(
         "consensusScore": result.consensus_score,
         "agentCount": len(signal_sets),
         "signalSource": body.signal_source,
+    }
+
+
+@router.post("/pipeline/trigger/data")
+async def trigger_data_refresh(
+    body: TriggerDataRequest,
+    db: Database = Depends(get_db),
+) -> dict:
+    """Refresh individual data sources for a ticker without re-running the full pipeline.
+
+    Fetches the requested data keys in-process and caches them. Useful for
+    filling gaps (e.g. just refresh analyst_ratings) without triggering
+    a full data_fetch + all agents.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from investmentology.config import load_config
+    from investmentology.data.enricher import build_enricher
+    from investmentology.data.web_search_provider import FallbackProvider
+
+    ticker = body.ticker.upper()
+    cycle_id = _ensure_active_cycle(db)
+
+    valid_keys = {
+        "fundamentals", "technical_indicators", "macro_context",
+        "news_context", "earnings_context", "insider_context",
+        "filing_context", "institutional_context", "analyst_ratings",
+        "short_interest", "social_sentiment", "research_briefing",
+    }
+    bad_keys = [k for k in body.data_keys if k not in valid_keys]
+    if bad_keys:
+        raise HTTPException(400, f"Invalid data keys: {bad_keys}")
+
+    config = load_config()
+    enricher = build_enricher(config)
+    fallback = FallbackProvider()
+
+    results = []
+    loop = asyncio.get_event_loop()
+
+    for key in body.data_keys:
+        result_data = None
+        source = "unknown"
+
+        try:
+            # Try primary provider first
+            if key == "macro_context" and enricher and enricher._fred:
+                result_data = await loop.run_in_executor(
+                    None, enricher._fred.get_macro_context,
+                )
+                source = "fred"
+            elif key == "news_context" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_news, ticker,
+                )
+                source = "finnhub"
+            elif key == "earnings_context" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_earnings, ticker,
+                )
+                source = "finnhub"
+            elif key == "insider_context" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_insider_transactions, ticker,
+                )
+                source = "finnhub"
+            elif key == "social_sentiment" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_social_sentiment, ticker,
+                )
+                source = "finnhub"
+            elif key == "analyst_ratings" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_analyst_ratings, ticker,
+                )
+                source = "finnhub"
+            elif key == "short_interest" and enricher and enricher._finnhub:
+                result_data = await loop.run_in_executor(
+                    None, enricher._finnhub.get_short_interest, ticker,
+                )
+                source = "finnhub"
+            elif key == "filing_context" and enricher and enricher._edgar:
+                result_data = await loop.run_in_executor(
+                    None, enricher._edgar.get_filing_text, ticker,
+                )
+                source = "edgar"
+            elif key == "institutional_context" and enricher and enricher._edgar:
+                raw = await loop.run_in_executor(
+                    None, enricher._edgar.get_institutional_holders, ticker,
+                )
+                result_data = raw.get("holders", []) if isinstance(raw, dict) else raw
+                source = "edgar"
+
+            # Fallback to yfinance/SearXNG if primary returned None
+            if result_data is None:
+                fb_method = {
+                    "analyst_ratings": fallback.get_analyst_ratings,
+                    "short_interest": fallback.get_short_interest,
+                    "insider_context": fallback.get_insider_transactions,
+                    "earnings_context": fallback.get_earnings,
+                    "news_context": fallback.get_news,
+                    "social_sentiment": fallback.get_social_sentiment,
+                    "filing_context": fallback.get_filing_context,
+                }.get(key)
+                if fb_method:
+                    result_data = await loop.run_in_executor(
+                        None, fb_method, ticker,
+                    )
+                    source = "fallback"
+
+            if result_data is not None:
+                # Stamp and cache
+                now = datetime.now(timezone.utc).isoformat()
+                if isinstance(result_data, dict) and "fetched_at" not in result_data:
+                    result_data["fetched_at"] = now
+                elif isinstance(result_data, list):
+                    result_data = {
+                        "items": result_data,
+                        "count": len(result_data),
+                        "fetched_at": now,
+                    }
+                state.store_data_cache(db, cycle_id, ticker, key, result_data)
+                results.append({
+                    "key": key, "status": "ok", "source": source,
+                })
+            else:
+                results.append({
+                    "key": key, "status": "empty", "source": source,
+                })
+
+        except Exception as exc:
+            logger.warning("Data refresh %s failed for %s: %s", key, ticker, exc)
+            results.append({
+                "key": key, "status": "error", "error": str(exc)[:100],
+            })
+
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    return {
+        "ticker": ticker,
+        "results": results,
+        "refreshed": ok_count,
+        "total": len(body.data_keys),
     }
 
 

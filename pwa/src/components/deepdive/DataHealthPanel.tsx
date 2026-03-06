@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { Badge } from "../shared/Badge";
 import { useDataReport } from "../../hooks/useDataReport";
-import { useTriggerAgent, useTriggerBoard, useTriggerFull } from "../../hooks/usePipelineTrigger";
+import { useTriggerAgent, useTriggerBoard, useTriggerData, useTriggerFull } from "../../hooks/usePipelineTrigger";
 import type { DataReportAgentImpact } from "../../types/models";
 
 interface DataHealthPanelProps {
@@ -199,8 +199,10 @@ export function DataHealthPanel({ ticker, onActivity }: DataHealthPanelProps) {
 
   const triggerAgent = useTriggerAgent();
   const triggerBoard = useTriggerBoard();
+  const triggerData = useTriggerData();
   const triggerFull = useTriggerFull();
   const [boardTriggering, setBoardTriggering] = useState(false);
+  const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set());
 
   // Notify parent of activity changes
   useEffect(() => {
@@ -334,6 +336,7 @@ export function DataHealthPanel({ ticker, onActivity }: DataHealthPanelProps) {
                   display: "flex",
                   alignItems: "center",
                   fontSize: "var(--text-xs)",
+                  gap: 4,
                 }}
               >
                 <StatusDot
@@ -351,12 +354,35 @@ export function DataHealthPanel({ ticker, onActivity }: DataHealthPanelProps) {
                     fontWeight: report.available[key] ? 400 : 500,
                   }}
                 >
-                  {report.available[key]
-                    ? report.dataAge[key]
-                      ? timeSince(report.dataAge[key])
-                      : "ok"
-                    : "missing"}
+                  {refreshingKeys.has(key)
+                    ? "fetching..."
+                    : report.available[key]
+                      ? report.dataAge[key]
+                        ? timeSince(report.dataAge[key])
+                        : "ok"
+                      : "missing"}
                 </span>
+                {key !== "fundamentals" && key !== "technical_indicators" && (
+                  <RefreshButton
+                    onClick={() => {
+                      setRefreshingKeys((prev) => new Set(prev).add(key));
+                      triggerData.mutate(
+                        { ticker, data_keys: [key] },
+                        {
+                          onSettled: () => {
+                            setRefreshingKeys((prev) => {
+                              const next = new Set(prev);
+                              next.delete(key);
+                              return next;
+                            });
+                          },
+                        },
+                      );
+                    }}
+                    loading={refreshingKeys.has(key)}
+                    size={10}
+                  />
+                )}
               </div>
             ))}
           </div>

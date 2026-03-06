@@ -61,6 +61,26 @@ export function useTriggerBoard() {
   });
 }
 
+export function useTriggerData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ticker: string; data_keys: string[] }) =>
+      apiFetch<{
+        ticker: string;
+        results: Array<{ key: string; status: string; source?: string; error?: string }>;
+        refreshed: number;
+        total: number;
+      }>("/api/invest/pipeline/trigger/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["pipeline", "data-report", vars.ticker] });
+    },
+  });
+}
+
 export function useTriggerFull() {
   const qc = useQueryClient();
   return useMutation({
