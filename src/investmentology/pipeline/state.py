@@ -381,6 +381,33 @@ def get_all_data_cache(
     return result
 
 
+def get_latest_data_cache(
+    db: Database, ticker: str,
+) -> dict[str, dict]:
+    """Retrieve the most recent cached data for each key across all cycles.
+
+    Uses DISTINCT ON to get the latest entry per data_key, regardless of cycle.
+    This is for the data-report endpoint — shows what data we *have*, not what
+    was cached in any specific cycle.
+    """
+    rows = db.execute(
+        "SELECT DISTINCT ON (data_key) data_key, data_value, created_at "
+        "FROM invest.pipeline_data_cache "
+        "WHERE ticker = %s "
+        "ORDER BY data_key, created_at DESC",
+        (ticker,),
+    )
+    result: dict[str, dict] = {}
+    for r in rows:
+        val = r["data_value"]
+        parsed = val if isinstance(val, dict) else json.loads(val)
+        # Inject created_at so the report can show data age
+        if isinstance(parsed, dict) and "fetched_at" not in parsed:
+            parsed["fetched_at"] = str(r["created_at"])
+        result[r["data_key"]] = parsed
+    return result
+
+
 def get_agent_signals_for_ticker(
     db: Database, cycle_id: UUID, ticker: str,
 ) -> list[dict]:

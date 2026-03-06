@@ -1163,10 +1163,9 @@ def _build_ticker_data_report(db: Database, cycle_id, ticker: str) -> dict:
     """Build data availability and agent impact report for a single ticker."""
     from investmentology.agents.skills import SKILLS
 
-    # Load all cached data keys
-    cached = {}
-    if cycle_id:
-        cached = state.get_all_data_cache(db, cycle_id, ticker)
+    # Load most recent cached data across all cycles (not just the active one)
+    # This ensures data populated in a previous cycle still shows as available
+    cached = state.get_latest_data_cache(db, ticker)
 
     # Data availability
     available = {}
