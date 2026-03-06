@@ -25,6 +25,8 @@ import { CompetencePanel } from "../components/deepdive/CompetencePanel";
 import { ResearchBriefingPanel } from "../components/deepdive/ResearchBriefingPanel";
 import { CollapsiblePanel } from "../components/deepdive/CollapsiblePanel";
 import { VerdictMathPanel } from "../components/deepdive/VerdictMathPanel";
+import { DataHealthPanel } from "../components/deepdive/DataHealthPanel";
+import { EnrichmentPanel } from "../components/deepdive/EnrichmentPanel";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
 
@@ -622,6 +624,8 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
 
       {data.verdict && <AgentAnalysisPanel verdict={data.verdict} signalData={data.signals} />}
       {data.verdict && <VerdictMathPanel verdict={data.verdict} />}
+      <DataHealthPanel ticker={data.ticker} />
+      <EnrichmentPanel news={news} buzz={data.buzz} earningsMomentum={data.earningsMomentum} />
       <MetricsPanel profile={p} quantGate={data.quantGate} fundamentals={f} />
       <RiskPanel verdict={data.verdict} competence={data.competence} adversarial={data.verdict?.adversarialResult ?? null} />
       {data.position && (

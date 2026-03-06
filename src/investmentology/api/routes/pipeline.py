@@ -5,17 +5,24 @@ Exposes the agent-first pipeline state machine to the PWA:
 - Per-ticker step breakdown with gate/screener detail
 - Funnel visualization data
 - Platform health metrics
+- Manual trigger endpoints for agent/board/verdict re-runs
+- Data availability report per ticker
 """
 
 from __future__ import annotations
 
 import json
+import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
-from investmentology.api.deps import get_db
+from investmentology.api.deps import get_db, get_gateway
+from investmentology.agents.gateway import LLMGateway
 from investmentology.pipeline import state
 from investmentology.registry.db import Database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -443,4 +450,702 @@ def pipeline_health(db: Database = Depends(get_db)) -> dict:
             "total": blocks["total"],
             "active": blocks["active"],
         },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TRIGGER ENDPOINTS — manual re-runs for agents, board, and full pipeline
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TriggerAgentRequest(BaseModel):
+    ticker: str
+    agent: str
+
+
+class TriggerAgentsRequest(BaseModel):
+    ticker: str
+    agents: list[str] | None = None  # None = all agents
+
+
+class TriggerBoardRequest(BaseModel):
+    ticker: str
+    verdict_id: int | None = None  # None = latest
+
+
+class TriggerHypotheticalRequest(BaseModel):
+    ticker: str
+    verdict_id: int | None = None
+    stance_overrides: dict[str, str] = {}  # agent -> bearish/bullish/neutral
+    confidence_overrides: dict[str, float] = {}
+
+
+class TriggerVerdictRequest(BaseModel):
+    ticker: str
+    signal_source: str = "latest"  # "latest" or "cycle"
+
+
+class TriggerFullRequest(BaseModel):
+    tickers: list[str]
+    force_data_refresh: bool = False
+
+
+def _ensure_active_cycle(db: Database):
+    """Return active cycle id or raise 422."""
+    cycle_id = _get_active_cycle_id(db)
+    if not cycle_id:
+        raise HTTPException(422, "No active pipeline cycle")
+    return cycle_id
+
+
+def _save_agent_signal(db: Database, ticker: str, response) -> int:
+    """Save agent signal to DB and return signal row id."""
+    from investmentology.registry.queries import Registry
+    registry = Registry(db)
+    signals_dict = {
+        "signals": [
+            {
+                "tag": s.tag.value,
+                "strength": s.strength,
+                "detail": s.detail,
+            }
+            for s in response.signal_set.signals.signals
+        ],
+        "target_price": (
+            float(response.target_price) if response.target_price else None
+        ),
+    }
+    return registry.insert_agent_signals(
+        ticker=ticker,
+        agent_name=response.agent_name,
+        model=response.model,
+        signals=signals_dict,
+        confidence=response.signal_set.confidence,
+        reasoning=response.summary or response.signal_set.reasoning,
+        token_usage=response.token_usage,
+        latency_ms=response.latency_ms,
+    )
+
+
+@router.post("/pipeline/trigger/agent")
+async def trigger_agent(
+    body: TriggerAgentRequest,
+    db: Database = Depends(get_db),
+    gateway: LLMGateway = Depends(get_gateway),
+) -> dict:
+    """Re-run a single agent for a single ticker.
+
+    API-only agents (simons, lynch, income_analyst, sector_specialist) run
+    in-process and return completed results. CLI agents are queued for
+    the controller to pick up.
+    """
+    from investmentology.agents.runner import AgentRunner
+    from investmentology.agents.skills import API_ONLY_AGENTS, SKILLS
+    from investmentology.pipeline.builder import build_analysis_request
+
+    ticker = body.ticker.upper()
+    agent = body.agent.lower()
+
+    if agent not in SKILLS:
+        raise HTTPException(400, f"Unknown agent: {agent}. Valid: {sorted(SKILLS.keys())}")
+
+    cycle_id = _ensure_active_cycle(db)
+
+    if agent in API_ONLY_AGENTS:
+        # Run in-process
+        skill = SKILLS[agent]
+        runner = AgentRunner(skill=skill, gateway=gateway)
+        request = build_analysis_request(db, ticker, str(cycle_id))
+        response = await runner.analyze(request)
+        signal_id = _save_agent_signal(db, ticker, response)
+
+        # Update pipeline state if step exists
+        step_id, action = state.reset_or_create_step(
+            db, cycle_id, ticker, f"agent:{agent}",
+        )
+        state.mark_running(db, step_id)
+        state.mark_completed(db, step_id, result_ref=signal_id)
+
+        return {
+            "status": "completed",
+            "agent": agent,
+            "ticker": ticker,
+            "confidence": float(response.signal_set.confidence),
+            "signalId": signal_id,
+        }
+
+    # CLI agent — queue for controller
+    step_id, action = state.reset_or_create_step(
+        db, cycle_id, ticker, f"agent:{agent}",
+    )
+    return {
+        "status": "queued" if action != "running" else "already_running",
+        "agent": agent,
+        "ticker": ticker,
+        "stepId": step_id,
+        "action": action,
+        "estimatedWaitSeconds": 60,
+    }
+
+
+@router.post("/pipeline/trigger/agents")
+async def trigger_agents(
+    body: TriggerAgentsRequest,
+    db: Database = Depends(get_db),
+    gateway: LLMGateway = Depends(get_gateway),
+) -> dict:
+    """Re-run multiple agents for a ticker. None = all agents."""
+    from investmentology.agents.runner import AgentRunner
+    from investmentology.agents.skills import API_ONLY_AGENTS, SKILLS
+    from investmentology.pipeline.builder import build_analysis_request
+
+    ticker = body.ticker.upper()
+    agent_names = [a.lower() for a in body.agents] if body.agents else list(SKILLS.keys())
+
+    invalid = [a for a in agent_names if a not in SKILLS]
+    if invalid:
+        raise HTTPException(400, f"Unknown agents: {invalid}")
+
+    cycle_id = _ensure_active_cycle(db)
+    request = build_analysis_request(db, ticker, str(cycle_id))
+    results = []
+
+    for agent in agent_names:
+        if agent in API_ONLY_AGENTS:
+            try:
+                skill = SKILLS[agent]
+                runner = AgentRunner(skill=skill, gateway=gateway)
+                response = await runner.analyze(request)
+                signal_id = _save_agent_signal(db, ticker, response)
+
+                step_id, action = state.reset_or_create_step(
+                    db, cycle_id, ticker, f"agent:{agent}",
+                )
+                state.mark_running(db, step_id)
+                state.mark_completed(db, step_id, result_ref=signal_id)
+
+                results.append({
+                    "agent": agent,
+                    "status": "completed",
+                    "confidence": float(response.signal_set.confidence),
+                    "signalId": signal_id,
+                })
+            except Exception as e:
+                results.append({
+                    "agent": agent,
+                    "status": "error",
+                    "error": str(e),
+                })
+        else:
+            step_id, action = state.reset_or_create_step(
+                db, cycle_id, ticker, f"agent:{agent}",
+            )
+            results.append({
+                "agent": agent,
+                "status": "queued" if action != "running" else "already_running",
+                "stepId": step_id,
+                "action": action,
+            })
+
+    return {"ticker": ticker, "results": results}
+
+
+@router.post("/pipeline/trigger/board")
+async def trigger_board(
+    body: TriggerBoardRequest,
+    db: Database = Depends(get_db),
+    gateway: LLMGateway = Depends(get_gateway),
+) -> dict:
+    """Re-evaluate advisory board with existing agent stances."""
+    from investmentology.advisory.board import AdvisoryBoard
+    from investmentology.advisory.cio import CIOSynthesizer
+    from investmentology.models.signal import AgentStance
+    from investmentology.pipeline.builder import (
+        build_analysis_request,
+        reconstruct_signal_sets,
+    )
+    from investmentology.verdict import synthesize
+
+    ticker = body.ticker.upper()
+
+    # Load verdict
+    if body.verdict_id:
+        rows = db.execute(
+            "SELECT * FROM invest.verdicts WHERE id = %s",
+            (body.verdict_id,),
+        )
+    else:
+        rows = db.execute(
+            "SELECT * FROM invest.verdicts WHERE ticker = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (ticker,),
+        )
+
+    if not rows:
+        raise HTTPException(404, f"No verdict found for {ticker}")
+
+    verdict_row = rows[0]
+
+    # Reconstruct stances
+    stances_data = verdict_row.get("agent_stances") or []
+    if isinstance(stances_data, str):
+        stances_data = json.loads(stances_data)
+    stances = [
+        AgentStance(
+            name=s["name"],
+            sentiment=s["sentiment"],
+            confidence=s["confidence"],
+            key_signals=s.get("key_signals", []),
+            summary=s.get("summary", ""),
+        )
+        for s in stances_data
+    ]
+
+    # Load latest agent signals and re-synthesize verdict
+    signal_rows = state.get_latest_agent_signals(db, ticker)
+    signal_sets = reconstruct_signal_sets(signal_rows)
+
+    verdict_result = synthesize(signal_sets)
+
+    # Build request for board context
+    cycle_id = _get_active_cycle_id(db)
+    request = build_analysis_request(db, ticker, str(cycle_id) if cycle_id else None)
+
+    # Run board
+    board = AdvisoryBoard(gateway)
+    board_result = await board.convene(verdict_result, stances, None, request)
+
+    # Run CIO synthesis
+    cio = CIOSynthesizer(gateway)
+    cio_result = await cio.synthesize(verdict_result, board_result, stances)
+
+    # Persist board results to verdict row
+    opinions_json = [
+        {
+            "advisor_name": op.advisor_name,
+            "display_name": op.display_name,
+            "vote": op.vote,
+            "confidence": op.confidence,
+            "assessment": op.assessment,
+            "key_concern": op.key_concern,
+            "key_endorsement": op.key_endorsement,
+            "reasoning": op.reasoning,
+        }
+        for op in board_result.opinions
+    ]
+    narrative_json = {
+        "headline": cio_result.headline,
+        "narrative": cio_result.narrative,
+        "risk_summary": cio_result.risk_summary,
+        "pre_mortem": cio_result.pre_mortem,
+        "conflict_resolution": cio_result.conflict_resolution,
+        "advisor_consensus": cio_result.advisor_consensus,
+    }
+
+    db.execute(
+        "UPDATE invest.verdicts SET "
+        "advisory_opinions = %s::jsonb, "
+        "board_narrative = %s::jsonb, "
+        "board_adjusted_verdict = %s "
+        "WHERE id = %s",
+        (
+            json.dumps(opinions_json),
+            json.dumps(narrative_json),
+            board_result.adjusted_verdict,
+            verdict_row["id"],
+        ),
+    )
+
+    return {
+        "status": "completed",
+        "ticker": ticker,
+        "verdictId": verdict_row["id"],
+        "adjustedVerdict": board_result.adjusted_verdict,
+        "opinions": opinions_json,
+        "narrative": narrative_json,
+    }
+
+
+@router.post("/pipeline/trigger/board/hypothetical")
+async def trigger_board_hypothetical(
+    body: TriggerHypotheticalRequest,
+    db: Database = Depends(get_db),
+    gateway: LLMGateway = Depends(get_gateway),
+) -> dict:
+    """What-if board simulation with overridden agent stances. Never persisted."""
+    from decimal import Decimal
+
+    from investmentology.advisory.board import AdvisoryBoard
+    from investmentology.advisory.cio import CIOSynthesizer
+    from investmentology.models.signal import AgentStance
+    from investmentology.pipeline.builder import (
+        build_analysis_request,
+        reconstruct_signal_sets,
+    )
+    from investmentology.verdict import synthesize
+
+    ticker = body.ticker.upper()
+
+    # Load verdict
+    if body.verdict_id:
+        rows = db.execute(
+            "SELECT * FROM invest.verdicts WHERE id = %s",
+            (body.verdict_id,),
+        )
+    else:
+        rows = db.execute(
+            "SELECT * FROM invest.verdicts WHERE ticker = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (ticker,),
+        )
+
+    if not rows:
+        raise HTTPException(404, f"No verdict found for {ticker}")
+
+    verdict_row = rows[0]
+
+    # Reconstruct stances
+    stances_data = verdict_row.get("agent_stances") or []
+    if isinstance(stances_data, str):
+        stances_data = json.loads(stances_data)
+
+    STANCE_MAP = {"bearish": -0.7, "bullish": 0.7, "neutral": 0.0}
+    stances = []
+    for s in stances_data:
+        name = s["name"]
+        sentiment = s["sentiment"]
+        confidence = s["confidence"]
+
+        if name in body.stance_overrides:
+            label = body.stance_overrides[name].lower()
+            sentiment = STANCE_MAP.get(label, sentiment)
+        if name in body.confidence_overrides:
+            confidence = body.confidence_overrides[name]
+
+        stances.append(AgentStance(
+            name=name,
+            sentiment=sentiment,
+            confidence=confidence,
+            key_signals=s.get("key_signals", []),
+            summary=s.get("summary", ""),
+        ))
+
+    # Re-synthesize with modified signals
+    signal_rows = state.get_latest_agent_signals(db, ticker)
+    signal_sets = reconstruct_signal_sets(signal_rows)
+
+    # Apply overrides to signal sets too (adjust confidence)
+    for ss in signal_sets:
+        if ss.agent_name in body.confidence_overrides:
+            ss.confidence = Decimal(str(body.confidence_overrides[ss.agent_name]))
+
+    verdict_result = synthesize(signal_sets)
+
+    # Build request for board context
+    cycle_id = _get_active_cycle_id(db)
+    request = build_analysis_request(db, ticker, str(cycle_id) if cycle_id else None)
+
+    # Run board + CIO (not persisted)
+    board = AdvisoryBoard(gateway)
+    board_result = await board.convene(verdict_result, stances, None, request)
+
+    cio = CIOSynthesizer(gateway)
+    cio_result = await cio.synthesize(verdict_result, board_result, stances)
+
+    return {
+        "hypothetical": True,
+        "ticker": ticker,
+        "verdict": verdict_result.verdict.value,
+        "confidence": float(verdict_result.confidence),
+        "consensusScore": verdict_result.consensus_score,
+        "adjustedVerdict": board_result.adjusted_verdict,
+        "stanceOverrides": body.stance_overrides,
+        "confidenceOverrides": body.confidence_overrides,
+        "opinions": [
+            {
+                "advisor_name": op.advisor_name,
+                "display_name": op.display_name,
+                "vote": op.vote,
+                "confidence": op.confidence,
+                "assessment": op.assessment,
+            }
+            for op in board_result.opinions
+        ],
+        "narrative": {
+            "headline": cio_result.headline,
+            "narrative": cio_result.narrative,
+        },
+    }
+
+
+@router.post("/pipeline/trigger/verdict")
+async def trigger_verdict(
+    body: TriggerVerdictRequest,
+    db: Database = Depends(get_db),
+) -> dict:
+    """Re-synthesize verdict from stored agent signals (pure Python, no LLM)."""
+    from investmentology.pipeline.builder import reconstruct_signal_sets
+    from investmentology.verdict import synthesize
+
+    ticker = body.ticker.upper()
+    cycle_id = _get_active_cycle_id(db)
+
+    if body.signal_source == "cycle":
+        if not cycle_id:
+            raise HTTPException(422, "No active cycle for cycle-scoped signals")
+        signal_rows = state.get_agent_signals_for_ticker(db, cycle_id, ticker)
+    else:
+        signal_rows = state.get_latest_agent_signals(db, ticker)
+
+    if not signal_rows:
+        raise HTTPException(404, f"No agent signals found for {ticker}")
+
+    signal_sets = reconstruct_signal_sets(signal_rows)
+    result = synthesize(signal_sets)
+
+    # Persist new verdict
+    from investmentology.registry.queries import Registry
+    registry = Registry(db)
+    stances_json = [
+        {
+            "name": s.name,
+            "sentiment": s.sentiment,
+            "confidence": s.confidence,
+            "key_signals": s.key_signals,
+            "summary": s.summary,
+        }
+        for s in result.agent_stances
+    ]
+
+    verdict_id = registry.insert_verdict(
+        ticker=ticker,
+        verdict=result.verdict.value,
+        confidence=result.confidence,
+        reasoning=result.reasoning,
+        consensus_score=result.consensus_score,
+        risk_flags=result.risk_flags,
+        agent_stances=stances_json,
+        auditor_override=result.auditor_override,
+        munger_override=result.munger_override,
+    )
+
+    return {
+        "status": "completed",
+        "ticker": ticker,
+        "verdictId": verdict_id,
+        "verdict": result.verdict.value,
+        "confidence": float(result.confidence),
+        "consensusScore": result.consensus_score,
+        "agentCount": len(signal_sets),
+        "signalSource": body.signal_source,
+    }
+
+
+@router.post("/pipeline/trigger/full")
+async def trigger_full(
+    body: TriggerFullRequest,
+    db: Database = Depends(get_db),
+) -> dict:
+    """Full re-analysis for one or more tickers via the pipeline."""
+    cycle_id = _ensure_active_cycle(db)
+
+    results = []
+    for raw_ticker in body.tickers:
+        ticker = raw_ticker.upper()
+
+        if body.force_data_refresh:
+            # Reset from data_fetch onwards
+            for step_name in [
+                state.STEP_DATA_FETCH, state.STEP_DATA_VALIDATE,
+                state.STEP_PRE_FILTER,
+            ]:
+                state.reset_or_create_step(db, cycle_id, ticker, step_name)
+
+            # Also create screening + gate steps
+            from investmentology.agents.skills import SCREENER_SKILLS
+            for sname in SCREENER_SKILLS:
+                state.reset_or_create_step(
+                    db, cycle_id, ticker, f"{state.STEP_SCREENER_PREFIX}{sname}",
+                )
+            state.reset_or_create_step(db, cycle_id, ticker, state.STEP_GATE_DECISION)
+            state.reset_or_create_step(db, cycle_id, ticker, state.STEP_RESEARCH)
+
+        # Create Phase 2 steps (agents + debate + synthesis)
+        from investmentology.agents.skills import SKILLS
+        for agent_name in SKILLS:
+            state.reset_or_create_step(
+                db, cycle_id, ticker, f"agent:{agent_name}",
+            )
+        state.reset_or_create_step(db, cycle_id, ticker, state.STEP_DEBATE)
+        state.reset_or_create_step(db, cycle_id, ticker, state.STEP_ADVERSARIAL)
+        state.reset_or_create_step(db, cycle_id, ticker, state.STEP_SYNTHESIS)
+
+        results.append({
+            "ticker": ticker,
+            "status": "queued",
+            "forceDataRefresh": body.force_data_refresh,
+        })
+
+    return {"results": results}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DATA REPORT — data availability and agent impact per ticker
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# The enrichment data keys stored in pipeline_data_cache
+_DATA_KEYS = [
+    "fundamentals", "technical_indicators", "macro_context",
+    "news_context", "earnings_context", "insider_context",
+    "filing_context", "institutional_context", "analyst_ratings",
+    "short_interest", "social_sentiment", "research_briefing",
+]
+
+# Data gate rules: agent -> (required_key, cap_value)
+_DATA_GATE_CAPS: dict[str, tuple[str, float]] = {
+    "simons": ("technical_indicators", 0.15),
+    "soros": ("macro_context", 0.20),
+    "druckenmiller": ("macro_context", 0.20),
+    "dalio": ("macro_context", 0.20),
+}
+
+
+def _build_ticker_data_report(db: Database, cycle_id, ticker: str) -> dict:
+    """Build data availability and agent impact report for a single ticker."""
+    from investmentology.agents.skills import SKILLS
+
+    # Load all cached data keys
+    cached = {}
+    if cycle_id:
+        cached = state.get_all_data_cache(db, cycle_id, ticker)
+
+    # Data availability
+    available = {}
+    data_age = {}
+    for key in _DATA_KEYS:
+        if key in cached:
+            available[key] = True
+            # Try to extract timestamp from cached data
+            val = cached[key]
+            if isinstance(val, dict) and "fetched_at" in val:
+                data_age[key] = val["fetched_at"]
+        else:
+            available[key] = False
+
+    # Agent impact analysis
+    agent_impact = []
+    latest_signals = state.get_latest_agent_signals(db, ticker)
+    signal_map = {r["agent_name"]: r for r in latest_signals}
+
+    for agent_name, skill in SKILLS.items():
+        info: dict = {"agent": agent_name, "status": "ok", "missingOptional": []}
+
+        # Check data gates
+        if agent_name in _DATA_GATE_CAPS:
+            required_key, cap = _DATA_GATE_CAPS[agent_name]
+            if not available.get(required_key):
+                info["status"] = "capped"
+                info["cap"] = cap
+                info["reason"] = f"No {required_key.replace('_', ' ')}"
+
+        # Check optional data
+        for opt_key in skill.optional_data:
+            # Map AnalysisRequest field names to cache keys
+            cache_key = opt_key
+            if not available.get(cache_key, False):
+                info["missingOptional"].append(opt_key)
+
+        # Last signal info
+        sig = signal_map.get(agent_name)
+        if sig:
+            info["lastSignalAt"] = str(sig.get("created_at", ""))
+            info["lastConfidence"] = float(sig["confidence"]) if sig.get("confidence") else None
+
+        agent_impact.append(info)
+
+    capped_count = sum(1 for a in agent_impact if a["status"] == "capped")
+
+    return {
+        "ticker": ticker,
+        "dataAge": data_age,
+        "available": available,
+        "agentImpact": agent_impact,
+        "cappedAgentCount": capped_count,
+        "totalAgentCount": len(SKILLS),
+    }
+
+
+@router.get("/pipeline/data-report/{ticker}")
+def data_report_ticker(
+    ticker: str,
+    db: Database = Depends(get_db),
+) -> dict:
+    """Data availability and agent impact for a single ticker."""
+    ticker = ticker.upper()
+    cycle_id = _get_active_cycle_id(db)
+    return _build_ticker_data_report(db, cycle_id, ticker)
+
+
+@router.get("/pipeline/data-report")
+def data_report_portfolio(
+    db: Database = Depends(get_db),
+    scope: str = Query("portfolio", description="portfolio or all"),
+) -> dict:
+    """Portfolio-wide data availability summary."""
+    cycle_id = _get_active_cycle_id(db)
+
+    # Get tickers based on scope
+    if scope == "portfolio":
+        rows = db.execute(
+            "SELECT DISTINCT ticker FROM ("
+            "  SELECT ticker FROM invest.portfolio_positions WHERE is_closed = FALSE "
+            "  UNION "
+            "  SELECT ticker FROM invest.watchlist WHERE state = ANY(%s)"
+            ") t",
+            (["CANDIDATE", "CONVICTION_BUY", "WATCHLIST_EARLY", "WATCHLIST_CATALYST"],),
+        )
+    else:
+        # All tickers in current cycle
+        if not cycle_id:
+            return {"scope": scope, "totalTickers": 0, "tickers": []}
+        rows = db.execute(
+            "SELECT DISTINCT ticker FROM invest.pipeline_state "
+            "WHERE cycle_id = %s",
+            (cycle_id,),
+        )
+
+    tickers = [r["ticker"] for r in rows]
+    ticker_reports = [_build_ticker_data_report(db, cycle_id, t) for t in tickers]
+
+    # Aggregate stats
+    fully_enriched = sum(
+        1 for r in ticker_reports
+        if all(r["available"].get(k) for k in _DATA_KEYS[:3])  # fundamentals + tech + macro
+    )
+    missing_fundamentals = sum(
+        1 for r in ticker_reports
+        if not r["available"].get("fundamentals")
+    )
+
+    # Count data-gated agents across all tickers
+    gated_agents: dict[str, int] = {}
+    missing_by_key: dict[str, int] = {}
+    for report in ticker_reports:
+        for ai in report["agentImpact"]:
+            if ai["status"] == "capped":
+                gated_agents[ai["agent"]] = gated_agents.get(ai["agent"], 0) + 1
+        for key in _DATA_KEYS:
+            if not report["available"].get(key):
+                missing_by_key[key] = missing_by_key.get(key, 0) + 1
+
+    return {
+        "scope": scope,
+        "totalTickers": len(tickers),
+        "fullyEnriched": fully_enriched,
+        "partiallyEnriched": len(tickers) - fully_enriched - missing_fundamentals,
+        "missingFundamentals": missing_fundamentals,
+        "dataGatedAgents": gated_agents,
+        "missingByDataKey": missing_by_key,
+        "tickers": ticker_reports,
     }

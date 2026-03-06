@@ -506,3 +506,84 @@ def create_analysis_steps(
             created, ticker, cycle_id,
         )
     return created
+
+
+# ---------------------------------------------------------------------------
+# Manual trigger helpers
+# ---------------------------------------------------------------------------
+
+
+def reset_or_create_step(
+    db: Database,
+    cycle_id: UUID,
+    ticker: str,
+    step: str,
+) -> tuple[int, str]:
+    """Reset a failed/expired step to pending, or create it if missing.
+
+    Returns (step_id, action) where action is one of:
+    'created', 'reset', 'already_pending', 'running'.
+    """
+    # Check if step already exists in this cycle
+    rows = db.execute(
+        "SELECT id, status FROM invest.pipeline_state "
+        "WHERE cycle_id = %s AND ticker = %s AND step = %s",
+        (cycle_id, ticker, step),
+    )
+
+    if not rows:
+        # Create new step
+        step_id = create_step(db, cycle_id, ticker, step)
+        return (step_id, "created")
+
+    row = rows[0]
+    step_id = row["id"]
+    status = row["status"]
+
+    if status == "pending":
+        return (step_id, "already_pending")
+
+    if status == "running":
+        return (step_id, "running")
+
+    # failed, expired, or completed — reset to pending
+    expires = datetime.now(timezone.utc) + timedelta(hours=STALENESS_HOURS)
+    db.execute(
+        "UPDATE invest.pipeline_state "
+        "SET status = 'pending', started_at = NULL, completed_at = NULL, "
+        "error = NULL, result_ref = NULL, expires_at = %s "
+        "WHERE id = %s",
+        (expires, step_id),
+    )
+    return (step_id, "reset")
+
+
+def get_latest_agent_signals(
+    db: Database,
+    ticker: str,
+    agent_names: list[str] | None = None,
+) -> list[dict]:
+    """Load most recent agent signals per agent for a ticker (cross-cycle).
+
+    Uses DISTINCT ON (agent_name) to get the latest signal per agent,
+    regardless of which pipeline cycle it came from.
+    """
+    if agent_names:
+        return db.execute(
+            "SELECT DISTINCT ON (agent_name) "
+            "id, ticker, agent_name, model, signals, confidence, "
+            "reasoning, latency_ms, created_at "
+            "FROM invest.agent_signals "
+            "WHERE ticker = %s AND agent_name = ANY(%s) "
+            "ORDER BY agent_name, created_at DESC",
+            (ticker, agent_names),
+        )
+    return db.execute(
+        "SELECT DISTINCT ON (agent_name) "
+        "id, ticker, agent_name, model, signals, confidence, "
+        "reasoning, latency_ms, created_at "
+        "FROM invest.agent_signals "
+        "WHERE ticker = %s "
+        "ORDER BY agent_name, created_at DESC",
+        (ticker,),
+    )

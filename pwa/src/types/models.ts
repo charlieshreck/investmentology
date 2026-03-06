@@ -420,3 +420,24 @@ export interface PipelineHealth {
   recentErrors?: PipelineRecentError[];
   reentryBlocks?: { total: number; active: number };
 }
+
+// ── Data Report Types ──────────────────────────────────────────────────
+
+export interface DataReportAgentImpact {
+  agent: string;
+  status: "ok" | "capped";
+  cap?: number;
+  reason?: string;
+  missingOptional: string[];
+  lastSignalAt?: string;
+  lastConfidence?: number | null;
+}
+
+export interface DataReport {
+  ticker: string;
+  dataAge: Record<string, string>;
+  available: Record<string, boolean>;
+  agentImpact: DataReportAgentImpact[];
+  cappedAgentCount: number;
+  totalAgentCount: number;
+}
