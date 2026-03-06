@@ -243,6 +243,31 @@ def build_analysis_request(
         if rb:
             research_briefing = rb.get("briefing")
 
+    # 3c. Enrichment data from cache (FRED, Finnhub, EDGAR)
+    macro_context = None
+    news_context = None
+    earnings_context = None
+    insider_context = None
+    social_sentiment = None
+    filing_context = None
+    institutional_context = None
+    analyst_ratings = None
+    short_interest = None
+    if cycle_id:
+        macro_context = state.get_data_cache(db, cycle_id, ticker, "macro_context")
+        news_raw = state.get_data_cache(db, cycle_id, ticker, "news_context")
+        news_context = news_raw.get("items") if isinstance(news_raw, dict) else news_raw
+        earn_raw = state.get_data_cache(db, cycle_id, ticker, "earnings_context")
+        earnings_context = earn_raw
+        ins_raw = state.get_data_cache(db, cycle_id, ticker, "insider_context")
+        insider_context = ins_raw.get("items") if isinstance(ins_raw, dict) else ins_raw
+        social_sentiment = state.get_data_cache(db, cycle_id, ticker, "social_sentiment")
+        filing_context = state.get_data_cache(db, cycle_id, ticker, "filing_context")
+        inst_raw = state.get_data_cache(db, cycle_id, ticker, "institutional_context")
+        institutional_context = inst_raw.get("items") if isinstance(inst_raw, dict) else inst_raw
+        analyst_ratings = state.get_data_cache(db, cycle_id, ticker, "analyst_ratings")
+        short_interest = state.get_data_cache(db, cycle_id, ticker, "short_interest")
+
     # 4. Portfolio context
     portfolio_context = get_portfolio_context(db, ticker)
 
@@ -358,6 +383,15 @@ def build_analysis_request(
         sector=raw_fundamentals.get("sector", "Unknown"),
         industry=raw_fundamentals.get("industry", "Unknown"),
         technical_indicators=tech,
+        macro_context=macro_context,
+        news_context=news_context,
+        earnings_context=earnings_context,
+        insider_context=insider_context,
+        social_sentiment=social_sentiment,
+        filing_context=filing_context,
+        institutional_context=institutional_context,
+        analyst_ratings=analyst_ratings,
+        short_interest=short_interest,
         portfolio_context=portfolio_context,
         previous_verdict=previous_verdict,
         similar_situations=similar_situations,

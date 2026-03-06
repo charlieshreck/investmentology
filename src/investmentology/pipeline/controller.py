@@ -90,6 +90,11 @@ class PipelineController:
         from investmentology.data.yfinance_client import YFinanceClient
         self._yf_client = YFinanceClient(cache_ttl_hours=24)
 
+        # Data enricher — FRED, Finnhub, EDGAR providers
+        from investmentology.data.enricher import build_enricher
+        from investmentology.config import load_config
+        self._enricher = build_enricher(load_config())
+
         # ReAct tool catalog for tool-use-capable agents
         tool_catalog = self._create_tool_catalog()
 
@@ -371,10 +376,100 @@ class PipelineController:
             except Exception:
                 logger.debug("Technical indicators unavailable for %s", ticker)
 
+            # ── Enrichment: FRED, Finnhub, EDGAR ──────────────────────
+            # Each provider is called individually so partial failures
+            # don't block the rest. Results cached per data key.
+            enrichment_ok = 0
+            enrichment_fail = 0
+
+            if self._enricher:
+                enrichment_ok, enrichment_fail = await loop.run_in_executor(
+                    None, self._run_enrichment, cycle_id, ticker,
+                )
+
             state.mark_completed(self.db, step_id)
-            logger.info("Data fetch for %s completed", ticker)
+            logger.info(
+                "Data fetch for %s completed (enrichment: %d ok, %d failed)",
+                ticker, enrichment_ok, enrichment_fail,
+            )
         except Exception as e:
             state.mark_failed(self.db, step_id, str(e))
+
+    def _run_enrichment(self, cycle_id: UUID, ticker: str) -> tuple[int, int]:
+        """Run all enrichment providers for a ticker, caching results individually.
+
+        Returns (success_count, failure_count). Each provider failure is logged
+        with the specific data key so silent data gaps become visible.
+        """
+        ok = 0
+        fail = 0
+        enricher = self._enricher
+        if not enricher:
+            return ok, fail
+
+        # Provider → cache_key mapping
+        # Each is called independently so one failure doesn't block others
+        providers: list[tuple[str, callable]] = []
+
+        if enricher._fred:
+            providers.append(("macro_context", lambda: enricher._fred.get_macro_context()))
+
+        if enricher._finnhub:
+            providers.extend([
+                ("news_context", lambda t=ticker: enricher._finnhub.get_news(t)),
+                ("earnings_context", lambda t=ticker: enricher._finnhub.get_earnings(t)),
+                ("insider_context", lambda t=ticker: enricher._finnhub.get_insider_transactions(t)),
+                ("social_sentiment", lambda t=ticker: enricher._finnhub.get_social_sentiment(t)),
+                ("analyst_ratings", lambda t=ticker: enricher._finnhub.get_analyst_ratings(t)),
+                ("short_interest", lambda t=ticker: enricher._finnhub.get_short_interest(t)),
+            ])
+
+        if enricher._edgar:
+            providers.extend([
+                ("filing_context", lambda t=ticker: enricher._edgar.get_filing_text(t)),
+                ("institutional_context", lambda t=ticker: self._fetch_institutional(t)),
+            ])
+
+        for cache_key, fetcher in providers:
+            try:
+                result = fetcher()
+                if result is not None:
+                    # Add a fetched_at timestamp for data age tracking
+                    if isinstance(result, dict) and "fetched_at" not in result:
+                        from datetime import datetime, timezone
+                        result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+                    elif isinstance(result, list):
+                        # Wrap lists in a dict with metadata
+                        from datetime import datetime, timezone
+                        result = {
+                            "items": result,
+                            "count": len(result),
+                            "fetched_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    state.store_data_cache(
+                        self.db, cycle_id, ticker, cache_key, result,
+                    )
+                    ok += 1
+                else:
+                    logger.warning(
+                        "Enrichment %s returned None for %s", cache_key, ticker,
+                    )
+                    fail += 1
+            except Exception as exc:
+                fail += 1
+                logger.error(
+                    "Enrichment %s FAILED for %s: %s",
+                    cache_key, ticker, str(exc)[:200],
+                )
+
+        return ok, fail
+
+    def _fetch_institutional(self, ticker: str):
+        """Fetch institutional holders with dict unwrapping."""
+        result = self._enricher._edgar.get_institutional_holders(ticker)
+        if isinstance(result, dict):
+            return result.get("holders", [])
+        return result or []
 
     async def _handle_data_validate(
         self, cycle_id: UUID, ticker: str, step_id: int,
