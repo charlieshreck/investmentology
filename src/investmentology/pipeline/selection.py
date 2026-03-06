@@ -17,12 +17,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from typing import NamedTuple
 
 from investmentology.registry.db import Database
 
 logger = logging.getLogger(__name__)
 
-# Maximum tickers to analyse per cycle (controls cost)
+# Maximum watchlist (non-portfolio) tickers per cycle
+MAX_WATCHLIST_TICKERS = 15
+
+# Legacy alias — total can be up to len(portfolio) + MAX_WATCHLIST_TICKERS
 MAX_TICKERS_PER_CYCLE = 20
 
 
@@ -33,35 +37,75 @@ class ScoredTicker:
     reasons: list[str]
 
 
+class TickerSelection(NamedTuple):
+    """Two-group selection: portfolio tickers (guaranteed) + watchlist (budget-capped)."""
+    portfolio: list[str]
+    watchlist: list[str]
+
+    @property
+    def all_tickers(self) -> list[str]:
+        """Portfolio first, then watchlist — preserves dispatch ordering."""
+        return self.portfolio + self.watchlist
+
+
+def get_portfolio_tickers(db: Database) -> list[str]:
+    """Get all open portfolio positions (shares > 0, not closed)."""
+    try:
+        rows = db.execute(
+            "SELECT ticker FROM invest.portfolio_positions "
+            "WHERE is_closed = FALSE AND shares > 0"
+        )
+        return [r["ticker"] for r in rows]
+    except Exception:
+        logger.warning("Failed to fetch portfolio tickers")
+        return []
+
+
 def select_tickers(
     db: Database,
     candidates: list[str],
     max_tickers: int = MAX_TICKERS_PER_CYCLE,
-) -> list[str]:
-    """Score and rank candidates, return top N tickers for analysis.
+) -> TickerSelection:
+    """Score and rank candidates, return TickerSelection with portfolio-first guarantee.
 
-    Always includes all held positions (they need monitoring regardless).
-    Remaining budget is filled by highest-scoring watchlist/QG candidates.
+    Portfolio tickers are ALWAYS included regardless of budget.
+    Remaining budget (MAX_WATCHLIST_TICKERS) is filled by highest-scoring
+    watchlist/QG candidates.
+
+    Returns TickerSelection(portfolio=[...], watchlist=[...]).
+    Use .all_tickers for a flat list with portfolio first.
     """
-    if len(candidates) <= max_tickers:
-        return candidates  # No need to select if under budget
+    # Identify portfolio tickers from the candidate list
+    portfolio_set = set(get_portfolio_tickers(db))
+    portfolio_tickers = [t for t in candidates if t in portfolio_set]
+    watchlist_candidates = [t for t in candidates if t not in portfolio_set]
 
-    scored = _score_all(db, candidates)
-    scored.sort(key=lambda s: s.score, reverse=True)
+    # Score watchlist candidates and select top N
+    if watchlist_candidates:
+        scored = _score_all(db, watchlist_candidates)
+        scored.sort(key=lambda s: s.score, reverse=True)
+        watchlist_selected = scored[:MAX_WATCHLIST_TICKERS]
+    else:
+        watchlist_selected = []
 
-    selected = scored[:max_tickers]
+    watchlist_tickers = [s.ticker for s in watchlist_selected]
 
-    if selected:
+    logger.info(
+        "Selection Desk: %d portfolio (guaranteed) + %d/%d watchlist selected",
+        len(portfolio_tickers),
+        len(watchlist_tickers),
+        len(watchlist_candidates),
+    )
+    if watchlist_selected:
         logger.info(
-            "Selection Desk: %d/%d candidates selected (top: %s %.1f, cutoff: %s %.1f)",
-            len(selected), len(scored),
-            selected[0].ticker, selected[0].score,
-            selected[-1].ticker, selected[-1].score,
+            "  Watchlist top: %s %.1f, cutoff: %s %.1f",
+            watchlist_selected[0].ticker, watchlist_selected[0].score,
+            watchlist_selected[-1].ticker, watchlist_selected[-1].score,
         )
-        for s in selected[:5]:
-            logger.debug("  %s: %.1f — %s", s.ticker, s.score, ", ".join(s.reasons))
+    for s in watchlist_selected[:5]:
+        logger.debug("  %s: %.1f — %s", s.ticker, s.score, ", ".join(s.reasons))
 
-    return [s.ticker for s in selected]
+    return TickerSelection(portfolio=portfolio_tickers, watchlist=watchlist_tickers)
 
 
 def _score_all(db: Database, candidates: list[str]) -> list[ScoredTicker]:

@@ -430,6 +430,10 @@ def cmd_cron(args: argparse.Namespace) -> None:
             logging.info(msg)
             print(msg)
 
+        elif job == "overnight-pipeline":
+            _run_overnight_pipeline(db, registry, cron_id)
+            return  # cron_id logged inside
+
         else:
             print(f"Unknown cron job: {job}")
             registry.log_cron_finish(cron_id, "error", f"Unknown job: {job}")
@@ -442,6 +446,198 @@ def cmd_cron(args: argparse.Namespace) -> None:
         logging.exception("Cron job %s failed", job)
         registry.log_cron_finish(cron_id, "error", str(e))
         raise
+
+
+def _run_overnight_pipeline(db: Database, registry: Registry, cron_id: int) -> None:
+    """Overnight pipeline coordinator.
+
+    Creates a fresh cycle, populates steps, then polls until the always-running
+    controller deployment processes them. Does NOT run the controller itself.
+
+    Flow:
+    1. Create cycle → create Phase 1 steps for all selected tickers
+    2. Poll every 30s until Phase 1 (screening) completes
+    3. Create Phase 2 steps for tickers that passed the gate
+    4. Poll every 60s until Phase 2 (agents + synthesis) completes
+    5. Log summary and exit
+    """
+    import time
+
+    from investmentology.pipeline import state
+    from investmentology.pipeline.selection import select_tickers
+    from investmentology.pipeline.controller import SCREENER_AGENT_NAMES, ANALYSIS_AGENT_NAMES
+    from investmentology.registry.reentry import get_blocked_tickers
+
+    # Gather candidates (same logic as controller._get_analysis_tickers)
+    candidates: set[str] = set()
+
+    _ANALYSABLE_STATES = [
+        "CANDIDATE", "ASSESSED", "CONVICTION_BUY",
+        "WATCHLIST_EARLY", "WATCHLIST_CATALYST",
+        "CONFLICT_REVIEW", "POSITION_HOLD", "POSITION_TRIM",
+    ]
+
+    try:
+        wl_rows = db.execute(
+            "SELECT ticker FROM invest.watchlist WHERE state = ANY(%s)",
+            (_ANALYSABLE_STATES,),
+        )
+        for r in wl_rows:
+            candidates.add(r["ticker"])
+    except Exception:
+        pass
+
+    try:
+        qg_rows = db.execute(
+            "SELECT DISTINCT r.ticker FROM invest.quant_gate_results r "
+            "WHERE r.run_id = ("
+            "  SELECT id FROM invest.quant_gate_runs ORDER BY id DESC LIMIT 1"
+            ") AND r.combined_rank <= 100",
+        )
+        for r in qg_rows:
+            candidates.add(r["ticker"])
+    except Exception:
+        pass
+
+    try:
+        pos_rows = db.execute(
+            "SELECT ticker FROM invest.portfolio_positions "
+            "WHERE is_closed = FALSE",
+        )
+        for r in pos_rows:
+            candidates.add(r["ticker"])
+    except Exception:
+        pass
+
+    blocked = get_blocked_tickers(db)
+    unblocked = sorted(t for t in candidates if t not in blocked)
+
+    if not unblocked:
+        logging.info("Overnight pipeline: no candidates found")
+        registry.log_cron_finish(cron_id, "skipped", "No candidates")
+        return
+
+    # Select tickers (portfolio-first)
+    selection = select_tickers(db, unblocked)
+    all_tickers = selection.all_tickers
+    logging.info(
+        "Overnight pipeline: %d portfolio + %d watchlist = %d tickers",
+        len(selection.portfolio), len(selection.watchlist), len(all_tickers),
+    )
+
+    # Expire old cycles and create fresh one
+    state.expire_old_cycles(db)
+    cycle_id = state.create_cycle(db, ticker_count=len(all_tickers))
+    logging.info("Created overnight cycle %s", cycle_id)
+
+    # Phase 1: Create screening steps
+    for ticker in all_tickers:
+        state.create_screening_steps(db, cycle_id, ticker, SCREENER_AGENT_NAMES)
+
+    logging.info(
+        "Phase 1: created screening steps for %d tickers, waiting for controller...",
+        len(all_tickers),
+    )
+
+    # Poll Phase 1 completion (controller processes steps)
+    phase1_timeout = 3600  # 1 hour max for screening
+    phase1_start = time.monotonic()
+
+    while time.monotonic() - phase1_start < phase1_timeout:
+        time.sleep(30)
+        summary = state.get_cycle_summary(db, cycle_id)
+        pending = summary["pending"]
+        running = summary["running"]
+        completed = summary["completed"]
+        failed = summary["failed"]
+
+        # Phase 1 is done when no pending/running steps remain
+        if pending == 0 and running == 0:
+            logging.info(
+                "Phase 1 complete: %d completed, %d failed", completed, failed,
+            )
+            break
+
+        logging.info(
+            "Phase 1 waiting: %d pending, %d running, %d completed, %d failed",
+            pending, running, completed, failed,
+        )
+    else:
+        logging.warning("Phase 1 timed out after %ds", phase1_timeout)
+
+    # Phase 2: Check which tickers passed gate, create analysis steps
+    passed_tickers = []
+    for ticker in all_tickers:
+        if state.is_step_completed(db, cycle_id, ticker, state.STEP_GATE_DECISION):
+            # Check if analysis steps already exist (controller may have created them)
+            progress = state.get_ticker_progress(db, cycle_id, ticker)
+            has_agent_steps = any(
+                s["step"].startswith("agent:") for s in progress
+            )
+            if not has_agent_steps:
+                state.create_analysis_steps(
+                    db, cycle_id, ticker, ANALYSIS_AGENT_NAMES,
+                )
+            passed_tickers.append(ticker)
+
+    if not passed_tickers:
+        logging.info("Overnight pipeline: no tickers passed gate")
+        state.complete_cycle(db, cycle_id)
+        registry.log_cron_finish(cron_id, "success", "No tickers passed gate")
+        return
+
+    logging.info(
+        "Phase 2: %d tickers passed gate, waiting for analysis...",
+        len(passed_tickers),
+    )
+
+    # Poll Phase 2 completion
+    phase2_timeout = 14400  # 4 hours max for analysis
+    phase2_start = time.monotonic()
+
+    while time.monotonic() - phase2_start < phase2_timeout:
+        time.sleep(60)
+        summary = state.get_cycle_summary(db, cycle_id)
+        pending = summary["pending"]
+        running = summary["running"]
+        completed = summary["completed"]
+        failed = summary["failed"]
+
+        if pending == 0 and running == 0:
+            logging.info(
+                "Phase 2 complete: %d completed, %d failed", completed, failed,
+            )
+            break
+
+        logging.info(
+            "Phase 2 waiting: %d pending, %d running, %d completed, %d failed",
+            pending, running, completed, failed,
+        )
+    else:
+        logging.warning("Phase 2 timed out after %ds", phase2_timeout)
+
+    # Final summary
+    state.complete_cycle(db, cycle_id)
+    final = state.get_cycle_summary(db, cycle_id)
+    total_failed = final["failed"] + final.get("expired", 0)
+    total_steps = final["total_steps"]
+
+    msg = (
+        f"Overnight pipeline complete: cycle {cycle_id}, "
+        f"{len(passed_tickers)}/{len(all_tickers)} passed gate, "
+        f"{final['completed']}/{total_steps} steps completed, "
+        f"{total_failed} failures"
+    )
+    logging.info(msg)
+    print(msg)
+
+    # Exit code based on failure rate
+    status = "success" if total_failed < total_steps * 0.5 else "error"
+    registry.log_cron_finish(cron_id, status, msg)
+
+    if status == "error":
+        import sys
+        sys.exit(1)
 
 
 def cmd_controller(args: argparse.Namespace) -> None:
@@ -536,7 +732,7 @@ def main(argv: list[str] | None = None) -> None:
     p_cron = subs.add_parser("cron", help="Run a scheduled pipeline job")
     p_cron.add_argument("job", choices=[
         "weekly-screen", "post-screen-analyze", "daily-watchlist-analyze",
-        "daily-monitor", "price-refresh",
+        "daily-monitor", "price-refresh", "overnight-pipeline",
     ], help="Cron job to run")
     p_cron.add_argument("--limit", type=int, default=20, help="Max tickers to process")
     p_cron.add_argument("--threshold", type=float, default=None,

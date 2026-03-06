@@ -1122,9 +1122,9 @@ DATA_ANALYST = AgentSkill(
         "REJECTED ticker prevents bad decisions."
     ),
     role="validator",
-    provider_preference=["remote-data-analyst", "gemini-cli"],
-    default_model="gemini-2.5-pro",
-    cli_screen="gemini",
+    provider_preference=["deepseek", "remote-data-analyst", "gemini-cli"],
+    default_model="deepseek-chat",
+    cli_screen=None,  # API-only for speed (~2-5s vs ~38s via CLI)
     methodology="""\
 1. COMPLETENESS AND CORRUPTION: Check all critical fields are present and \
 non-null (market_cap, price, shares_outstanding = ERROR if missing). For \

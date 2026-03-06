@@ -13,3 +13,4 @@ resources:
   - cronjob-price-refresh.yaml
   - cronjob-portfolio-sync.yaml
   - cronjob-daily-monitor.yaml
+  - cronjob-overnight-pipeline.yaml

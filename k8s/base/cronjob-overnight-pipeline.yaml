@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: investmentology-overnight-pipeline
+  namespace: investmentology
+  labels:
+    app.kubernetes.io/name: investmentology
+    app.kubernetes.io/component: overnight-pipeline
+spec:
+  # 01:00 UTC Tue-Sat (Mon-Fri market days)
+  schedule: "0 1 * * 2-6"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 5 hour max (pipeline can be slow with 30+ tickers and CLI agents)
+      activeDeadlineSeconds: 18000
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: investmentology
+            app.kubernetes.io/component: overnight-pipeline
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: overnight
+              image: ghcr.io/charlieshreck/investmentology-api:latest
+              command: ["python3", "-m", "investmentology", "cron", "overnight-pipeline"]
+              envFrom:
+                - secretRef:
+                    name: investmentology-secrets
+              env:
+                - name: QUANT_GATE_TOP_N
+                  value: "100"
+                - name: MIN_MARKET_CAP
+                  value: "200000000"
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "200m"
+                limits:
+                  memory: "1Gi"
+                  cpu: "1000m"

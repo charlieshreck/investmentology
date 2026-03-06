@@ -34,7 +34,8 @@ from investmentology.pipeline import state
 from investmentology.pipeline.convergence import should_debate, synthesis_ready
 from investmentology.pipeline.pre_filter import deterministic_pre_filter
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
-from investmentology.pipeline.selection import select_tickers
+from investmentology.pipeline import freshness
+from investmentology.pipeline.selection import select_tickers, get_portfolio_tickers
 from investmentology.registry.db import Database
 from investmentology.registry.reentry import create_gate_blocks, get_blocked_tickers
 
@@ -85,6 +86,8 @@ class PipelineController:
         self._runners: dict[str, AgentRunner] = {}
         self._running = False
         self._current_cycle_id: UUID | None = None
+        self._tick_count = 0
+        self._portfolio_tickers: set[str] = set()
 
         # YFinance client — synchronous, used in run_in_executor
         from investmentology.data.yfinance_client import YFinanceClient
@@ -266,7 +269,10 @@ class PipelineController:
             return
         self._current_cycle_id = cycle_id
 
-        # 3. Populate screening steps for tickers needing analysis
+        # 3. Refresh portfolio ticker set
+        self._portfolio_tickers = set(get_portfolio_tickers(self.db))
+
+        # 4. Populate screening steps for tickers needing analysis
         tickers = self._get_analysis_tickers()
         for ticker in tickers:
             existing = state.get_ticker_progress(self.db, cycle_id, ticker)
@@ -275,19 +281,26 @@ class PipelineController:
                     self.db, cycle_id, ticker, SCREENER_AGENT_NAMES,
                 )
 
-        # 4. Get pending work
+        # 5. Get pending work
         pending = state.get_pending_steps(self.db, cycle_id)
         if not pending:
             # Check if cycle is complete
             self._check_cycle_completion(cycle_id)
+            # Staleness sweep even when no pending work
+            self._tick_count += 1
+            if self._tick_count % 10 == 0:
+                await self._staleness_sweep(cycle_id)
             return
+
+        # Sort pending: portfolio tickers first, then watchlist
+        pending.sort(key=lambda r: (0 if r["ticker"] in self._portfolio_tickers else 1, r["ticker"], r["step"]))
 
         logger.info(
             "Controller tick: %d pending steps in cycle %s",
             len(pending), cycle_id,
         )
 
-        # 5. Process each pending step.
+        # 6. Process each pending step.
         # Each CLI agent has its own queue worker, so all agents run in
         # parallel. No dispatch limit needed — workers self-serialize.
         for row in pending:
@@ -327,8 +340,13 @@ class PipelineController:
             elif step == state.STEP_SYNTHESIS:
                 await self._handle_synthesis(cycle_id, ticker, step_id)
 
-        # 6. Check if cycle is complete
+        # 7. Check if cycle is complete
         self._check_cycle_completion(cycle_id)
+
+        # 8. Staleness sweep every 10th tick (~10 minutes)
+        self._tick_count += 1
+        if self._tick_count % 10 == 0:
+            await self._staleness_sweep(cycle_id)
 
     # ------------------------------------------------------------------
     # Step handlers
@@ -590,10 +608,34 @@ class PipelineController:
                 },
             )
 
-            # NOTE: LLM validation via Data Analyst is available but disabled
-            # for batch processing (38s per ticker via CLI proxy is too slow
-            # for 200+ tickers). Deterministic validation catches the critical
-            # cases. Enable for targeted re-analysis via the web UI.
+            # Phase 2: LLM quality check (portfolio tickers only)
+            # Data Analyst is now an API agent (DeepSeek, ~2-5s) not CLI (~38s)
+            if ticker in self._portfolio_tickers:
+                try:
+                    runner = self._runners.get("data_analyst")
+                    if runner:
+                        request = self._build_request(ticker)
+                        response = await runner.analyze(request)
+                        if response and hasattr(response, "signal_set"):
+                            conf = response.signal_set.confidence
+                            if conf < 0.5:
+                                logger.warning(
+                                    "Data Analyst flagged %s (conf=%.2f): %s",
+                                    ticker, conf,
+                                    response.summary or "low quality",
+                                )
+                            # Save Data Analyst result to cache (informational)
+                            state.store_data_cache(
+                                self.db, cycle_id, ticker, "data_analyst_review", {
+                                    "confidence": conf,
+                                    "summary": response.summary or "",
+                                },
+                            )
+                except Exception:
+                    logger.debug(
+                        "LLM data validation failed for %s, continuing",
+                        ticker, exc_info=True,
+                    )
 
             state.mark_completed(self.db, step_id)
             logger.info("Data validation for %s passed", ticker)
@@ -793,7 +835,24 @@ class PipelineController:
     def _gate_pass(
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
-        """Ticker passed the gate — create Phase 2 analysis steps."""
+        """Ticker passed the gate — check data freshness, gap-fill, create Phase 2 steps."""
+        # Check data freshness before creating agent steps
+        report = freshness.check_freshness(self.db, str(cycle_id), ticker)
+        if not report.is_fresh:
+            stale_names = report.stale_key_names
+            logger.info(
+                "Gate PASS for %s with data gaps: %s",
+                ticker, ", ".join(stale_names[:5]),
+            )
+            # Attempt gap-fill synchronously (blocking is OK here, gate runs once per ticker)
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context — schedule gap-fill as a task
+                asyncio.create_task(
+                    self._attempt_gap_fill(cycle_id, ticker, stale_names),
+                    name=f"gap-fill-{ticker}",
+                )
+
         agent_names = self._get_agents_for_ticker(ticker)
         state.create_analysis_steps(
             self.db, cycle_id, ticker, agent_names,
@@ -1492,6 +1551,69 @@ class PipelineController:
                     "Pipeline cycle %s completed: %s", cycle_id, summary,
                 )
 
+    async def _staleness_sweep(self, cycle_id: UUID) -> None:
+        """Check portfolio tickers for stale data and auto-queue refreshes.
+
+        Runs every 10th tick (~10 minutes). Only refreshes portfolio tickers
+        to avoid wasting API calls on watchlist data that's acceptable stale.
+        """
+        if not self._portfolio_tickers:
+            return
+
+        try:
+            stale = freshness.get_stale_tickers(
+                self.db, str(cycle_id), self._portfolio_tickers,
+            )
+            for ticker, stale_keys in stale.items():
+                if freshness.should_auto_refresh(stale_keys, is_portfolio=True):
+                    step_id, action = state.reset_or_create_step(
+                        self.db, cycle_id, ticker, state.STEP_DATA_FETCH,
+                    )
+                    if action in ("created", "reset"):
+                        logger.info(
+                            "Staleness sweep: auto-refreshing %s (%s stale: %s)",
+                            ticker, action, ", ".join(stale_keys[:3]),
+                        )
+        except Exception:
+            logger.debug("Staleness sweep failed", exc_info=True)
+
+    async def _attempt_gap_fill(
+        self, cycle_id: UUID, ticker: str, missing_keys: list[str],
+    ) -> list[str]:
+        """Try FallbackProvider for each missing key. Returns keys still missing.
+
+        Uses the existing web_search_provider.FallbackProvider for:
+        - analyst_ratings, short_interest, insider_context → yfinance fallback
+        - news_context, social_sentiment, filing_context → SearXNG fallback
+        """
+        if not missing_keys:
+            return []
+
+        loop = asyncio.get_event_loop()
+        still_missing = await loop.run_in_executor(
+            None, self._run_web_fallbacks_for_gaps, cycle_id, ticker, missing_keys,
+        )
+        filled = len(missing_keys) - len(still_missing)
+        if filled:
+            logger.info(
+                "Gap-fill for %s: filled %d/%d keys", ticker, filled, len(missing_keys),
+            )
+        return still_missing
+
+    def _run_web_fallbacks_for_gaps(
+        self, cycle_id: UUID, ticker: str, missing_keys: list[str],
+    ) -> list[str]:
+        """Synchronous gap-fill via FallbackProvider. Returns still-missing keys."""
+        ok, fail = self._run_web_fallbacks(cycle_id, ticker, missing_keys)
+        # Keys that weren't filled = still missing
+        # We can't tell exactly which ones failed, so re-check cache
+        still_missing = []
+        for key in missing_keys:
+            cached = state.get_data_cache(self.db, cycle_id, ticker, key)
+            if not cached:
+                still_missing.append(key)
+        return still_missing
+
     def _save_agent_signals(
         self, ticker: str, response: AnalysisResponse,
     ) -> int:
@@ -1593,10 +1715,11 @@ class PipelineController:
         return build_analysis_request(self.db, ticker, self._current_cycle_id)
 
     def _get_analysis_tickers(self) -> list[str]:
-        """Get tickers that need analysis.
+        """Get tickers that need analysis, portfolio-first.
 
         Sources: watchlist, quant gate candidates, held positions.
         Excludes: blocked tickers (reentry gate).
+        Returns: portfolio tickers first, then watchlist (budget-capped).
         """
         blocked = get_blocked_tickers(self.db)
         candidates: set[str] = set()
@@ -1642,13 +1765,15 @@ class PipelineController:
         if not unblocked:
             return []
 
-        # L2 Selection Desk: score and prioritize candidates
-        selected = select_tickers(self.db, unblocked)
+        # L2 Selection Desk: portfolio-first selection with guaranteed slots
+        selection = select_tickers(self.db, unblocked)
+        all_tickers = selection.all_tickers
         logger.info(
-            "Analysis tickers: %d selected from %d candidates (%d blocked)",
-            len(selected), len(unblocked), len(candidates) - len(unblocked),
+            "Analysis tickers: %d portfolio + %d watchlist from %d candidates (%d blocked)",
+            len(selection.portfolio), len(selection.watchlist),
+            len(unblocked), len(candidates) - len(unblocked),
         )
-        return selected
+        return all_tickers
 
     def _get_portfolio_context(self, ticker: str) -> dict | None:
         """Get portfolio context for a ticker if it's a held position."""
