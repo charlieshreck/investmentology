@@ -469,3 +469,31 @@ export interface DataReport {
   cappedAgentCount: number;
   totalAgentCount: number;
 }
+
+// ── Analysis Overview (command center) ────────────────────────────────────
+
+export interface AnalysisOverviewAgent {
+  name: string;
+  confidence: number | null;
+  ranAt: string;
+  status: "ok" | "capped";
+}
+
+export interface AnalysisOverviewTicker {
+  ticker: string;
+  category: "portfolio" | "watchlist" | "recommendation" | "other";
+  verdict: string | null;
+  verdictConfidence: number | null;
+  verdictAt: string | null;
+  boardAdjustedVerdict: string | null;
+  dataSourceCount: number;
+  dataSourceTotal: number;
+  dataStaleness: "fresh" | "partial" | "stale" | "missing";
+  lastAgentRun: string | null;
+  agentCount: number;
+  agentTotal: number;
+  agents: AnalysisOverviewAgent[];
+  available: Record<string, boolean>;
+  dataAge: Record<string, string>;
+  cappedAgentCount: number;
+}

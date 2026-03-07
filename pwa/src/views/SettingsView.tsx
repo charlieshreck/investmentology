@@ -209,7 +209,7 @@ export function SettingsView() {
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
               { label: "Learning & Calibration", icon: GraduationCap, path: "/learning" },
-              { label: "Run Analysis", icon: Plus, path: "/analyze" },
+              { label: "Analysis", icon: Plus, path: "/analyze" },
               { label: "Screener", icon: Search, path: "/screener" },
               { label: "Decision Log", icon: ScrollText, path: "/log" },
               { label: "Agents", icon: Bot, path: "/agents" },

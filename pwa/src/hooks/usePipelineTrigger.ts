@@ -41,6 +41,7 @@ export function useTriggerAgent() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["pipeline", "data-report", vars.ticker] });
       qc.invalidateQueries({ queryKey: ["pipeline", "ticker", vars.ticker] });
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
     },
   });
 }
@@ -57,6 +58,7 @@ export function useTriggerBoard() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["pipeline", "data-report", vars.ticker] });
       qc.invalidateQueries({ queryKey: ["stock", vars.ticker] });
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
     },
   });
 }
@@ -77,6 +79,7 @@ export function useTriggerData() {
       }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["pipeline", "data-report", vars.ticker] });
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
     },
   });
 }
@@ -92,6 +95,47 @@ export function useTriggerFull() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
+    },
+  });
+}
+
+export function useTriggerVerdict() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ticker: string; signal_source?: string }) =>
+      apiFetch<{
+        status: string;
+        ticker: string;
+        verdictId: number;
+        verdict: string;
+        confidence: number;
+      }>("/api/invest/pipeline/trigger/verdict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+    },
+  });
+}
+
+export function useTriggerAgents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ticker: string; agents?: string[] }) =>
+      apiFetch<{ ticker: string; results: unknown[] }>(
+        "/api/invest/pipeline/trigger/agents",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["analysis-overview"] });
     },
   });
 }

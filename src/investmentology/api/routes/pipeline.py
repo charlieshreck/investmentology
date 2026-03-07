@@ -1305,3 +1305,163 @@ def data_report_portfolio(
         "missingByDataKey": missing_by_key,
         "tickers": ticker_reports,
     }
+
+
+# ---------------------------------------------------------------------------
+# Analysis overview (multi-ticker command center)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/pipeline/analysis-overview")
+def analysis_overview(
+    db: Database = Depends(get_db),
+    scope: str = Query("portfolio", description="portfolio | watchlist | recommendations | custom"),
+    tickers: str | None = Query(None, description="Comma-separated tickers for scope=custom"),
+) -> dict:
+    """Per-ticker analysis status for the Analysis dashboard.
+
+    Combines data-report availability with latest verdict and agent signal
+    timestamps into a single batch response.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    cycle_id = _get_active_cycle_id(db)
+
+    # ── Resolve ticker list ──────────────────────────────────────────────
+    if scope == "custom":
+        if not tickers:
+            return {"scope": scope, "tickers": []}
+        ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        category_map = {t: "other" for t in ticker_list}
+
+    elif scope == "portfolio":
+        rows = db.execute(
+            "SELECT ticker FROM invest.portfolio_positions "
+            "WHERE is_closed = FALSE AND shares > 0"
+        )
+        ticker_list = [r["ticker"] for r in rows]
+        category_map = {t: "portfolio" for t in ticker_list}
+
+    elif scope == "watchlist":
+        rows = db.execute(
+            "SELECT DISTINCT ticker FROM invest.watchlist "
+            "WHERE state NOT IN ('GRADUATED', 'REJECTED')"
+        )
+        ticker_list = [r["ticker"] for r in rows]
+        category_map = {t: "watchlist" for t in ticker_list}
+
+    elif scope == "recommendations":
+        rows = db.execute(
+            "SELECT DISTINCT ON (ticker) ticker "
+            "FROM invest.verdicts "
+            "WHERE verdict IN ('STRONG_BUY', 'BUY', 'ACCUMULATE') "
+            "ORDER BY ticker, created_at DESC"
+        )
+        ticker_list = [r["ticker"] for r in rows]
+        category_map = {t: "recommendation" for t in ticker_list}
+
+    else:
+        return {"scope": scope, "tickers": []}
+
+    if not ticker_list:
+        return {"scope": scope, "tickers": []}
+
+    # ── Latest verdict per ticker (single batch query) ───────────────────
+    placeholders = ",".join(["%s"] * len(ticker_list))
+    verdict_rows = db.execute(
+        f"SELECT DISTINCT ON (ticker) ticker, verdict, confidence, "
+        f"created_at, board_adjusted_verdict "
+        f"FROM invest.verdicts WHERE ticker IN ({placeholders}) "
+        f"ORDER BY ticker, created_at DESC",
+        tuple(ticker_list),
+    )
+    verdict_map = {r["ticker"]: r for r in verdict_rows}
+
+    # ── Build per-ticker overview ────────────────────────────────────────
+    now = datetime.now(timezone.utc)
+    FRESH_THRESHOLD = timedelta(hours=6)
+    STALE_THRESHOLD = timedelta(hours=24)
+
+    result = []
+    for ticker in ticker_list:
+        report = _build_ticker_data_report(db, cycle_id, ticker)
+        verdict_row = verdict_map.get(ticker)
+
+        # Data staleness classification
+        data_count = sum(1 for v in report["available"].values() if v)
+        data_total = len(report["available"])
+
+        staleness = "missing"
+        if data_count > 0:
+            ages = []
+            for _key, ts in report["dataAge"].items():
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(
+                            str(ts).replace("Z", "+00:00")
+                        )
+                        ages.append(now - dt)
+                    except (ValueError, TypeError):
+                        pass
+            if ages:
+                oldest = max(ages)
+                if oldest < FRESH_THRESHOLD and data_count == data_total:
+                    staleness = "fresh"
+                elif oldest < STALE_THRESHOLD:
+                    staleness = "partial"
+                else:
+                    staleness = "stale"
+            else:
+                staleness = "partial"
+
+        # Agent signals summary
+        agents = []
+        last_agent_run = None
+        agent_count = 0
+        for ai in report["agentImpact"]:
+            ran_at = ai.get("lastSignalAt")
+            if ran_at:
+                agents.append({
+                    "name": ai["agent"],
+                    "confidence": ai.get("lastConfidence"),
+                    "ranAt": ran_at,
+                    "status": ai["status"],
+                })
+                agent_count += 1
+                if last_agent_run is None or ran_at > last_agent_run:
+                    last_agent_run = ran_at
+
+        result.append({
+            "ticker": ticker,
+            "category": category_map.get(ticker, "other"),
+            "verdict": verdict_row["verdict"] if verdict_row else None,
+            "verdictConfidence": (
+                float(verdict_row["confidence"])
+                if verdict_row and verdict_row.get("confidence") is not None
+                else None
+            ),
+            "verdictAt": (
+                str(verdict_row["created_at"])
+                if verdict_row and verdict_row.get("created_at")
+                else None
+            ),
+            "boardAdjustedVerdict": (
+                verdict_row.get("board_adjusted_verdict")
+                if verdict_row
+                else None
+            ),
+            "dataSourceCount": data_count,
+            "dataSourceTotal": data_total,
+            "dataStaleness": staleness,
+            "lastAgentRun": last_agent_run,
+            "agentCount": agent_count,
+            "agentTotal": report["totalAgentCount"],
+            "agents": sorted(
+                agents, key=lambda a: a["ranAt"] or "", reverse=True
+            ),
+            "available": report["available"],
+            "dataAge": report["dataAge"],
+            "cappedAgentCount": report["cappedAgentCount"],
+        })
+
+    return {"scope": scope, "tickers": result}
