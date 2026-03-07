@@ -244,29 +244,40 @@ def build_analysis_request(
             research_briefing = rb.get("briefing")
 
     # 3c. Enrichment data from cache (FRED, Finnhub, EDGAR)
-    macro_context = None
-    news_context = None
-    earnings_context = None
-    insider_context = None
-    social_sentiment = None
-    filing_context = None
-    institutional_context = None
-    analyst_ratings = None
-    short_interest = None
+    # Try current cycle first, then fall back to latest across all cycles
+    # so agents always get the best available data rather than running blind.
+    cycle_cache: dict[str, dict] = {}
     if cycle_id:
-        macro_context = state.get_data_cache(db, cycle_id, ticker, "macro_context")
-        news_raw = state.get_data_cache(db, cycle_id, ticker, "news_context")
-        news_context = news_raw.get("items") if isinstance(news_raw, dict) else news_raw
-        earn_raw = state.get_data_cache(db, cycle_id, ticker, "earnings_context")
-        earnings_context = earn_raw
-        ins_raw = state.get_data_cache(db, cycle_id, ticker, "insider_context")
-        insider_context = ins_raw.get("items") if isinstance(ins_raw, dict) else ins_raw
-        social_sentiment = state.get_data_cache(db, cycle_id, ticker, "social_sentiment")
-        filing_context = state.get_data_cache(db, cycle_id, ticker, "filing_context")
-        inst_raw = state.get_data_cache(db, cycle_id, ticker, "institutional_context")
-        institutional_context = inst_raw.get("items") if isinstance(inst_raw, dict) else inst_raw
-        analyst_ratings = state.get_data_cache(db, cycle_id, ticker, "analyst_ratings")
-        short_interest = state.get_data_cache(db, cycle_id, ticker, "short_interest")
+        cycle_cache = state.get_all_data_cache(db, cycle_id, ticker)
+
+    # Cross-cycle fallback — only query if current cycle is missing keys
+    _ENRICH_KEYS = (
+        "macro_context", "news_context", "earnings_context", "insider_context",
+        "social_sentiment", "filing_context", "institutional_context",
+        "analyst_ratings", "short_interest",
+    )
+    cross_cache: dict[str, dict] | None = None
+    def _enrich(key: str) -> dict | None:
+        nonlocal cross_cache
+        val = cycle_cache.get(key)
+        if val is not None:
+            return val
+        if cross_cache is None:
+            cross_cache = state.get_latest_data_cache(db, ticker)
+        return cross_cache.get(key)
+
+    macro_context = _enrich("macro_context")
+    news_raw = _enrich("news_context")
+    news_context = news_raw.get("items") if isinstance(news_raw, dict) else news_raw
+    earnings_context = _enrich("earnings_context")
+    ins_raw = _enrich("insider_context")
+    insider_context = ins_raw.get("items") if isinstance(ins_raw, dict) else ins_raw
+    social_sentiment = _enrich("social_sentiment")
+    filing_context = _enrich("filing_context")
+    inst_raw = _enrich("institutional_context")
+    institutional_context = inst_raw.get("items") if isinstance(inst_raw, dict) else inst_raw
+    analyst_ratings = _enrich("analyst_ratings")
+    short_interest = _enrich("short_interest")
 
     # 4. Portfolio context
     portfolio_context = get_portfolio_context(db, ticker)

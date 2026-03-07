@@ -861,19 +861,36 @@ class PipelineController:
     def _gate_pass(
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
-        """Ticker passed the gate — check data freshness, gap-fill, create Phase 2 steps."""
-        # Check data freshness before creating agent steps
+        """Ticker passed the gate — enforce data freshness, then create Phase 2 steps.
+
+        If critical data is stale or missing, reset back to data_fetch so
+        agents never run against outdated information.
+        """
         report = freshness.check_freshness(self.db, str(cycle_id), ticker)
         if not report.is_fresh:
             stale_names = report.stale_key_names
+            is_critical = report.has_critical_staleness
+
+            if is_critical:
+                # Critical data stale — reset to data_fetch, do NOT proceed
+                logger.warning(
+                    "Gate PASS for %s BLOCKED — critical data stale: %s. "
+                    "Resetting to data_fetch.",
+                    ticker, ", ".join(stale_names[:5]),
+                )
+                state.reset_or_create_step(
+                    self.db, cycle_id, ticker, state.STEP_DATA_FETCH,
+                )
+                # Don't mark gate completed — it will re-run after fresh data
+                return
+
+            # Non-critical staleness — attempt synchronous gap-fill before proceeding
             logger.info(
-                "Gate PASS for %s with data gaps: %s",
+                "Gate PASS for %s with non-critical gaps: %s — attempting gap-fill",
                 ticker, ", ".join(stale_names[:5]),
             )
-            # Attempt gap-fill synchronously (blocking is OK here, gate runs once per ticker)
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # We're in an async context — schedule gap-fill as a task
                 asyncio.create_task(
                     self._attempt_gap_fill(cycle_id, ticker, stale_names),
                     name=f"gap-fill-{ticker}",
