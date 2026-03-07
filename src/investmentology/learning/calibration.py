@@ -320,7 +320,7 @@ class CalibrationTracker:
                 (
                     ticker, date.today(), verdict,
                     sentiment, confidence, price_at_verdict,
-                    json.dumps(agent_contributions) if agent_contributions else None,
+                    json.dumps(agent_contributions, default=str) if agent_contributions else None,
                     position_type, regime_label,
                 ),
             )

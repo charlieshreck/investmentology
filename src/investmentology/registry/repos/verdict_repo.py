@@ -6,6 +6,20 @@ from decimal import Decimal
 from investmentology.registry.db import Database
 
 
+class _DecimalEncoder(json.JSONEncoder):
+    """JSON encoder that converts Decimal to float."""
+
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return float(o)
+        return super().default(o)
+
+
+def _dumps(obj) -> str:
+    """json.dumps with Decimal support."""
+    return json.dumps(obj, cls=_DecimalEncoder)
+
+
 class VerdictRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -31,12 +45,12 @@ class VerdictRepo:
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                     (
                         ticker, verdict, confidence, consensus_score, reasoning,
-                        json.dumps(agent_stances), json.dumps(risk_flags),
+                        _dumps(agent_stances), _dumps(risk_flags),
                         auditor_override, munger_override,
-                        json.dumps(advisory_opinions) if advisory_opinions else None,
-                        json.dumps(board_narrative) if board_narrative else None,
+                        _dumps(advisory_opinions) if advisory_opinions else None,
+                        _dumps(board_narrative) if board_narrative else None,
                         board_adjusted_verdict,
-                        json.dumps(adversarial_result) if adversarial_result else None,
+                        _dumps(adversarial_result) if adversarial_result else None,
                     ),
                 )
                 return rows[0]["id"]
@@ -50,7 +64,7 @@ class VerdictRepo:
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
                 ticker, verdict, confidence, consensus_score, reasoning,
-                json.dumps(agent_stances), json.dumps(risk_flags),
+                _dumps(agent_stances), _dumps(risk_flags),
                 auditor_override, munger_override,
             ),
         )

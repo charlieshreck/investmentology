@@ -753,6 +753,10 @@ async def trigger_board(
         "advisor_consensus": cio_result.advisor_consensus,
     }
 
+    def _default_ser(o):
+        from decimal import Decimal as _D
+        return float(o) if isinstance(o, _D) else str(o)
+
     db.execute(
         "UPDATE invest.verdicts SET "
         "advisory_opinions = %s::jsonb, "
@@ -760,8 +764,8 @@ async def trigger_board(
         "board_adjusted_verdict = %s "
         "WHERE id = %s",
         (
-            json.dumps(opinions_json),
-            json.dumps(narrative_json),
+            json.dumps(opinions_json, default=_default_ser),
+            json.dumps(narrative_json, default=_default_ser),
             board_result.adjusted_verdict,
             verdict_row["id"],
         ),

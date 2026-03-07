@@ -7,6 +7,11 @@ from decimal import Decimal
 from investmentology.registry.db import Database
 
 
+def _dumps(obj) -> str:
+    """json.dumps with Decimal→float coercion."""
+    return json.dumps(obj, default=lambda o: float(o) if isinstance(o, Decimal) else str(o))
+
+
 class SignalRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -47,8 +52,8 @@ class SignalRepo:
             "token_usage, latency_ms, run_id) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
-                ticker, agent_name, model, json.dumps(signals), confidence,
-                reasoning, json.dumps(token_usage) if token_usage else None,
+                ticker, agent_name, model, _dumps(signals), confidence,
+                reasoning, _dumps(token_usage) if token_usage else None,
                 latency_ms, run_id,
             ),
         )
