@@ -1617,7 +1617,8 @@ class PortfolioService:
         since = datetime.now() - timedelta(days=days)
 
         rows = self._reg._db.execute("""
-            SELECT snapshot_date, total_value, drawdown_pct, high_water_mark
+            SELECT snapshot_date, total_value,
+                   portfolio_drawdown_pct, high_water_mark
             FROM invest.portfolio_risk_snapshots
             WHERE snapshot_date >= %s
             ORDER BY snapshot_date
@@ -1631,13 +1632,13 @@ class PortfolioService:
             data_points.append({
                 "date": str(r["snapshot_date"]),
                 "value": round(float(r["total_value"]), 2),
-                "drawdownPct": round(float(r["drawdown_pct"]), 2),
+                "drawdownPct": round(float(r.get("portfolio_drawdown_pct") or 0), 2),
             })
 
         first_val = float(rows[0]["total_value"])
         last_val = float(rows[-1]["total_value"])
         cum_return = ((last_val - first_val) / first_val * 100) if first_val > 0 else 0
-        max_dd = max((float(r["drawdown_pct"]) for r in rows), default=0)
+        max_dd = max((float(r.get("portfolio_drawdown_pct") or 0) for r in rows), default=0)
 
         return {
             "dataPoints": data_points,
