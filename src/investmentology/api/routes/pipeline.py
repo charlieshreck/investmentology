@@ -1345,7 +1345,7 @@ def analysis_overview(
     elif scope == "watchlist":
         rows = db.execute(
             "SELECT DISTINCT ticker FROM invest.watchlist "
-            "WHERE state NOT IN ('GRADUATED', 'REJECTED')"
+            "WHERE state != 'REJECTED'"
         )
         ticker_list = [r["ticker"] for r in rows]
         category_map = {t: "watchlist" for t in ticker_list}
