@@ -140,7 +140,13 @@ def extract_watchlist_metadata(
             except (json.JSONDecodeError, TypeError):
                 continue
 
-        signal_list = signals if isinstance(signals, list) else signals.get("signals", [])
+        if isinstance(signals, list):
+            signal_list = signals
+        elif isinstance(signals, dict):
+            # Support both {signals: [{tag: ...}]} and {tags: ["TAG", ...]} formats
+            signal_list = signals.get("signals", []) or signals.get("tags", [])
+        else:
+            continue
         for sig in signal_list:
             tag = sig.get("tag", "") if isinstance(sig, dict) else str(sig)
             if tag in BLOCKING_FACTOR_MAP and tag not in seen_factors:
