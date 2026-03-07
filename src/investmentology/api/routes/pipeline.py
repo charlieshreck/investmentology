@@ -724,12 +724,19 @@ async def trigger_board(
     cio_result = await cio.synthesize(verdict_result, board_result, stances)
 
     # Persist board results to verdict row
+    def _jsonable(v):
+        """Coerce Decimal/non-serializable values to float/str."""
+        from decimal import Decimal as _D
+        if isinstance(v, _D):
+            return float(v)
+        return v
+
     opinions_json = [
         {
             "advisor_name": op.advisor_name,
             "display_name": op.display_name,
             "vote": op.vote,
-            "confidence": op.confidence,
+            "confidence": _jsonable(op.confidence),
             "assessment": op.assessment,
             "key_concern": op.key_concern,
             "key_endorsement": op.key_endorsement,
@@ -869,7 +876,7 @@ async def trigger_board_hypothetical(
                 "advisor_name": op.advisor_name,
                 "display_name": op.display_name,
                 "vote": op.vote,
-                "confidence": op.confidence,
+                "confidence": float(op.confidence) if isinstance(op.confidence, Decimal) else op.confidence,
                 "assessment": op.assessment,
             }
             for op in board_result.opinions
