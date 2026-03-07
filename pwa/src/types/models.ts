@@ -85,6 +85,8 @@ export interface Recommendation {
   advisoryOpinions?: AdvisoryOpinion[] | null;
   boardNarrative?: BoardNarrative | null;
   boardAdjustedVerdict?: string | null;
+  dataSourceCount?: number;
+  dataSourceTotal?: number;
 }
 
 export interface AgentStance {

@@ -235,6 +235,12 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
             "graduationTrigger": row.get("watchlist_graduation_trigger"),
         }
 
+    # Data source coverage
+    dsc = row.get("_data_source_count")
+    if dsc is not None:
+        result["dataSourceCount"] = dsc
+        result["dataSourceTotal"] = row.get("_data_source_total", 12)
+
     return result
 
 
@@ -353,9 +359,30 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         logger.debug("Dividend enrichment failed")
 
+    # Batch-fetch data source coverage from pipeline_data_cache
+    data_coverage: dict[str, int] = {}
+    _DATA_KEYS_TOTAL = 12  # fundamentals through research_briefing
+    if rec_tickers:
+        try:
+            placeholders = ",".join(["%s"] * len(rec_tickers))
+            cov_rows = registry._db.execute(
+                f"SELECT ticker, COUNT(DISTINCT data_key) AS cnt "
+                f"FROM invest.pipeline_data_cache "
+                f"WHERE ticker IN ({placeholders}) "
+                f"GROUP BY ticker",
+                tuple(rec_tickers),
+            )
+            for cr in (cov_rows or []):
+                data_coverage[cr["ticker"]] = cr["cnt"]
+        except Exception:
+            logger.debug("Could not fetch data coverage counts")
+
     # Apply enrichment results
     for row in positive_rows:
         ticker = row.get("ticker", "")
+        # Data coverage
+        row["_data_source_count"] = data_coverage.get(ticker, 0)
+        row["_data_source_total"] = _DATA_KEYS_TOTAL
         # Buzz
         buzz = buzz_results.get(ticker)
         if buzz:

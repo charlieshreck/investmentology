@@ -400,6 +400,12 @@ function RecCard({
               bg="rgba(148, 163, 184, 0.08)" fg="var(--color-text-secondary)"
             />
           )}
+          {rec.dataSourceCount != null && rec.dataSourceTotal != null && (() => {
+            const ratio = rec.dataSourceCount / rec.dataSourceTotal;
+            const fg = ratio >= 0.83 ? "var(--color-success)" : ratio >= 0.58 ? "var(--color-warning)" : "var(--color-error)";
+            const bg = ratio >= 0.83 ? "rgba(52, 211, 153, 0.08)" : ratio >= 0.58 ? "rgba(251, 191, 36, 0.10)" : "rgba(248, 113, 113, 0.10)";
+            return <SignalPill label={`${rec.dataSourceCount}/${rec.dataSourceTotal} data`} bg={bg} fg={fg} />;
+          })()}
         </div>
 
         {/* Advisory Board summary strip */}
