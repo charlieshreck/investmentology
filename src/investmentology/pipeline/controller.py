@@ -263,6 +263,10 @@ class PipelineController:
         state.reset_stale_running_steps(self.db)
         state.expire_old_cycles(self.db)
 
+        # 1b. Cascade-fail zombie pending steps for tickers with upstream failures
+        if self._current_cycle_id:
+            state.cascade_fail_blocked_tickers(self.db, self._current_cycle_id)
+
         # 2. Get or create current cycle
         cycle_id = self._get_or_create_cycle()
         if cycle_id is None:

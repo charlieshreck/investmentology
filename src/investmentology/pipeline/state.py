@@ -159,6 +159,37 @@ def reset_for_retry(db: Database, step_id: int) -> bool:
 # Expiry
 # ---------------------------------------------------------------------------
 
+def cascade_fail_blocked_tickers(db: Database, cycle_id: UUID) -> int:
+    """Mark all pending steps as failed for tickers that have a failed upstream step.
+
+    When data_fetch or data_validate fails for a ticker, downstream steps
+    (screeners, agents, debate, synthesis) would stay permanently 'pending'
+    because their handlers do a bare return when prerequisites aren't met.
+    This sweep catches those zombie steps in one pass per tick.
+    """
+    rows = db.execute(
+        "WITH failed_tickers AS ("
+        "  SELECT DISTINCT ticker FROM invest.pipeline_state "
+        "  WHERE cycle_id = %s AND status = 'failed'"
+        ") "
+        "UPDATE invest.pipeline_state ps "
+        "SET status = 'failed', completed_at = NOW(), "
+        "    error = 'Cascade: upstream step failed' "
+        "FROM failed_tickers ft "
+        "WHERE ps.cycle_id = %s AND ps.ticker = ft.ticker "
+        "AND ps.status = 'pending' "
+        "RETURNING ps.id, ps.ticker, ps.step",
+        (cycle_id, cycle_id),
+    )
+    if rows:
+        tickers = {r["ticker"] for r in rows}
+        logger.info(
+            "Cascade-failed %d zombie pending steps for %d tickers: %s",
+            len(rows), len(tickers), ", ".join(sorted(tickers)),
+        )
+    return len(rows)
+
+
 def expire_stale_steps(db: Database) -> int:
     """Mark steps past their expires_at as expired."""
     now = datetime.now(timezone.utc)
