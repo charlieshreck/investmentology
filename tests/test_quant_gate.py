@@ -355,7 +355,7 @@ class TestPiotroski:
 
 class TestAltman:
     def test_safe_zone(self) -> None:
-        """A healthy company should be in the safe zone (>2.99)."""
+        """A healthy manufacturing company should be in the safe zone (>2.99)."""
         snap = _make_snapshot(
             operating_income=Decimal("200000"),
             market_cap=Decimal("2000000"),
@@ -367,7 +367,7 @@ class TestAltman:
             current_liabilities=Decimal("50000"),
         )
 
-        result = calculate_altman(snap)
+        result = calculate_altman(snap, sector="Industrials")
 
         assert result is not None
         assert isinstance(result, AltmanResult)
@@ -387,7 +387,7 @@ class TestAltman:
             current_liabilities=Decimal("200000"),
         )
 
-        result = calculate_altman(snap)
+        result = calculate_altman(snap, sector="Industrials")
 
         assert result is not None
         assert result.zone == "distress"
@@ -406,7 +406,7 @@ class TestAltman:
             current_liabilities=Decimal("120000"),
         )
 
-        result = calculate_altman(snap)
+        result = calculate_altman(snap, sector="Industrials")
 
         assert result is not None
         assert result.zone == "grey"
@@ -423,7 +423,7 @@ class TestAltman:
         assert result is None
 
     def test_z_score_formula_manual(self) -> None:
-        """Verify Z-score calculation against manual computation."""
+        """Verify original Z-score calculation against manual computation."""
         snap = _make_snapshot(
             current_assets=Decimal("200"),
             current_liabilities=Decimal("100"),
@@ -435,7 +435,7 @@ class TestAltman:
             total_assets=Decimal("400"),
         )
 
-        # Manual calculation:
+        # Manual calculation (manufacturing Z):
         # A = (200 - 100) / 400 = 0.25
         # B = 50 / 400 = 0.125
         # C = 80 / 400 = 0.2
@@ -449,7 +449,7 @@ class TestAltman:
                    Decimal("0.6") * Decimal("2.5") + \
                    Decimal("1.0") * Decimal("0.75")
 
-        result = calculate_altman(snap)
+        result = calculate_altman(snap, sector="Industrials")
         assert result is not None
         assert result.z_score == expected
 
@@ -460,6 +460,78 @@ class TestAltman:
         assert isinstance(result.z_score, Decimal)
         assert isinstance(result.zone, str)
         assert result.zone in ("safe", "grey", "distress")
+
+    def test_zpp_tech_uses_different_formula(self) -> None:
+        """Non-manufacturing sectors should use Z'' (no Revenue/TA term)."""
+        snap = _make_snapshot(
+            current_assets=Decimal("200"),
+            current_liabilities=Decimal("100"),
+            net_income=Decimal("50"),
+            operating_income=Decimal("80"),
+            market_cap=Decimal("500"),
+            total_liabilities=Decimal("200"),
+            revenue=Decimal("300"),
+            total_assets=Decimal("400"),
+        )
+        z_mfg = calculate_altman(snap, sector="Industrials")
+        z_tech = calculate_altman(snap, sector="Technology")
+        assert z_mfg is not None and z_tech is not None
+        # Different formulas should produce different scores
+        assert z_mfg.z_score != z_tech.z_score
+
+    def test_zpp_formula_manual(self) -> None:
+        """Verify Z'' calculation against manual computation."""
+        snap = _make_snapshot(
+            current_assets=Decimal("200"),
+            current_liabilities=Decimal("100"),
+            net_income=Decimal("50"),
+            operating_income=Decimal("80"),
+            market_cap=Decimal("500"),
+            total_liabilities=Decimal("200"),
+            revenue=Decimal("300"),
+            total_assets=Decimal("400"),
+        )
+        # Z'' manual calculation (Technology → non-manufacturing):
+        # A = (200 - 100) / 400 = 0.25
+        # B = 50 / 400 = 0.125
+        # C = 80 / 400 = 0.2
+        # D = (400 - 200) / 200 = 1.0  (Book Equity / TL, not Market Cap)
+        # Z'' = 6.56*0.25 + 3.26*0.125 + 6.72*0.2 + 1.05*1.0
+        expected = Decimal("6.56") * Decimal("0.25") + \
+                   Decimal("3.26") * Decimal("0.125") + \
+                   Decimal("6.72") * Decimal("0.2") + \
+                   Decimal("1.05") * Decimal("1.0")
+
+        result = calculate_altman(snap, sector="Technology")
+        assert result is not None
+        assert result.z_score == expected
+
+    def test_zpp_thresholds_differ(self) -> None:
+        """Z'' uses different thresholds (safe>2.60, distress<1.10)."""
+        # Build a snapshot that's "grey" under Z but "safe" under Z''
+        snap = _make_snapshot(
+            current_assets=Decimal("200"),
+            current_liabilities=Decimal("100"),
+            net_income=Decimal("50"),
+            operating_income=Decimal("80"),
+            market_cap=Decimal("500"),
+            total_liabilities=Decimal("200"),
+            revenue=Decimal("300"),
+            total_assets=Decimal("400"),
+        )
+        z_tech = calculate_altman(snap, sector="Technology")
+        assert z_tech is not None
+        # Z'' = 6.56*0.25 + 3.26*0.125 + 6.72*0.2 + 1.05*1.0 = 4.3975
+        # This is > 2.60, so should be "safe" under Z'' thresholds
+        assert z_tech.zone == "safe"
+
+    def test_empty_sector_uses_zpp(self) -> None:
+        """Empty/unknown sector defaults to Z'' (non-manufacturing)."""
+        snap = _make_snapshot()
+        result_empty = calculate_altman(snap, sector="")
+        result_tech = calculate_altman(snap, sector="Technology")
+        assert result_empty is not None and result_tech is not None
+        assert result_empty.z_score == result_tech.z_score
 
 
 # ========================================================================
@@ -807,16 +879,39 @@ class TestCompositeScore:
         )
         assert high_f > low_f
 
-    def test_without_prior_year_normalizes_to_4(self) -> None:
+    def test_without_prior_year_capped_at_half(self) -> None:
         from investmentology.quant_gate.composite import composite_score
-        # 3/4 without prior should be same ratio as 6.75/9 with prior
+        # Without prior year, Piotroski component caps at 0.5 (not 1.0).
+        # This prevents data-poor companies (3/3) from ranking equal to data-rich (9/9).
         no_prior = composite_score(
             greenblatt_rank=1, total_ranked=100,
             piotroski_score=3, has_prior_year=False,
             altman_zone="safe",
         )
-        # Without prior, max piotroski is 4, so 3/4 = 0.75 piotroski component
-        assert no_prior > Decimal("0.8")  # 0.5 + 0.225 + 0.2 = 0.925
+        with_prior = composite_score(
+            greenblatt_rank=1, total_ranked=100,
+            piotroski_score=9, has_prior_year=True,
+            altman_zone="safe",
+        )
+        # no_prior: piotroski = 3/9 = 0.333 (below 0.5 cap, so cap doesn't bind)
+        # with_prior: piotroski = 9/9 = 1.0 (full marks)
+        # Both have perfect greenblatt + safe altman, so difference is piotroski only.
+        assert no_prior < with_prior
+
+    def test_without_prior_year_high_score_caps(self) -> None:
+        from investmentology.quant_gate.composite import composite_score
+        # Score 5/9 = 0.556 but capped at 0.5 without prior year
+        capped = composite_score(
+            greenblatt_rank=1, total_ranked=100,
+            piotroski_score=5, has_prior_year=False,
+            altman_zone="safe",
+        )
+        uncapped = composite_score(
+            greenblatt_rank=1, total_ranked=100,
+            piotroski_score=5, has_prior_year=True,
+            altman_zone="safe",
+        )
+        assert capped < uncapped  # cap at 0.5 vs uncapped 0.556
 
     def test_missing_altman_treated_as_grey(self) -> None:
         from investmentology.quant_gate.composite import composite_score

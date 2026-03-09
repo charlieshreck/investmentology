@@ -206,6 +206,16 @@ class YFinanceClient:
             except Exception:
                 pass
 
+            # Gross profit from income statement
+            gross_profit_val = None
+            try:
+                fins = stock.financials
+                if fins is not None and not fins.empty:
+                    if "Gross Profit" in fins.index:
+                        gross_profit_val = _to_decimal(fins.loc["Gross Profit"].iloc[0])
+            except Exception:
+                pass
+
             result: dict[str, Any] = {
                 "ticker": ticker,
                 "fetched_at": datetime.now(UTC).isoformat(),
@@ -231,6 +241,7 @@ class YFinanceClient:
                 "name": info.get("shortName"),
                 "retained_earnings": retained_earnings_val,
                 "operating_cash_flow": operating_cash_flow_val,
+                "gross_profit": gross_profit_val,
                 "enterprise_value": _to_decimal(info.get("enterpriseValue")),
                 "pe_ratio": _to_decimal(info.get("trailingPE")),
                 "forward_pe": _to_decimal(info.get("forwardPE")),

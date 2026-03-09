@@ -551,7 +551,14 @@ def _score_to_verdict(
     if sent >= Decimal("-0.10"):
         margin = float(sent - Decimal("-0.10"))
         return Verdict.HOLD, margin
+    # Sell-side confidence gates mirror buy-side: low confidence → HOLD
+    if confidence < Decimal("0.40"):
+        return Verdict.HOLD, float(sent - Decimal("-0.10"))
     if sent >= Decimal("-0.30"):
+        margin = float(sent - Decimal("-0.30"))
+        return Verdict.REDUCE, margin
+    if confidence < Decimal("0.50"):
+        # Strongly negative but only moderate confidence → cap at REDUCE
         margin = float(sent - Decimal("-0.30"))
         return Verdict.REDUCE, margin
     if sent >= Decimal("-0.50"):

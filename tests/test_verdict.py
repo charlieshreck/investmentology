@@ -295,6 +295,26 @@ class TestScoreToVerdict:
         v, _m = _score_to_verdict(0.5, Decimal("0.8"), True, True, None)
         assert v == Verdict.AVOID  # Munger checked first
 
+    def test_reduce_requires_confidence(self) -> None:
+        # Low confidence negative → HOLD, not REDUCE
+        v, _m = _score_to_verdict(-0.2, Decimal("0.3"), False, False, None)
+        assert v == Verdict.HOLD
+
+    def test_sell_requires_confidence(self) -> None:
+        # Moderate confidence strongly negative → REDUCE, not SELL
+        v, _m = _score_to_verdict(-0.4, Decimal("0.45"), False, False, None)
+        assert v == Verdict.REDUCE
+
+    def test_sell_low_confidence_falls_to_hold(self) -> None:
+        # Low confidence strongly negative → HOLD
+        v, _m = _score_to_verdict(-0.4, Decimal("0.3"), False, False, None)
+        assert v == Verdict.HOLD
+
+    def test_avoid_still_fires_high_confidence(self) -> None:
+        # Very negative + high confidence → AVOID unchanged
+        v, _m = _score_to_verdict(-0.6, Decimal("0.7"), False, False, None)
+        assert v == Verdict.AVOID
+
 
 # ---------------------------------------------------------------------------
 # TestSynthesize — full integration

@@ -64,6 +64,9 @@ FRAME_CONCEPTS: dict[str, list[tuple[str, str, str]]] = {
     "operating_cash_flow": [
         ("NetCashProvidedByUsedInOperatingActivities", "USD", ""),
     ],
+    "gross_profit": [
+        ("GrossProfit", "USD", ""),
+    ],
 }
 
 
@@ -222,6 +225,7 @@ class EdgarClient:
             "name": self._ticker_to_name.get(ticker),
             "enterprise_value": None,  # computed downstream from market_cap + debt - cash
             "net_ppe": _get("net_ppe"),
+            "gross_profit": _get("gross_profit"),
         }
 
     def get_fundamentals_batch(self, tickers: list[str]) -> list[dict]:

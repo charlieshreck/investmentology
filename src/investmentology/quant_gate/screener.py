@@ -76,6 +76,7 @@ def _dict_to_snapshot(d: dict) -> FundamentalsSnapshot | None:
             price=d.get("price") or Decimal(0),
             retained_earnings=d.get("retained_earnings") or Decimal(0),
             operating_cash_flow=d.get("operating_cash_flow") or Decimal(0),
+            gross_profit=d.get("gross_profit") or Decimal(0),
         )
     except (KeyError, TypeError, ValueError):
         logger.debug("Failed to convert dict to snapshot for %s", d.get("ticker"))
@@ -94,43 +95,61 @@ def _dict_to_stock(d: dict) -> Stock:
     )
 
 
-def _compute_momentum_scores(tickers: list[str]) -> dict[str, float]:
-    """Compute cross-sectional momentum scores for a batch of tickers.
+def _compute_momentum_and_liquidity(
+    tickers: list[str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Compute cross-sectional momentum scores and average daily dollar volume.
 
-    Momentum = 12-month return minus 1-month return (Jegadeesh-Titman style).
-    Ranks tickers and normalizes to 0.0-1.0 (percentile).
+    Momentum uses Jegadeesh-Titman skip-month: price(T-1m) / price(T-12m) - 1.
+    ADV = mean daily volume × last close price (dollar volume).
+
+    Returns:
+        (momentum_percentiles, adv_dollars) — both keyed by ticker.
     """
     if not tickers:
-        return {}
+        return {}, {}
     try:
         import yfinance as yf
         data = yf.download(tickers, period="1y", progress=False, threads=True)
         if data.empty:
-            return {}
+            return {}, {}
 
         close = data["Close"]
+        volume = data["Volume"] if "Volume" in data.columns else None
         momentum_raw: dict[str, float] = {}
+        adv_dollars: dict[str, float] = {}
         for ticker in tickers:
             col = ticker if len(tickers) > 1 else "Close"
+            vol_col = ticker if len(tickers) > 1 else "Volume"
             if col not in close.columns:
                 continue
             series = close[col].dropna()
-            if len(series) < 30:
-                continue
-            ret_12m = (series.iloc[-1] / series.iloc[0]) - 1
-            ret_1m = (series.iloc[-1] / series.iloc[-22]) - 1 if len(series) > 22 else 0
-            momentum_raw[ticker] = float(ret_12m - ret_1m)
 
-        if not momentum_raw:
-            return {}
+            # ADV: compute for any ticker with price data
+            if volume is not None and vol_col in volume.columns and len(series) >= 22:
+                vol_series = volume[vol_col].dropna()
+                if len(vol_series) >= 22:
+                    avg_vol = float(vol_series.tail(60).mean())
+                    last_price = float(series.iloc[-1])
+                    adv_dollars[ticker] = avg_vol * last_price
+
+            # Momentum: require ≥200 trading days for meaningful J-T signal
+            if len(series) < 200:
+                continue
+            # Jegadeesh-Titman skip-month: price at T-1month / price at T-12months - 1
+            momentum_raw[ticker] = float((series.iloc[-22] / series.iloc[0]) - 1)
 
         # Cross-sectional rank → percentile (0.0 worst, 1.0 best)
-        sorted_tickers = sorted(momentum_raw, key=lambda t: momentum_raw[t])
-        n = len(sorted_tickers)
-        return {t: i / (n - 1) if n > 1 else 0.5 for i, t in enumerate(sorted_tickers)}
+        momentum_pct: dict[str, float] = {}
+        if momentum_raw:
+            sorted_tickers = sorted(momentum_raw, key=lambda t: momentum_raw[t])
+            n = len(sorted_tickers)
+            momentum_pct = {t: i / (n - 1) if n > 1 else 0.5 for i, t in enumerate(sorted_tickers)}
+
+        return momentum_pct, adv_dollars
     except Exception:
-        logger.warning("Momentum computation failed", exc_info=True)
-        return {}
+        logger.warning("Momentum/liquidity computation failed", exc_info=True)
+        return {}, {}
 
 
 class QuantGateScreener:
@@ -291,27 +310,35 @@ class QuantGateScreener:
 
         total_ranked = len(ranked)
 
-        # 5.5. Compute cross-sectional momentum for top-N
+        # 5.5. Compute cross-sectional momentum + liquidity for top-N
         momentum_tickers = [gr.ticker for gr in top_ranked]
-        momentum_scores = _compute_momentum_scores(momentum_tickers)
+        momentum_scores, adv_dollars = _compute_momentum_and_liquidity(momentum_tickers)
         if momentum_scores:
             logger.info("Momentum scores computed for %d/%d tickers", len(momentum_scores), len(momentum_tickers))
+
+        # 5.6. ADV liquidity filter: remove tickers with avg daily dollar volume < $500K
+        adv_min = 500_000
+        pre_filter = len(top_ranked)
+        top_ranked = [gr for gr in top_ranked if adv_dollars.get(gr.ticker, float("inf")) >= adv_min]
+        filtered_count = pre_filter - len(top_ranked)
+        if filtered_count:
+            logger.info("ADV filter removed %d illiquid tickers (<%s/day)", filtered_count, f"${adv_min:,.0f}")
 
         # 6. Calculate Piotroski + Altman + Momentum + Composite for top N
         self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (Piotroski + Altman + Momentum + Composite)...", 80)
         top_results: list[dict] = []
-        for gr in top_ranked:
+        for ordinal, gr in enumerate(top_ranked, start=1):
             snap = snap_by_ticker.get(gr.ticker)
             if snap is None:
                 continue
 
             prior_snap = prior_by_ticker.get(gr.ticker)
             piotroski = calculate_piotroski(snap, previous=prior_snap)
-            altman = calculate_altman(snap)
+            altman = calculate_altman(snap, sector=sectors.get(gr.ticker, ""))
             mom = momentum_scores.get(gr.ticker)
 
             score = composite_score(
-                greenblatt_rank=gr.combined_rank,
+                greenblatt_rank=ordinal,
                 total_ranked=total_ranked,
                 piotroski_score=piotroski.score,
                 has_prior_year=prior_snap is not None,

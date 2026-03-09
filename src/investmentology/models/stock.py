@@ -35,6 +35,7 @@ class FundamentalsSnapshot:
     price: Decimal
     retained_earnings: Decimal = Decimal(0)
     operating_cash_flow: Decimal = Decimal(0)
+    gross_profit: Decimal = Decimal(0)
 
     @property
     def enterprise_value(self) -> Decimal:

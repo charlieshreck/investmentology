@@ -60,9 +60,12 @@ def composite_score(
         greenblatt_pct = Decimal("1.0")
     greenblatt_pct = max(Decimal("0"), min(Decimal("1"), greenblatt_pct))
 
-    # Piotroski component: normalize against achievable max
-    piotroski_max = PIOTROSKI_MAX_WITH_PRIOR if has_prior_year else PIOTROSKI_MAX_WITHOUT_PRIOR
-    piotroski_pct = Decimal(piotroski_score) / Decimal(piotroski_max)
+    # Piotroski component: always normalize against full 9-point scale.
+    # Without prior-year data, cap at 0.5 to prevent data-poor companies
+    # (scoring 3/3) from ranking equal to data-rich ones (scoring 9/9).
+    piotroski_pct = Decimal(piotroski_score) / Decimal(PIOTROSKI_MAX_WITH_PRIOR)
+    if not has_prior_year:
+        piotroski_pct = min(piotroski_pct, Decimal("0.5"))
     piotroski_pct = min(Decimal("1"), piotroski_pct)
 
     # Altman component

@@ -103,10 +103,12 @@ def calculate_piotroski(
 
     # --- Efficiency ---
 
-    # 8. Gross margin improving (proxy: operating margin = operating_income/revenue)
+    # 8. Gross margin improving (use gross_profit when available, else operating_income)
     if previous is not None and current.revenue > ZERO and previous.revenue > ZERO:
-        current_margin = current.operating_income / current.revenue
-        previous_margin = previous.operating_income / previous.revenue
+        curr_gp = current.gross_profit if current.gross_profit != ZERO else current.operating_income
+        prev_gp = previous.gross_profit if previous.gross_profit != ZERO else previous.operating_income
+        current_margin = curr_gp / current.revenue
+        previous_margin = prev_gp / previous.revenue
         details["gross_margin_improving"] = current_margin > previous_margin
     else:
         details["gross_margin_improving"] = False
