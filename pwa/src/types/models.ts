@@ -87,6 +87,8 @@ export interface Recommendation {
   boardAdjustedVerdict?: string | null;
   dataSourceCount?: number;
   dataSourceTotal?: number;
+  adversarialResult?: AdversarialResult | null;
+  predictionCard?: PredictionCard;
 }
 
 export interface AgentStance {

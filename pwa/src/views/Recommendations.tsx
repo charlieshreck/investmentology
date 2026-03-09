@@ -8,16 +8,17 @@ import { MarketStatus } from "../components/shared/MarketStatus";
 import { AddToPortfolioModal } from "../components/shared/AddToPortfolioModal";
 import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
 import { SignalTagCloud } from "../components/shared/SignalTagCloud";
+import { PriceRangeBar } from "../components/shared/PriceRangeBar";
 import { FormattedProse } from "../components/shared/FormattedProse";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
-import type { Recommendation, AgentStance } from "../types/models";
+import type { Recommendation, AgentStance, PredictionCard } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
   ChevronDown, Plus, TrendingUp, TrendingDown,
   Rocket, ShoppingCart, Layers, Anchor, Eye, Scissors, DoorOpen, ShieldAlert, Trash2,
-  RefreshCw,
+  RefreshCw, Clock, AlertTriangle, Target, Shield,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +44,11 @@ function formatCap(n: number): string {
 
 function formatPrice(n: number): string {
   return n > 0 ? `$${n.toFixed(2)}` : "\u2014";
+}
+
+function fmtPrice(v: number | null | undefined): string {
+  if (v == null) return "\u2014";
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 /* ── Signal Pill (unified) ── */
@@ -111,6 +117,50 @@ function earningsPill(momentum?: { label: string; beatStreak: number }) {
   };
   const streak = momentum.beatStreak >= 3 ? ` (${momentum.beatStreak}x beat)` : "";
   return <SignalPill label={`${short[momentum.label] || "EPS"}${streak}`} bg={bg} fg={fg} />;
+}
+
+/* ── Conviction tier config ── */
+const CONVICTION_CONFIG: Record<string, { label: string; bg: string; fg: string; icon: string }> = {
+  ALL_SIGNALS_ALIGNED: { label: "All Aligned", bg: "rgba(52, 211, 153, 0.15)", fg: "var(--color-success)", icon: "\u2605" },
+  HIGH_CONVICTION:     { label: "High",        bg: "rgba(167, 139, 250, 0.15)", fg: "var(--color-accent-bright)", icon: "\u25B2" },
+  MODERATE:            { label: "Moderate",     bg: "rgba(251, 191, 36, 0.12)",  fg: "var(--color-warning)", icon: "\u25CF" },
+  LOW_CONVICTION:      { label: "Low",          bg: "rgba(148, 163, 184, 0.10)", fg: "var(--color-text-muted)", icon: "\u25BD" },
+  MIXED_SIGNALS:       { label: "Mixed",        bg: "rgba(248, 113, 113, 0.12)", fg: "var(--color-error)", icon: "\u26A0" },
+};
+
+/* ── Sort controls ── */
+const SORT_OPTIONS = [
+  { key: "default", label: "Probability" },
+  { key: "upside", label: "Upside %" },
+  { key: "rr", label: "R:R Ratio" },
+  { key: "confidence", label: "Confidence" },
+  { key: "conviction", label: "Conviction" },
+] as const;
+
+const CONVICTION_RANK: Record<string, number> = {
+  ALL_SIGNALS_ALIGNED: 5,
+  HIGH_CONVICTION: 4,
+  MODERATE: 3,
+  LOW_CONVICTION: 2,
+  MIXED_SIGNALS: 1,
+};
+
+function sortRecs(recs: Recommendation[], sortKey: string): Recommendation[] {
+  return [...recs].sort((a, b) => {
+    switch (sortKey) {
+      case "upside":
+        return (b.predictionCard?.upsidePct ?? -999) - (a.predictionCard?.upsidePct ?? -999);
+      case "rr":
+        return (b.predictionCard?.riskRewardRatio ?? -999) - (a.predictionCard?.riskRewardRatio ?? -999);
+      case "confidence":
+        return (b.confidence ?? 0) - (a.confidence ?? 0);
+      case "conviction":
+        return (CONVICTION_RANK[b.predictionCard?.convictionTier ?? ""] ?? 0)
+             - (CONVICTION_RANK[a.predictionCard?.convictionTier ?? ""] ?? 0);
+      default:
+        return (b.successProbability ?? 0) - (a.successProbability ?? 0);
+    }
+  });
 }
 
 /* ── Sparkline (3 month) ── */
@@ -194,6 +244,85 @@ function SuccessRing({ probability }: { probability: number | null }) {
   );
 }
 
+/* ── Prediction Hero — compact 4-stat row ── */
+function PredictionHero({ card }: { card: PredictionCard }) {
+  const rrColor = (card.riskRewardRatio ?? 0) >= 2
+    ? "var(--color-success)"
+    : (card.riskRewardRatio ?? 0) >= 1
+      ? "var(--color-warning)"
+      : "var(--color-error)";
+
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2,
+      marginTop: "var(--space-md)",
+      background: "var(--color-surface-1)",
+      borderRadius: "var(--radius-md)",
+      border: "1px solid var(--glass-border)",
+      overflow: "hidden",
+    }}>
+      {/* Target */}
+      <div style={{
+        padding: "8px 4px", textAlign: "center",
+        background: "rgba(52, 211, 153, 0.04)",
+      }}>
+        <div style={{ fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 2 }}>
+          Target
+        </div>
+        <div style={{
+          fontSize: "var(--text-base)", fontWeight: 800, fontFamily: "var(--font-mono)",
+          color: "var(--color-success)",
+        }}>
+          {fmtPrice(card.compositeTarget)}
+        </div>
+      </div>
+
+      {/* Current */}
+      <div style={{ padding: "8px 4px", textAlign: "center" }}>
+        <div style={{ fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 2 }}>
+          Current
+        </div>
+        <div style={{
+          fontSize: "var(--text-base)", fontWeight: 800, fontFamily: "var(--font-mono)",
+          color: "var(--color-text)",
+        }}>
+          {fmtPrice(card.currentPrice)}
+        </div>
+      </div>
+
+      {/* Upside */}
+      <div style={{
+        padding: "8px 4px", textAlign: "center",
+        background: card.upsidePct != null && card.upsidePct >= 0
+          ? "rgba(52, 211, 153, 0.04)" : "rgba(248, 113, 113, 0.04)",
+      }}>
+        <div style={{ fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 2 }}>
+          Upside
+        </div>
+        <div style={{
+          fontSize: "var(--text-base)", fontWeight: 800, fontFamily: "var(--font-mono)",
+          color: card.upsidePct != null && card.upsidePct >= 0 ? "var(--color-success)" : "var(--color-error)",
+        }}>
+          {card.upsidePct != null ? `${card.upsidePct > 0 ? "+" : ""}${card.upsidePct.toFixed(1)}%` : "\u2014"}
+        </div>
+      </div>
+
+      {/* R:R */}
+      <div style={{ padding: "8px 4px", textAlign: "center" }}>
+        <div style={{ fontSize: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 2 }}>
+          R:R
+        </div>
+        <div style={{
+          fontSize: "var(--text-base)", fontWeight: 800, fontFamily: "var(--font-mono)",
+          color: rrColor,
+        }}>
+          {card.riskRewardRatio != null ? `${card.riskRewardRatio}:1` : "\u2014"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ── Main Recommendation Card ── */
 function RecCard({
@@ -214,6 +343,9 @@ function RecCard({
   const ringColor = probPct != null
     ? (probPct >= 70 ? "var(--color-success)" : probPct >= 40 ? "var(--color-warning)" : "var(--color-error)")
     : vColor;
+  const pc = rec.predictionCard;
+  const convTier = pc ? (CONVICTION_CONFIG[pc.convictionTier] ?? CONVICTION_CONFIG.MODERATE) : null;
+  const adv = rec.adversarialResult;
 
   return (
     <motion.div
@@ -310,15 +442,84 @@ function RecCard({
           </div>
         </div>
 
-        {/* Row 2: Agent consensus segments — proportional fill */}
+        {/* Row 2: Prediction hero stats (if available) */}
+        {pc && pc.compositeTarget != null && (
+          <PredictionHero card={pc} />
+        )}
+
+        {/* Row 3: Price range bar (if prediction card exists) */}
+        {pc && pc.compositeTarget != null && (
+          <div style={{
+            marginTop: "var(--space-sm)",
+            padding: "var(--space-xs) var(--space-sm)",
+            background: "var(--color-surface-1)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--glass-border)",
+          }}>
+            <PriceRangeBar card={pc} />
+          </div>
+        )}
+
+        {/* Row 4: Conviction + Hold Period + Earnings badges */}
+        {pc && (
+          <div style={{
+            display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-sm)",
+            flexWrap: "wrap", alignItems: "center",
+          }}>
+            {convTier && (
+              <SignalPill
+                label={`${convTier.icon} ${convTier.label}`}
+                bg={convTier.bg} fg={convTier.fg}
+              />
+            )}
+            {pc.holdingPeriod && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "2px 8px", borderRadius: 99, fontSize: 10, fontWeight: 600,
+                background: "rgba(148, 163, 184, 0.08)", color: "var(--color-text-secondary)",
+                whiteSpace: "nowrap",
+              }}>
+                <Clock size={10} />
+                {pc.holdingPeriod}
+              </span>
+            )}
+            {pc.earningsWarning && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "2px 8px", borderRadius: 99, fontSize: 10, fontWeight: 600,
+                background: pc.earningsWarning.toLowerCase().includes("defer") || pc.earningsWarning.toLowerCase().includes("block")
+                  ? "rgba(248, 113, 113, 0.12)" : "rgba(251, 191, 36, 0.12)",
+                color: pc.earningsWarning.toLowerCase().includes("defer") || pc.earningsWarning.toLowerCase().includes("block")
+                  ? "var(--color-error)" : "var(--color-warning)",
+                whiteSpace: "nowrap",
+              }}>
+                <AlertTriangle size={10} />
+                {pc.earningsWarning}
+              </span>
+            )}
+            {/* Adversarial verdict badge */}
+            {adv && (
+              <SignalPill
+                label={`Munger: ${adv.verdict}`}
+                bg={adv.verdict === "PROCEED" ? "rgba(52, 211, 153, 0.12)"
+                  : adv.verdict === "CAUTION" ? "rgba(251, 191, 36, 0.12)"
+                  : "rgba(248, 113, 113, 0.12)"}
+                fg={adv.verdict === "PROCEED" ? "var(--color-success)"
+                  : adv.verdict === "CAUTION" ? "var(--color-warning)"
+                  : "var(--color-error)"}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Row 5: Agent consensus segments — proportional fill */}
         {stances.length > 0 && (() => {
           const bulls = stances.filter((s) => s.sentiment >= 0.15);
           const bears = stances.filter((s) => s.sentiment <= -0.15);
           const holds = stances.filter((s) => s.sentiment > -0.15 && s.sentiment < 0.15);
-          void stances.length;
           const segments: { count: number; label: string; bg: string; fg: string }[] = [];
           if (bulls.length) segments.push({
-            count: bulls.length, label: `${bulls.length} Bull${bulls.length > 1 ? "ish" : "ish"}`,
+            count: bulls.length, label: `${bulls.length} Bullish`,
             bg: "rgba(52, 211, 153, 0.15)", fg: "var(--color-success)",
           });
           if (holds.length) segments.push({
@@ -326,7 +527,7 @@ function RecCard({
             bg: "rgba(251, 191, 36, 0.12)", fg: "var(--color-warning)",
           });
           if (bears.length) segments.push({
-            count: bears.length, label: `${bears.length} Bear${bears.length > 1 ? "ish" : "ish"}`,
+            count: bears.length, label: `${bears.length} Bearish`,
             bg: "rgba(248, 113, 113, 0.15)", fg: "var(--color-error)",
           });
           return (
@@ -353,7 +554,7 @@ function RecCard({
           );
         })()}
 
-        {/* Row 3: Signal pills */}
+        {/* Row 6: Signal pills */}
         <div style={{
           display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-sm)",
           flexWrap: "wrap", alignItems: "center",
@@ -583,6 +784,128 @@ function RecCard({
                 <SignalTagCloud stances={stances} />
               )}
 
+              {/* Agent price targets (from prediction card) */}
+              {pc && pc.agentTargets && pc.agentTargets.length > 0 && (
+                <div>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: "var(--space-xs)",
+                  }}>
+                    <Target size={12} color="var(--color-text-muted)" />
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: "0.05em", color: "var(--color-text-muted)",
+                    }}>
+                      Agent Price Targets
+                    </span>
+                  </div>
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+                    gap: "var(--space-xs)",
+                  }}>
+                    {[...pc.agentTargets]
+                      .sort((a, b) => b.weight - a.weight)
+                      .map((t) => (
+                        <div
+                          key={t.agent}
+                          style={{
+                            display: "flex", alignItems: "center", gap: "var(--space-xs)",
+                            padding: "3px var(--space-sm)",
+                            background: "var(--color-surface-0)",
+                            borderRadius: "var(--radius-sm)",
+                            border: "1px solid var(--glass-border)",
+                          }}
+                        >
+                          <span style={{
+                            fontSize: 10, fontWeight: 600, color: "var(--color-text-secondary)",
+                            flex: 1, textTransform: "capitalize",
+                          }}>
+                            {t.agent}
+                          </span>
+                          <span style={{
+                            fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700,
+                            color: t.targetPrice > pc.currentPrice ? "var(--color-success)" : "var(--color-error)",
+                          }}>
+                            {fmtPrice(t.targetPrice)}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Risk summary from board narrative */}
+              {rec.boardNarrative?.risk_summary && (
+                <div style={{
+                  padding: "var(--space-sm) var(--space-md)",
+                  background: "rgba(248, 113, 113, 0.04)",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid rgba(248, 113, 113, 0.1)",
+                }}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: 4,
+                  }}>
+                    <Shield size={12} color="var(--color-error)" />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-error)" }}>
+                      Risk Summary
+                    </span>
+                  </div>
+                  <FormattedProse text={rec.boardNarrative.risk_summary} fontSize="11px" color="var(--color-text-muted)" />
+                </div>
+              )}
+
+              {/* Kill scenarios from adversarial result */}
+              {adv && adv.kill_scenarios && adv.kill_scenarios.length > 0 && (
+                <div>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: "var(--space-sm)", marginBottom: "var(--space-xs)",
+                  }}>
+                    <AlertTriangle size={12} color="var(--color-warning)" />
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: "0.05em", color: "var(--color-warning)",
+                    }}>
+                      Kill Scenarios
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
+                    {adv.kill_scenarios.slice(0, 3).map((ks, i) => {
+                      const impactColor = ks.impact === "fatal" ? "var(--color-error)"
+                        : ks.impact === "severe" ? "var(--color-warning)" : "var(--color-text-muted)";
+                      return (
+                        <div key={i} style={{
+                          padding: "var(--space-xs) var(--space-sm)",
+                          background: "var(--color-surface-0)",
+                          borderRadius: "var(--radius-sm)",
+                          border: "1px solid var(--glass-border)",
+                          fontSize: 10, color: "var(--color-text-secondary)",
+                          display: "flex", alignItems: "flex-start", gap: "var(--space-sm)",
+                        }}>
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4,
+                            background: ks.likelihood === "high" ? "rgba(248, 113, 113, 0.12)"
+                              : ks.likelihood === "medium" ? "rgba(251, 191, 36, 0.12)"
+                              : "rgba(148, 163, 184, 0.08)",
+                            color: ks.likelihood === "high" ? "var(--color-error)"
+                              : ks.likelihood === "medium" ? "var(--color-warning)"
+                              : "var(--color-text-muted)",
+                            whiteSpace: "nowrap", flexShrink: 0,
+                          }}>
+                            {ks.likelihood}
+                          </span>
+                          <span style={{ flex: 1, lineHeight: 1.4 }}>{ks.scenario}</span>
+                          <span style={{
+                            fontSize: 9, fontWeight: 600, color: impactColor,
+                            whiteSpace: "nowrap", flexShrink: 0,
+                          }}>
+                            {ks.impact}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Advisory board compact votes */}
               {rec.advisoryOpinions && rec.advisoryOpinions.length > 0 && (() => {
                 const opinions = rec.advisoryOpinions!;
@@ -653,6 +976,7 @@ export function Recommendations() {
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const [portfolioTarget, setPortfolioTarget] = useState<Recommendation | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState("default");
 
   const handleRefresh = useCallback(async () => {
     await refetch();
@@ -727,33 +1051,62 @@ export function Recommendations() {
           </div>
         )}
 
-        {/* Verdict group badges */}
-        <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
-          {verdictOrder.map((v) => (
-            <a
-              key={v}
-              href={`#verdict-${v}`}
-              style={{ textDecoration: "none" }}
+        {/* Verdict group badges + Sort controls */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+          <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
+            {verdictOrder.map((v) => (
+              <a
+                key={v}
+                href={`#verdict-${v}`}
+                style={{ textDecoration: "none" }}
+              >
+                <Badge variant={verdictBadgeVariant[v] || "neutral"}>
+                  {verdictGroupMeta[v]?.title || verdictLabel[v] || v} ({groupedByVerdict[v].length})
+                </Badge>
+              </a>
+            ))}
+            <button
+              onClick={() => refetch()}
+              style={{
+                padding: "var(--space-xs) var(--space-md)",
+                borderRadius: "var(--radius-full)",
+                background: "var(--color-surface-2)",
+                border: "1px solid var(--glass-border)",
+                color: "var(--color-text-secondary)",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+              }}
             >
-              <Badge variant={verdictBadgeVariant[v] || "neutral"}>
-                {verdictGroupMeta[v]?.title || verdictLabel[v] || v} ({groupedByVerdict[v].length})
-              </Badge>
-            </a>
-          ))}
-          <button
-            onClick={() => refetch()}
-            style={{
-              padding: "var(--space-xs) var(--space-md)",
-              borderRadius: "var(--radius-full)",
-              background: "var(--color-surface-2)",
-              border: "1px solid var(--glass-border)",
-              color: "var(--color-text-secondary)",
-              cursor: "pointer",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            Refresh
-          </button>
+              Refresh
+            </button>
+          </div>
+
+          {/* Sort bar */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: "var(--space-xs)",
+            fontSize: 10, color: "var(--color-text-muted)",
+          }}>
+            <span style={{ fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", marginRight: 2 }}>
+              Sort
+            </span>
+            {SORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setSortKey(opt.key)}
+                style={{
+                  padding: "2px 10px", borderRadius: 99,
+                  background: sortKey === opt.key ? "var(--color-accent-ghost)" : "transparent",
+                  border: sortKey === opt.key ? "1px solid rgba(99,102,241,0.2)" : "1px solid transparent",
+                  color: sortKey === opt.key ? "var(--color-accent-bright)" : "var(--color-text-muted)",
+                  cursor: "pointer", fontSize: 10, fontWeight: 600,
+                  fontFamily: "var(--font-sans)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Empty state */}
@@ -783,7 +1136,7 @@ export function Recommendations() {
 
         {/* Verdict groups */}
         {verdictOrder.map((v) => {
-          const recs = [...groupedByVerdict[v]].sort((a, b) => (b.successProbability ?? 0) - (a.successProbability ?? 0));
+          const recs = sortRecs(groupedByVerdict[v], sortKey);
           return (
             <div key={v} id={`verdict-${v}`}>
               {/* Group wrapper — border container for whole category */}

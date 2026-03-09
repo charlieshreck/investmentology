@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends
 
 from investmentology.api.deps import get_registry
 from investmentology.advisory.portfolio_fit import PortfolioFitScorer
+from investmentology.advisory.prediction_card import (
+    AgentTarget,
+    PredictionCard,
+    PredictionCardInputs,
+    build_prediction_card,
+)
 from investmentology.api.routes.shared import (
     consensus_tier as _consensus_tier,
     get_dividend_data,
@@ -53,6 +60,179 @@ def _build_price_history(row: dict, registry: Registry) -> list[dict]:
         ]
     except Exception:
         return []
+
+def _build_prediction_cards(
+    registry: Registry, tickers: list[str],
+) -> dict[str, PredictionCard]:
+    """Batch-build prediction cards for recommendation tickers."""
+    if not tickers:
+        return {}
+
+    db = registry._db
+    result: dict[str, PredictionCard] = {}
+
+    # 1. Batch-fetch agent signal rows (target prices)
+    signal_map: dict[str, list[dict]] = {}
+    try:
+        placeholders = ",".join(["%s"] * len(tickers))
+        rows = db.execute(
+            "SELECT DISTINCT ON (ticker, agent_name) ticker, agent_name, signals "
+            "FROM invest.agent_signals "
+            f"WHERE ticker IN ({placeholders}) "
+            "ORDER BY ticker, agent_name, created_at DESC",
+            tuple(tickers),
+        )
+        for r in (rows or []):
+            signal_map.setdefault(r["ticker"], []).append(r)
+    except Exception:
+        logger.debug("Could not fetch agent signals for prediction cards")
+
+    # 2. Batch-fetch quant gate data
+    qg_map: dict[str, dict] = {}
+    try:
+        placeholders = ",".join(["%s"] * len(tickers))
+        rows = db.execute(
+            "SELECT ticker, combined_rank, piotroski_score, altman_zone "
+            "FROM invest.quant_gate_results "
+            "WHERE run_id = ("
+            "  SELECT id FROM invest.quant_gate_runs ORDER BY id DESC LIMIT 1"
+            f") AND ticker IN ({placeholders})",
+            tuple(tickers),
+        )
+        for r in (rows or []):
+            qg_map[r["ticker"]] = r
+    except Exception:
+        logger.debug("Could not fetch quant gate data for prediction cards")
+
+    # 3. Batch-fetch earnings context
+    earnings_map: dict[str, str | None] = {}
+    try:
+        from investmentology.advisory.earnings_calendar import (
+            classify_earnings_proximity,
+            format_earnings_alert,
+        )
+        placeholders = ",".join(["%s"] * len(tickers))
+        rows = db.execute(
+            "SELECT DISTINCT ON (ticker) ticker, data_value "
+            "FROM invest.pipeline_data_cache "
+            f"WHERE ticker IN ({placeholders}) AND data_key = 'earnings_context' "
+            "ORDER BY ticker, created_at DESC",
+            tuple(tickers),
+        )
+        for r in (rows or []):
+            if r.get("data_value"):
+                try:
+                    proximity = classify_earnings_proximity(r["ticker"], r["data_value"])
+                    warning = format_earnings_alert(proximity)
+                    if warning is None and proximity.days_to_earnings is not None:
+                        warning = f"Earnings in {proximity.days_to_earnings}d"
+                    earnings_map[r["ticker"]] = warning
+                except Exception:
+                    pass
+    except Exception:
+        logger.debug("Could not fetch earnings context for prediction cards")
+
+    # 4. SPY benchmark
+    spy_price = None
+    try:
+        spy_rows = db.execute(
+            "SELECT spy_price FROM invest.market_snapshots "
+            "ORDER BY snapshot_date DESC LIMIT 1",
+        )
+        if spy_rows:
+            spy_price = float(spy_rows[0]["spy_price"])
+    except Exception:
+        pass
+
+    # 5. Skill weights
+    try:
+        from investmentology.agents.skills import SKILLS
+    except Exception:
+        SKILLS = {}
+
+    # Build card for each ticker
+    for ticker in tickers:
+        try:
+            signals = signal_map.get(ticker, [])
+            if not signals:
+                continue
+
+            # Extract agent target prices
+            pc_targets: list[AgentTarget] = []
+            for r in signals:
+                sigs = r.get("signals")
+                if sigs and isinstance(sigs, str):
+                    sigs = json.loads(sigs)
+                if sigs and isinstance(sigs, dict):
+                    tp = sigs.get("target_price")
+                    if tp and isinstance(tp, (int, float)) and tp > 0:
+                        agent_name = r["agent_name"]
+                        weight = SKILLS[agent_name].base_weight if agent_name in SKILLS else 0.05
+                        pc_targets.append(AgentTarget(
+                            agent=agent_name, target_price=float(tp), weight=weight,
+                        ))
+
+            if not pc_targets:
+                continue
+
+            # Bear case from Klarman
+            bear_case = None
+            for r in signals:
+                if r["agent_name"] == "klarman":
+                    sigs = r.get("signals")
+                    if sigs and isinstance(sigs, str):
+                        sigs = json.loads(sigs)
+                    if sigs and isinstance(sigs, dict):
+                        bc = sigs.get("bear_case_price") or sigs.get("bear_case")
+                        if bc and isinstance(bc, (int, float)) and bc > 0:
+                            bear_case = float(bc)
+
+            qg = qg_map.get(ticker) or {}
+
+            inputs = PredictionCardInputs(
+                ticker=ticker,
+                current_price=0,  # Will be set from row data
+                verdict="",       # Will be set from row data
+                confidence=0,     # Will be set from row data
+                agent_targets=pc_targets,
+                bear_case_price=bear_case,
+                quant_gate_rank=qg.get("combined_rank"),
+                piotroski_score=qg.get("piotroski_score"),
+                altman_zone=qg.get("altman_zone"),
+                earnings_warning=earnings_map.get(ticker),
+                spy_price=spy_price,
+            )
+            result[ticker] = inputs  # Store inputs; finalize with row data later
+        except Exception:
+            logger.debug("Could not build prediction card for %s", ticker)
+
+    return result
+
+
+def _finalize_prediction_card(
+    inputs: PredictionCardInputs,
+    row: dict,
+) -> PredictionCard | None:
+    """Finalize prediction card with row-specific data (price, verdict, confidence)."""
+    try:
+        price = float(row.get("current_price") or 0)
+        if price <= 0:
+            return None
+        inputs.current_price = price
+        inputs.verdict = row.get("verdict", "")
+        inputs.confidence = float(row.get("confidence") or 0)
+
+        # Compute consensus % from agent stances
+        stances = row.get("agent_stances") or []
+        if isinstance(stances, str):
+            stances = json.loads(stances)
+        bullish = sum(1 for s in stances if s.get("sentiment", 0) > 0)
+        inputs.agent_consensus_pct = (bullish / len(stances) * 100) if stances else 0.0
+
+        return build_prediction_card(inputs)
+    except Exception:
+        return None
+
 
 def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
     entry_price = float(row["entry_price"]) if row.get("entry_price") else 0.0
@@ -241,6 +421,16 @@ def _format_recommendation(row: dict, registry: Registry | None = None) -> dict:
         result["dataSourceCount"] = dsc
         result["dataSourceTotal"] = row.get("_data_source_total", 12)
 
+    # Prediction card
+    pc = row.get("_prediction_card")
+    if pc:
+        result["predictionCard"] = pc.to_dict()
+
+    # Adversarial result (already in row, now surfaced)
+    adv = row.get("adversarial_result")
+    if adv:
+        result["adversarialResult"] = adv
+
     return result
 
 
@@ -377,6 +567,13 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
         except Exception:
             logger.debug("Could not fetch data coverage counts")
 
+    # Build prediction cards (batch — 4 queries total)
+    pc_inputs: dict = {}
+    try:
+        pc_inputs = _build_prediction_cards(registry, rec_tickers)
+    except Exception:
+        logger.debug("Could not build prediction cards")
+
     # Apply enrichment results
     for row in positive_rows:
         ticker = row.get("ticker", "")
@@ -401,6 +598,12 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
         em = earnings_results.get(ticker)
         if em:
             row["_earnings_momentum"] = em
+        # Prediction card
+        pc_input = pc_inputs.get(ticker)
+        if pc_input:
+            card = _finalize_prediction_card(pc_input, row)
+            if card:
+                row["_prediction_card"] = card
 
     items = [_format_recommendation(r, registry) for r in positive_rows]
 
