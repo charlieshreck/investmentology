@@ -21,7 +21,8 @@ Now you will see the positions of your peer analysts. Review their arguments, co
 they raise valid points you missed, and provide a REVISED assessment.
 
 Rules:
-- You CANNOT change your overall direction (bullish/bearish/neutral)
+- You CAN change your overall direction (bullish/bearish/neutral) if peer evidence is compelling
+  BUT you MUST explain why in "direction_change_reason" (mandatory if direction flips)
 - You CAN adjust your confidence level up or down
 - You CAN add or remove signal tags based on peer arguments
 - You CAN revise your target price
@@ -32,7 +33,8 @@ Return your revised analysis as JSON with the same structure as before:
     "signals": [{"tag": "...", "strength": "...", "detail": "..."}],
     "confidence": 0.XX,
     "target_price": NNN,
-    "summary": "Revised assessment after peer review..."
+    "summary": "Revised assessment after peer review...",
+    "direction_change_reason": "Only required if you changed direction. Explain what evidence convinced you."
 }
 
 Return ONLY valid JSON. No markdown, no code fences."""
@@ -126,8 +128,8 @@ class DebateOrchestrator:
             f"{_format_stance(original)}\n\n"
             f"Peer analyst positions:\n{all_stances}\n\n"
             f"Based on the peer positions above, provide your REVISED assessment. "
-            f"Remember: you cannot change your overall direction, but you can adjust "
-            f"confidence, signals, and target price."
+            f"You MAY change your overall direction if peer evidence is compelling, "
+            f"but you MUST include 'direction_change_reason' explaining why."
         )
 
         # Determine provider for this agent

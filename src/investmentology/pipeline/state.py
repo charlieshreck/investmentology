@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 STALENESS_HOURS = 24
 
 # Steps in dependency order
+STEP_MACRO_CLASSIFY = "macro_classify"
 STEP_DATA_FETCH = "data_fetch"
 STEP_DATA_VALIDATE = "data_validate"
 STEP_PRE_FILTER = "pre_filter"

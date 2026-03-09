@@ -48,6 +48,10 @@ _TYPE_GUIDANCE: dict[tuple[str, str], str] = {
     ("dalio", "permanent"): "PERMANENT position — evaluate through all 4 economic quadrants. Will this company compound through rising rates, falling growth, stagflation? All-weather resilience is the test.",
     ("dalio", "core"): "CORE position — which quadrant are we in, and does this position benefit? Evaluate regime alignment over 2-5 years.",
     ("dalio", "tactical"): "TACTICAL position — regime timing is critical. Is the current macro regime favorable for this trade? When does the regime shift invalidate the thesis?",
+    # Marks
+    ("marks", "permanent"): "PERMANENT position — second-level thinking over decades. Is consensus correct that this will compound for 20+ years? Where is the pendulum on the sector's long-term narrative?",
+    ("marks", "core"): "CORE position — where is consensus vs reality for a 3-5 year hold? Is the pendulum extended in either direction?",
+    ("marks", "tactical"): "TACTICAL position — short-term pendulum assessment critical. Is sentiment at an extreme? Is there asymmetric risk/reward in the next 3-12 months?",
     # Simons
     ("simons", "permanent"): "PERMANENT position — long-term technical trends. Multi-year uptrend? Volume patterns suggesting institutional accumulation.",
     ("simons", "core"): "CORE position — medium-term technical analysis. Trend strength, support/resistance levels, momentum indicators.",
@@ -175,6 +179,9 @@ class AgentRunner:
 
         if "research_briefing" in opt and request.research_briefing:
             parts.extend(self._fmt_research_briefing(request.research_briefing))
+
+        if "macro_regime" in opt and request.macro_regime:
+            parts.extend(self._fmt_macro_regime(request.macro_regime))
 
         if "macro_context" in opt and request.macro_context:
             parts.extend(self._fmt_macro(request.macro_context))
@@ -686,6 +693,23 @@ class AgentRunner:
             briefing,
             "=" * 60,
         ]
+
+    @staticmethod
+    def _fmt_macro_regime(regime: dict) -> list[str]:
+        """Format the pre-classified macro regime for agent context."""
+        parts = [
+            "",
+            "MACRO REGIME (pre-classified, factual):",
+            f"  Regime: {regime.get('regime', 'unknown').upper()}",
+            f"  Confidence: {regime.get('confidence', 0):.0%}",
+        ]
+        signals = regime.get("signals", {})
+        if signals:
+            for k, v in signals.items():
+                parts.append(f"  {k}: {v}")
+        if regime.get("summary"):
+            parts.append(f"  Summary: {regime['summary']}")
+        return parts
 
     @staticmethod
     def _fmt_macro(macro: dict) -> list[str]:

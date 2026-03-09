@@ -272,6 +272,9 @@ class PipelineController:
         # 3. Refresh portfolio ticker set
         self._portfolio_tickers = set(get_portfolio_tickers(self.db))
 
+        # 3b. Macro regime pre-classification (once per cycle)
+        await self._ensure_macro_regime(cycle_id)
+
         # 4. Populate screening steps for tickers needing analysis
         tickers = self._get_analysis_tickers()
         for ticker in tickers:
@@ -1598,6 +1601,59 @@ class PipelineController:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _ensure_macro_regime(self, cycle_id: UUID) -> None:
+        """Run macro regime classification once per cycle.
+
+        Uses FRED data from the enricher to classify the current macro
+        environment. Result is stored in pipeline_data_cache with
+        ticker='__cycle__' so all agents receive the same factual context.
+        """
+        # Check if already classified this cycle
+        existing = state.get_data_cache(
+            self.db, cycle_id, "__cycle__", "macro_regime",
+        )
+        if existing:
+            return
+
+        try:
+            from investmentology.data.macro_regime import (
+                classify_macro_regime,
+                macro_regime_to_dict,
+            )
+
+            # Try to get FRED macro context from this cycle's cache first
+            macro_ctx = state.get_data_cache(
+                self.db, cycle_id, "__cycle__", "macro_context",
+            )
+
+            # Fall back to fetching fresh FRED data
+            if not macro_ctx and self._enricher and self._enricher._fred:
+                loop = asyncio.get_event_loop()
+                macro_ctx = await loop.run_in_executor(
+                    None, self._enricher._fred.get_macro_context,
+                )
+                if macro_ctx:
+                    state.store_data_cache(
+                        self.db, cycle_id, "__cycle__", "macro_context",
+                        macro_ctx,
+                    )
+
+            if not macro_ctx:
+                logger.warning("No FRED data available for macro regime classification")
+                return
+
+            result = classify_macro_regime(macro_ctx)
+            state.store_data_cache(
+                self.db, cycle_id, "__cycle__", "macro_regime",
+                macro_regime_to_dict(result),
+            )
+            logger.info(
+                "Macro regime: %s (confidence=%.0f%%): %s",
+                result.regime, result.confidence * 100, result.summary,
+            )
+        except Exception:
+            logger.warning("Macro regime classification failed", exc_info=True)
 
     def _get_or_create_cycle(self) -> UUID | None:
         """Get the active cycle or create a new one."""

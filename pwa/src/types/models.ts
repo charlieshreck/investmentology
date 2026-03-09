@@ -497,3 +497,34 @@ export interface AnalysisOverviewTicker {
   dataAge: Record<string, string>;
   cappedAgentCount: number;
 }
+
+// ── Prediction Card (stock outcome view) ──────────────────────────────────
+
+export interface PredictionCardAgent {
+  agent: string;
+  targetPrice: number;
+  weight: number;
+}
+
+export interface PredictionCard {
+  ticker: string;
+  currentPrice: number;
+  verdict: string;
+  confidence: number;
+  compositeTarget: number | null;
+  targetRangeLow: number | null;
+  targetRangeHigh: number | null;
+  bearCase: number | null;
+  upsidePct: number | null;
+  downsidePct: number | null;
+  riskRewardRatio: number | null;
+  convictionTier: string;
+  agentConsensusPct: number;
+  quantGateRank: number | null;
+  piotroskiScore: number | null;
+  altmanZone: string | null;
+  holdingPeriod: string;
+  earningsWarning: string | null;
+  settlementBenchmarkSpy: number | null;
+  agentTargets: PredictionCardAgent[];
+}

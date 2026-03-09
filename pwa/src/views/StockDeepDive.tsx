@@ -9,7 +9,7 @@ import { Badge } from "../components/shared/Badge";
 import { formatCap } from "../utils/deepdiveHelpers";
 import { useAnalysis } from "../contexts/AnalysisContext";
 import { useStore } from "../stores/useStore";
-import type { AdversarialResult, TargetPriceRange } from "../types/models";
+import type { AdversarialResult, PredictionCard, TargetPriceRange } from "../types/models";
 
 // Layer 1
 import { OrbitBorder } from "../components/shared/OrbitBorder";
@@ -27,6 +27,7 @@ import { CollapsiblePanel } from "../components/deepdive/CollapsiblePanel";
 import { VerdictMathPanel } from "../components/deepdive/VerdictMathPanel";
 import { DataHealthPanel } from "../components/deepdive/DataHealthPanel";
 import { EnrichmentPanel } from "../components/deepdive/EnrichmentPanel";
+import { PredictionPanel } from "../components/deepdive/PredictionPanel";
 import { PipelineActivityPill } from "../components/deepdive/PipelineActivityPill";
 // Layer 3
 import { ArchiveSection } from "../components/deepdive/ArchiveSection";
@@ -259,6 +260,7 @@ export interface StockResponse {
   consensusTier: string | null;
   targetPriceRange: TargetPriceRange | null;
   researchBriefing: ResearchBriefing | null;
+  predictionCard: PredictionCard | null;
 }
 
 // ─── Orchestrator ───────────────────────────────────────────────────────────
@@ -635,6 +637,7 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
          ═══════════════════════════════════════════════════════════════════ */}
 
       {data.verdict && <AgentAnalysisPanel verdict={data.verdict} signalData={data.signals} />}
+      {data.predictionCard && <PredictionPanel card={data.predictionCard} />}
       {data.verdict && <VerdictMathPanel verdict={data.verdict} />}
       <DataHealthPanel
         ticker={data.ticker}

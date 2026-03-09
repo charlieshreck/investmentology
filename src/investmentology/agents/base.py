@@ -48,6 +48,7 @@ class AnalysisRequest:
     previous_verdict: dict | None = None
     previous_signals: list[dict] | None = None
     # Thesis lifecycle context (Phase 0+1)
+    macro_regime: dict | None = None  # Pre-classified macro regime (expansion/late_cycle/contraction/recovery)
     market_snapshot: dict | None = None  # SPY, VIX, yields at analysis time
     position_thesis: str | None = None  # Original buy thesis (immutable)
     position_type: str | None = None  # permanent, core, tactical

@@ -270,6 +270,95 @@ class StockService:
                 "median": sorted_prices[len(sorted_prices) // 2],
             }
 
+        # --- Prediction card assembly ---
+        prediction_card = None
+        if verdict_data and fund_data and fund_data.get("price"):
+            try:
+                from investmentology.advisory.prediction_card import (
+                    AgentTarget,
+                    PredictionCardInputs,
+                    build_prediction_card,
+                )
+                from investmentology.agents.skills import SKILLS
+
+                pc_targets = []
+                for r in signal_rows:
+                    sigs = r.get("signals")
+                    if sigs and isinstance(sigs, dict):
+                        tp = sigs.get("target_price")
+                        if tp and isinstance(tp, (int, float)) and tp > 0:
+                            agent_name = r["agent_name"]
+                            weight = SKILLS[agent_name].base_weight if agent_name in SKILLS else 0.05
+                            pc_targets.append(AgentTarget(
+                                agent=agent_name, target_price=float(tp), weight=weight,
+                            ))
+
+                stances = verdict_data.get("agentStances") or []
+                if isinstance(stances, str):
+                    import json
+                    stances = json.loads(stances)
+                bullish = sum(1 for s in stances if s.get("sentiment", 0) > 0)
+                consensus_pct = (bullish / len(stances) * 100) if stances else 0.0
+
+                # Earnings proximity from cached pipeline data
+                earnings_warning = None
+                try:
+                    from investmentology.advisory.earnings_calendar import (
+                        classify_earnings_proximity,
+                        format_earnings_alert,
+                    )
+                    ep_rows = registry._db.execute(
+                        "SELECT data_value FROM invest.pipeline_data_cache "
+                        "WHERE ticker = %s AND data_key = 'earnings_context' "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (ticker,),
+                    )
+                    if ep_rows and ep_rows[0].get("data_value"):
+                        proximity = classify_earnings_proximity(ticker, ep_rows[0]["data_value"])
+                        earnings_warning = format_earnings_alert(proximity)
+                        if earnings_warning is None and proximity.days_to_earnings is not None:
+                            earnings_warning = (
+                                f"Earnings in {proximity.days_to_earnings}d (safe to enter)"
+                            )
+                except Exception:
+                    pass
+
+                # SPY benchmark
+                spy_rows = registry._db.execute(
+                    "SELECT spy_price FROM invest.market_snapshots "
+                    "ORDER BY snapshot_date DESC LIMIT 1",
+                )
+                spy_price = float(spy_rows[0]["spy_price"]) if spy_rows else None
+
+                # Bear case from Klarman agent signals
+                bear_case = None
+                for r in signal_rows:
+                    if r["agent_name"] == "klarman":
+                        sigs = r.get("signals")
+                        if sigs and isinstance(sigs, dict):
+                            bc = sigs.get("bear_case_price") or sigs.get("bear_case")
+                            if bc and isinstance(bc, (int, float)) and bc > 0:
+                                bear_case = float(bc)
+
+                inputs = PredictionCardInputs(
+                    ticker=ticker,
+                    current_price=float(fund_data["price"]),
+                    verdict=verdict_data.get("recommendation", ""),
+                    confidence=float(verdict_data.get("confidence") or 0),
+                    agent_targets=pc_targets,
+                    bear_case_price=bear_case,
+                    agent_consensus_pct=consensus_pct,
+                    quant_gate_rank=quant_gate.get("combinedRank") if quant_gate else None,
+                    piotroski_score=quant_gate.get("piotroskiScore") if quant_gate else None,
+                    altman_zone=quant_gate.get("altmanZone") if quant_gate else None,
+                    earnings_warning=earnings_warning,
+                    spy_price=spy_price,
+                )
+                card = build_prediction_card(inputs)
+                prediction_card = card.to_dict()
+            except Exception:
+                logger.debug("Could not build prediction card for %s", ticker)
+
         stab_score, stab_label = verdict_stability(ticker, registry)
         cons_tier = consensus_tier(
             float(verdict_data["consensusScore"]) if verdict_data and verdict_data.get("consensusScore") else None
@@ -333,6 +422,7 @@ class StockService:
             "consensusTier": cons_tier,
             "targetPriceRange": target_price_range,
             "researchBriefing": research_briefing,
+            "predictionCard": prediction_card,
         }
 
 
