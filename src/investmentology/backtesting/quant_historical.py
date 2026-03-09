@@ -392,32 +392,47 @@ class HistoricalQuantBacktest:
                 return d
         return date(screen_year, 1, 15)
 
+    @staticmethod
+    def _yf_download_with_retry(tickers, start, end, max_retries=3):
+        """Download yfinance data with rate-limit retry and backoff."""
+        import yfinance as yf
+
+        for attempt in range(max_retries):
+            try:
+                data = yf.download(
+                    tickers, start=str(start), end=str(end),
+                    progress=False, threads=True,
+                )
+                return data
+            except Exception as e:
+                if "Rate" in str(e) or "429" in str(e) or attempt < max_retries - 1:
+                    wait = 30 * (attempt + 1)
+                    logger.warning("yfinance rate limited, waiting %ds (attempt %d/%d)", wait, attempt + 1, max_retries)
+                    time.sleep(wait)
+                else:
+                    raise
+        return None
+
     def _fetch_prices_at_date(
         self,
         tickers: list[str],
         as_of: date,
     ) -> dict[str, Decimal]:
         """Fetch closing prices at a specific historical date using yfinance."""
-        import yfinance as yf
-
         prices: dict[str, Decimal] = {}
-        # Fetch in chunks to avoid yfinance overload
-        chunk_size = 100
+        chunk_size = 50  # Smaller chunks to avoid rate limits
         for i in range(0, len(tickers), chunk_size):
             chunk = tickers[i : i + chunk_size]
             try:
-                # Look back 7 days to handle weekends/holidays
                 start = as_of - timedelta(days=7)
-                data = yf.download(
-                    chunk, start=str(start), end=str(as_of + timedelta(days=1)),
-                    progress=False, threads=True,
+                data = self._yf_download_with_retry(
+                    chunk, start, as_of + timedelta(days=1),
                 )
-                if data.empty:
+                if data is None or data.empty:
                     continue
 
                 close = data["Close"]
                 if isinstance(close, np.ndarray) or not hasattr(close, "columns"):
-                    # Single ticker
                     if len(chunk) == 1 and not close.empty:
                         prices[chunk[0]] = Decimal(str(float(close.iloc[-1])))
                 else:
@@ -428,7 +443,7 @@ class HistoricalQuantBacktest:
                                 prices[ticker] = Decimal(str(float(series.iloc[-1])))
             except Exception:
                 logger.warning("Price fetch failed for chunk %d-%d at %s", i, i + len(chunk), as_of)
-            time.sleep(0.5)
+            time.sleep(2)
 
         return prices
 
@@ -443,24 +458,20 @@ class HistoricalQuantBacktest:
         Returns:
             (ticker_returns, spy_return) — both as decimal fractions (0.10 = 10%).
         """
-        import yfinance as yf
-
         all_tickers = list(set(tickers + ["SPY"]))
         returns: dict[str, float] = {}
         spy_return = 0.0
 
-        chunk_size = 100
+        chunk_size = 50
         for i in range(0, len(all_tickers), chunk_size):
             chunk = all_tickers[i : i + chunk_size]
             try:
-                data = yf.download(
+                data = self._yf_download_with_retry(
                     chunk,
-                    start=str(start_date - timedelta(days=5)),
-                    end=str(end_date + timedelta(days=5)),
-                    progress=False,
-                    threads=True,
+                    start_date - timedelta(days=5),
+                    end_date + timedelta(days=5),
                 )
-                if data.empty:
+                if data is None or data.empty:
                     continue
 
                 close = data["Close"]
@@ -488,7 +499,7 @@ class HistoricalQuantBacktest:
                         continue
             except Exception:
                 logger.warning("Forward return fetch failed for chunk %d", i)
-            time.sleep(0.5)
+            time.sleep(2)
 
         return returns, spy_return
 
@@ -502,20 +513,17 @@ class HistoricalQuantBacktest:
         Downloads 13 months of price history ending at as_of, computes
         price(T-1m) / price(T-12m) - 1, then converts to cross-sectional percentile.
         """
-        import yfinance as yf
-
         start = as_of - timedelta(days=400)  # ~13 months
         momentum_raw: dict[str, float] = {}
 
-        chunk_size = 100
+        chunk_size = 50
         for i in range(0, len(tickers), chunk_size):
             chunk = tickers[i : i + chunk_size]
             try:
-                data = yf.download(
-                    chunk, start=str(start), end=str(as_of + timedelta(days=1)),
-                    progress=False, threads=True,
+                data = self._yf_download_with_retry(
+                    chunk, start, as_of + timedelta(days=1),
                 )
-                if data.empty:
+                if data is None or data.empty:
                     continue
 
                 close = data["Close"]
@@ -537,7 +545,7 @@ class HistoricalQuantBacktest:
                         continue
             except Exception:
                 logger.warning("Momentum fetch failed for chunk %d at %s", i, as_of)
-            time.sleep(0.5)
+            time.sleep(2)
 
         return _rank_to_percentile(momentum_raw)
 

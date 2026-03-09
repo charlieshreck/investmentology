@@ -65,8 +65,7 @@ def compute_regime_ic_table(
         groups[key].append((r.ic, r.n_stocks, r.screen_year))
 
     results: list[RegimeFactorIC] = []
-    for (regime, factor, horizon), entries in sorted(groups.keys()):
-        entries = groups[(regime, factor, horizon)]
+    for (regime, factor, horizon), entries in sorted(groups.items()):
         total_n = sum(e[1] for e in entries)
         # Weighted average IC by sample size
         if total_n > 0:
