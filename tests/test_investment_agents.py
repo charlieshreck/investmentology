@@ -541,7 +541,7 @@ class TestSkillsRegistry:
     def test_all_agents_present(self) -> None:
         expected = {
             "warren", "soros", "simons", "auditor",
-            "dalio", "druckenmiller", "klarman", "lynch",
+            "dalio", "druckenmiller", "klarman", "lynch", "marks",
             "income_analyst", "data_analyst",
             "financial_health_screener", "valuation_screener",
             "growth_momentum_screener", "quality_position_screener",

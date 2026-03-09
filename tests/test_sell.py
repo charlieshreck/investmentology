@@ -7,6 +7,7 @@ from decimal import Decimal
 from investmentology.models.position import PortfolioPosition
 from investmentology.models.stock import FundamentalsSnapshot
 from investmentology.sell.core import check_core_rules
+from investmentology.sell.discipline import DisciplineContext, check_discipline_triggers
 from investmentology.sell.engine import SellEngine
 from investmentology.sell.permanent import check_permanent_rules
 from investmentology.sell.rules import SellReason, SellUrgency
@@ -383,3 +384,157 @@ class TestSellEngine:
         stop_signals = [s for s in tact_signals if s.reason == SellReason.STOP_LOSS]
         for s in stop_signals:
             assert s.urgency == SellUrgency.EXECUTE
+
+
+# ===========================================================================
+# Discipline triggers
+# ===========================================================================
+
+class TestDisciplineTriggers:
+    def test_fully_valued_above_fair_value(self) -> None:
+        """P/FV > 1.0 flags position as fully valued."""
+        pos = _pos(current_price="110")
+        ctx = DisciplineContext(fair_value=Decimal("100"))
+        signals = check_discipline_triggers(pos, ctx)
+        fv_signals = [s for s in signals if s.reason == SellReason.FULLY_VALUED]
+        assert len(fv_signals) == 1
+        assert fv_signals[0].urgency == SellUrgency.FLAG
+        assert "1.10x" in fv_signals[0].detail
+
+    def test_no_flag_below_fair_value(self) -> None:
+        """No fully-valued flag when P/FV <= 1.0."""
+        pos = _pos(current_price="95")
+        ctx = DisciplineContext(fair_value=Decimal("100"))
+        signals = check_discipline_triggers(pos, ctx)
+        fv_signals = [s for s in signals if s.reason == SellReason.FULLY_VALUED]
+        assert fv_signals == []
+
+    def test_no_flag_at_exact_fair_value(self) -> None:
+        """No fully-valued flag when P/FV == 1.0."""
+        pos = _pos(current_price="100")
+        ctx = DisciplineContext(fair_value=Decimal("100"))
+        signals = check_discipline_triggers(pos, ctx)
+        fv_signals = [s for s in signals if s.reason == SellReason.FULLY_VALUED]
+        assert fv_signals == []
+
+    def test_piotroski_drop_2_points(self) -> None:
+        """Piotroski drop >= 2 flags financial health."""
+        pos = _pos()
+        ctx = DisciplineContext(piotroski_current=5, piotroski_prior=7)
+        signals = check_discipline_triggers(pos, ctx)
+        pio_signals = [s for s in signals if s.reason == SellReason.PIOTROSKI_DROP]
+        assert len(pio_signals) == 1
+        assert "7 → 5" in pio_signals[0].detail
+        assert "deteriorating" in pio_signals[0].detail
+
+    def test_piotroski_drop_1_point_no_flag(self) -> None:
+        """Piotroski drop of 1 point does not trigger."""
+        pos = _pos()
+        ctx = DisciplineContext(piotroski_current=6, piotroski_prior=7)
+        signals = check_discipline_triggers(pos, ctx)
+        pio_signals = [s for s in signals if s.reason == SellReason.PIOTROSKI_DROP]
+        assert pio_signals == []
+
+    def test_piotroski_improvement_no_flag(self) -> None:
+        """Piotroski improvement does not trigger."""
+        pos = _pos()
+        ctx = DisciplineContext(piotroski_current=8, piotroski_prior=6)
+        signals = check_discipline_triggers(pos, ctx)
+        pio_signals = [s for s in signals if s.reason == SellReason.PIOTROSKI_DROP]
+        assert pio_signals == []
+
+    def test_composite_decay_top_to_bottom(self) -> None:
+        """Rank falling from top quartile to bottom half flags."""
+        pos = _pos()
+        ctx = DisciplineContext(
+            composite_rank_pct=0.40,
+            composite_rank_prior_pct=0.80,
+        )
+        signals = check_discipline_triggers(pos, ctx)
+        decay_signals = [s for s in signals if s.reason == SellReason.COMPOSITE_DECAY]
+        assert len(decay_signals) == 1
+        assert "quant gate no longer supports" in decay_signals[0].detail
+
+    def test_composite_decay_top_to_middle_no_flag(self) -> None:
+        """Rank dropping from top quartile but staying above 50% is ok."""
+        pos = _pos()
+        ctx = DisciplineContext(
+            composite_rank_pct=0.55,
+            composite_rank_prior_pct=0.85,
+        )
+        signals = check_discipline_triggers(pos, ctx)
+        decay_signals = [s for s in signals if s.reason == SellReason.COMPOSITE_DECAY]
+        assert decay_signals == []
+
+    def test_composite_decay_not_from_top_quartile(self) -> None:
+        """Rank falling to bottom half from below top quartile is not flagged."""
+        pos = _pos()
+        ctx = DisciplineContext(
+            composite_rank_pct=0.30,
+            composite_rank_prior_pct=0.60,
+        )
+        signals = check_discipline_triggers(pos, ctx)
+        decay_signals = [s for s in signals if s.reason == SellReason.COMPOSITE_DECAY]
+        assert decay_signals == []
+
+    def test_empty_context_no_signals(self) -> None:
+        """Empty discipline context produces no signals."""
+        pos = _pos()
+        ctx = DisciplineContext()
+        signals = check_discipline_triggers(pos, ctx)
+        assert signals == []
+
+    def test_multiple_triggers_at_once(self) -> None:
+        """Multiple discipline triggers can fire simultaneously."""
+        pos = _pos(current_price="120")
+        ctx = DisciplineContext(
+            fair_value=Decimal("100"),
+            piotroski_current=3,
+            piotroski_prior=7,
+            composite_rank_pct=0.25,
+            composite_rank_prior_pct=0.90,
+        )
+        signals = check_discipline_triggers(pos, ctx)
+        reasons = {s.reason for s in signals}
+        assert SellReason.FULLY_VALUED in reasons
+        assert SellReason.PIOTROSKI_DROP in reasons
+        assert SellReason.COMPOSITE_DECAY in reasons
+        assert all(s.urgency == SellUrgency.FLAG for s in signals)
+
+    def test_engine_includes_discipline_for_permanent(self) -> None:
+        """Engine runs discipline triggers on permanent positions."""
+        engine = SellEngine()
+        pos = _pos(position_type="permanent", current_price="120")
+        ctx = DisciplineContext(fair_value=Decimal("100"))
+        signals = engine.evaluate_position(pos, discipline_ctx=ctx)
+        fv_signals = [s for s in signals if s.reason == SellReason.FULLY_VALUED]
+        assert len(fv_signals) == 1
+
+    def test_engine_includes_discipline_for_tactical(self) -> None:
+        """Engine runs discipline triggers on tactical positions."""
+        engine = SellEngine()
+        pos = _pos(position_type="tactical", current_price="110")
+        ctx = DisciplineContext(
+            piotroski_current=4,
+            piotroski_prior=8,
+        )
+        signals = engine.evaluate_position(pos, discipline_ctx=ctx)
+        pio_signals = [s for s in signals if s.reason == SellReason.PIOTROSKI_DROP]
+        assert len(pio_signals) == 1
+
+    def test_engine_portfolio_with_discipline(self) -> None:
+        """Engine evaluate_portfolio passes discipline contexts."""
+        engine = SellEngine()
+        positions = [
+            _pos(ticker="AAPL", current_price="120"),
+            _pos(ticker="MSFT", current_price="100"),
+        ]
+        disc_ctxs = {
+            "AAPL": DisciplineContext(fair_value=Decimal("100")),
+            "MSFT": DisciplineContext(),
+        }
+        results = engine.evaluate_portfolio(
+            positions, discipline_contexts=disc_ctxs,
+        )
+        assert "AAPL" in results
+        assert "MSFT" not in results

@@ -206,13 +206,49 @@ class YFinanceClient:
             except Exception:
                 pass
 
-            # Gross profit from income statement
+            # Gross profit, SGA, depreciation from income statement
             gross_profit_val = None
+            sga_val = None
+            depreciation_val = None
             try:
                 fins = stock.financials
                 if fins is not None and not fins.empty:
                     if "Gross Profit" in fins.index:
                         gross_profit_val = _to_decimal(fins.loc["Gross Profit"].iloc[0])
+                    if "Selling General And Administration" in fins.index:
+                        sga_val = _to_decimal(fins.loc["Selling General And Administration"].iloc[0])
+            except Exception:
+                pass
+
+            # Depreciation, dividends, buybacks from cash flow statement
+            dividends_paid_val = None
+            shares_repurchased_val = None
+            try:
+                cf_stmt = stock.cashflow
+                if cf_stmt is not None and not cf_stmt.empty:
+                    if "Depreciation And Amortization" in cf_stmt.index:
+                        depreciation_val = _to_decimal(cf_stmt.loc["Depreciation And Amortization"].iloc[0])
+                    # Dividends are reported as negative; store as positive
+                    if "Common Stock Dividend Paid" in cf_stmt.index:
+                        raw_div = _to_decimal(cf_stmt.loc["Common Stock Dividend Paid"].iloc[0])
+                        if raw_div is not None:
+                            dividends_paid_val = abs(raw_div)
+                    # Buybacks are reported as negative; store as positive
+                    if "Repurchase Of Capital Stock" in cf_stmt.index:
+                        raw_buy = _to_decimal(cf_stmt.loc["Repurchase Of Capital Stock"].iloc[0])
+                        if raw_buy is not None:
+                            shares_repurchased_val = abs(raw_buy)
+            except Exception:
+                pass
+
+            # Receivables from balance sheet
+            receivables_val = None
+            try:
+                if bs is not None and not bs.empty:
+                    for label in ["Net Receivables", "Accounts Receivable", "Receivables"]:
+                        if label in bs.index:
+                            receivables_val = _to_decimal(bs.loc[label].iloc[0])
+                            break
             except Exception:
                 pass
 
@@ -242,6 +278,11 @@ class YFinanceClient:
                 "retained_earnings": retained_earnings_val,
                 "operating_cash_flow": operating_cash_flow_val,
                 "gross_profit": gross_profit_val,
+                "receivables": receivables_val,
+                "depreciation": depreciation_val,
+                "sga": sga_val,
+                "dividends_paid": dividends_paid_val,
+                "shares_repurchased": shares_repurchased_val,
                 "enterprise_value": _to_decimal(info.get("enterpriseValue")),
                 "pe_ratio": _to_decimal(info.get("trailingPE")),
                 "forward_pe": _to_decimal(info.get("forwardPE")),

@@ -14,6 +14,7 @@ from investmentology.models.decision import Decision, DecisionType
 from investmentology.models.lifecycle import WatchlistState
 from investmentology.models.stock import FundamentalsSnapshot, Stock
 from investmentology.quant_gate.altman import calculate_altman
+from investmentology.quant_gate.beneish import calculate_beneish
 from investmentology.quant_gate.composite import composite_score
 from investmentology.quant_gate.greenblatt import rank_by_greenblatt
 from investmentology.quant_gate.piotroski import calculate_piotroski
@@ -77,6 +78,11 @@ def _dict_to_snapshot(d: dict) -> FundamentalsSnapshot | None:
             retained_earnings=d.get("retained_earnings") or Decimal(0),
             operating_cash_flow=d.get("operating_cash_flow") or Decimal(0),
             gross_profit=d.get("gross_profit") or Decimal(0),
+            receivables=d.get("receivables") or Decimal(0),
+            depreciation=d.get("depreciation") or Decimal(0),
+            sga=d.get("sga") or Decimal(0),
+            dividends_paid=d.get("dividends_paid") or Decimal(0),
+            shares_repurchased=d.get("shares_repurchased") or Decimal(0),
         )
     except (KeyError, TypeError, ValueError):
         logger.debug("Failed to convert dict to snapshot for %s", d.get("ticker"))
@@ -150,6 +156,15 @@ def _compute_momentum_and_liquidity(
     except Exception:
         logger.warning("Momentum/liquidity computation failed", exc_info=True)
         return {}, {}
+
+
+def _rank_to_percentile(raw_scores: dict[str, float]) -> dict[str, float]:
+    """Convert raw scores to cross-sectional percentile ranks (0.0-1.0)."""
+    if not raw_scores:
+        return {}
+    sorted_tickers = sorted(raw_scores, key=lambda t: raw_scores[t])
+    n = len(sorted_tickers)
+    return {t: i / (n - 1) if n > 1 else 0.5 for i, t in enumerate(sorted_tickers)}
 
 
 class QuantGateScreener:
@@ -324,15 +339,47 @@ class QuantGateScreener:
         if filtered_count:
             logger.info("ADV filter removed %d illiquid tickers (<%s/day)", filtered_count, f"${adv_min:,.0f}")
 
-        # 6. Calculate Piotroski + Altman + Momentum + Composite for top N
-        self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (Piotroski + Altman + Momentum + Composite)...", 80)
+        # 6a. Compute cross-sectional O'Shaughnessy factor ranks
+        # Gross Profitability (Novy-Marx): gross_profit / total_assets
+        gp_raw: dict[str, float] = {}
+        # Shareholder Yield: (dividends_paid + shares_repurchased) / market_cap
+        sy_raw: dict[str, float] = {}
+        for gr in top_ranked:
+            snap = snap_by_ticker.get(gr.ticker)
+            if snap is None:
+                continue
+            if snap.total_assets > 0 and snap.gross_profit > 0:
+                gp_raw[gr.ticker] = float(snap.gross_profit / snap.total_assets)
+            if snap.market_cap > 0:
+                total_return = float(snap.dividends_paid + snap.shares_repurchased)
+                if total_return > 0:
+                    sy_raw[gr.ticker] = total_return / float(snap.market_cap)
+
+        # Rank to 0.0-1.0 (higher = better)
+        gp_scores: dict[str, float] = _rank_to_percentile(gp_raw)
+        sy_scores: dict[str, float] = _rank_to_percentile(sy_raw)
+
+        # 6b. Calculate Piotroski + Altman + Beneish + Momentum + Composite for top N
+        self._progress("scoring", f"Scoring top {len(top_ranked)} stocks (6-factor composite)...", 80)
         top_results: list[dict] = []
+        beneish_excluded = 0
         for ordinal, gr in enumerate(top_ranked, start=1):
             snap = snap_by_ticker.get(gr.ticker)
             if snap is None:
                 continue
 
             prior_snap = prior_by_ticker.get(gr.ticker)
+
+            # Beneish M-Score: exclude likely manipulators before scoring
+            beneish = calculate_beneish(snap, prior_snap)
+            if beneish and beneish.data_sufficient and beneish.is_manipulator:
+                logger.info(
+                    "Beneish exclusion: %s M-Score=%.2f (> -1.78)",
+                    gr.ticker, beneish.m_score,
+                )
+                beneish_excluded += 1
+                continue
+
             piotroski = calculate_piotroski(snap, previous=prior_snap)
             altman = calculate_altman(snap, sector=sectors.get(gr.ticker, ""))
             mom = momentum_scores.get(gr.ticker)
@@ -344,6 +391,8 @@ class QuantGateScreener:
                 has_prior_year=prior_snap is not None,
                 altman_zone=altman.zone if altman else None,
                 momentum_score=mom,
+                gross_profitability=gp_scores.get(gr.ticker),
+                shareholder_yield=sy_scores.get(gr.ticker),
             )
 
             top_results.append({
@@ -356,9 +405,15 @@ class QuantGateScreener:
                 "piotroski_score": piotroski.score,
                 "altman_z_score": altman.z_score if altman else None,
                 "altman_zone": altman.zone if altman else None,
+                "beneish_m_score": beneish.m_score if beneish and beneish.data_sufficient else None,
+                "gross_profitability": gp_scores.get(gr.ticker),
+                "shareholder_yield": sy_scores.get(gr.ticker),
                 "momentum_score": mom,
                 "composite_score": score,
             })
+
+        if beneish_excluded:
+            logger.info("Beneish filter excluded %d likely manipulators", beneish_excluded)
 
         # Sort by composite score descending (highest = best)
         top_results.sort(key=lambda r: r["composite_score"] or Decimal("0"), reverse=True)

@@ -1,10 +1,12 @@
-"""Portfolio-fit scoring — evaluate how well a candidate stock fits the current portfolio.
+"""Portfolio-fit scoring and macro regime allocation guidance.
 
 For each candidate, computes:
   - Sector diversification impact (does it add diversity or increase concentration?)
   - Risk category balance impact (growth/defensive/cyclical balance)
   - Position count impact (are we near max positions?)
   - Overlap check (do we already hold this stock?)
+
+Cash regime rule: translates MacroRegimeResult into allocation guidance.
 
 Output: fit_score (0.0-1.0) and fit_reasoning string.
 """
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 
 from investmentology.registry.queries import Registry
 
@@ -230,3 +233,114 @@ class PortfolioFitScorer:
 
         remaining_ratio = (MAX_POSITIONS - n) / MAX_POSITIONS
         return min(1.0, remaining_ratio + 0.3)  # Generous until near max
+
+
+# ---------------------------------------------------------------------------
+# Cash Regime Rule — Macro → Portfolio Allocation Guidance
+# ---------------------------------------------------------------------------
+
+class AllocationStance(StrEnum):
+    AGGRESSIVE = "aggressive"  # Recovery: 80-90% equity
+    STANDARD = "standard"  # Expansion: 70-85% equity
+    CAUTIOUS = "cautious"  # Late-cycle: 60-70% equity
+    DEFENSIVE = "defensive"  # Contraction: 40-50% equity
+
+
+@dataclass
+class CashRegimeGuidance:
+    regime: str
+    stance: AllocationStance
+    equity_min_pct: int
+    equity_max_pct: int
+    cash_min_pct: int
+    cash_max_pct: int
+    entry_criteria: str  # How strict entry should be
+    summary: str
+
+
+# Regime → allocation mapping (from Phase 2 definitive plan)
+_REGIME_RULES: dict[str, dict] = {
+    "expansion": {
+        "stance": AllocationStance.STANDARD,
+        "equity_min": 70, "equity_max": 85,
+        "cash_min": 15, "cash_max": 30,
+        "entry": "Standard entry criteria. Full and core positions permitted.",
+    },
+    "late_cycle": {
+        "stance": AllocationStance.CAUTIOUS,
+        "equity_min": 60, "equity_max": 70,
+        "cash_min": 30, "cash_max": 40,
+        "entry": "Tightened entry: require ALL SIGNALS ALIGNED tier for new positions.",
+    },
+    "contraction": {
+        "stance": AllocationStance.DEFENSIVE,
+        "equity_min": 40, "equity_max": 50,
+        "cash_min": 50, "cash_max": 60,
+        "entry": "Only highest conviction with counter-cyclical thesis. Starter positions only.",
+    },
+    "recovery": {
+        "stance": AllocationStance.AGGRESSIVE,
+        "equity_min": 80, "equity_max": 90,
+        "cash_min": 10, "cash_max": 20,
+        "entry": "Broader entry criteria. Aggressive allocation to quality at distressed prices.",
+    },
+}
+
+# Default for unknown regime
+_DEFAULT_RULE = {
+    "stance": AllocationStance.STANDARD,
+    "equity_min": 70, "equity_max": 85,
+    "cash_min": 15, "cash_max": 30,
+    "entry": "Standard entry criteria (regime unknown).",
+}
+
+
+def get_cash_regime_guidance(macro_regime: dict | None) -> CashRegimeGuidance:
+    """Translate a MacroRegimeResult dict into portfolio allocation guidance.
+
+    Args:
+        macro_regime: Dict from MacroRegimeResult (with 'regime', 'confidence', 'summary')
+                     or None if macro data is unavailable.
+
+    Returns:
+        CashRegimeGuidance with allocation ranges and entry criteria.
+    """
+    if macro_regime is None:
+        regime_name = "unknown"
+    else:
+        regime_name = macro_regime.get("regime", "unknown")
+
+    rule = _REGIME_RULES.get(regime_name, _DEFAULT_RULE)
+    stance = rule["stance"]
+
+    confidence = 0.0
+    if macro_regime:
+        confidence = macro_regime.get("confidence", 0.0)
+
+    # Low confidence → soften toward standard stance
+    if confidence < 0.35 and regime_name != "unknown":
+        summary = (
+            f"Macro regime: {regime_name} (low confidence {confidence:.0%}). "
+            f"Defaulting to standard allocation. {rule['entry']}"
+        )
+        rule = _DEFAULT_RULE
+        stance = AllocationStance.STANDARD
+    else:
+        regime_summary = macro_regime.get("summary", "") if macro_regime else ""
+        summary = (
+            f"Macro regime: {regime_name} ({confidence:.0%} confidence). "
+            f"Target equity: {rule['equity_min']}-{rule['equity_max']}%. "
+            f"{rule['entry']}"
+            + (f" ({regime_summary})" if regime_summary else "")
+        )
+
+    return CashRegimeGuidance(
+        regime=regime_name,
+        stance=stance,
+        equity_min_pct=rule["equity_min"],
+        equity_max_pct=rule["equity_max"],
+        cash_min_pct=rule["cash_min"],
+        cash_max_pct=rule["cash_max"],
+        entry_criteria=rule["entry"],
+        summary=summary,
+    )

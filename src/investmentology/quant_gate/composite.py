@@ -1,28 +1,37 @@
-"""Composite scoring: blends Greenblatt rank, Piotroski F-Score, Altman Z-Score, and momentum.
+"""Composite scoring: 6-factor O'Shaughnessy-style composite.
 
 Weights:
-    40% — Greenblatt rank percentile (lower rank = better score)
-    25% — Piotroski F-Score (higher = better, normalized to 0-1)
-    15% — Altman Z-Score zone (safe=1.0, grey=0.5, distress=0.0)
-    20% — Momentum (Jegadeesh-Titman: 12m return minus 1m return, cross-sectional rank)
+    30% — Greenblatt rank percentile (EV/EBIT + ROIC)
+    20% — Piotroski F-Score (financial health quality)
+    10% — Altman Z-Score zone (distress risk)
+    15% — Momentum (Jegadeesh-Titman 12-1 month)
+    15% — Gross Profitability (Novy-Marx: gross profit / total assets)
+    10% — Shareholder Yield (dividend yield + net buyback yield)
 
-When momentum_score is None, its weight is redistributed proportionally.
+When optional factors are unavailable, their weight is redistributed
+proportionally among available factors.
 
-Output: 0.0 (worst) to 1.0 (best).
+Value-momentum intersection: +3% bonus when BOTH value (Greenblatt top
+quartile) AND momentum (top quartile) score in the top 25%.
+
+Output: 0.0 (worst) to ~1.03 (best, with intersection bonus).
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-WEIGHT_GREENBLATT = Decimal("0.40")
-WEIGHT_PIOTROSKI = Decimal("0.25")
-WEIGHT_ALTMAN = Decimal("0.15")
-WEIGHT_MOMENTUM = Decimal("0.20")
+WEIGHT_GREENBLATT = Decimal("0.30")
+WEIGHT_PIOTROSKI = Decimal("0.20")
+WEIGHT_ALTMAN = Decimal("0.10")
+WEIGHT_MOMENTUM = Decimal("0.15")
+WEIGHT_GROSS_PROFITABILITY = Decimal("0.15")
+WEIGHT_SHAREHOLDER_YIELD = Decimal("0.10")
 
-# Piotroski max possible is 9, but without prior-year data only 4 tests
-# are scoreable. We normalize against the number of tests that could fire.
-PIOTROSKI_MAX_WITHOUT_PRIOR = 3
+# Value-momentum intersection bonus
+VM_INTERSECTION_BONUS = Decimal("0.03")
+VM_TOP_QUARTILE = Decimal("0.75")
+
 PIOTROSKI_MAX_WITH_PRIOR = 9
 
 # Altman zone scores
@@ -30,7 +39,7 @@ ALTMAN_ZONE_SCORES: dict[str | None, Decimal] = {
     "safe": Decimal("1.0"),
     "grey": Decimal("0.5"),
     "distress": Decimal("0.0"),
-    None: Decimal("0.3"),  # missing data — treated as grey-ish
+    None: Decimal("0.3"),
 }
 
 
@@ -42,8 +51,10 @@ def composite_score(
     has_prior_year: bool,
     altman_zone: str | None,
     momentum_score: float | None = None,
+    gross_profitability: float | None = None,
+    shareholder_yield: float | None = None,
 ) -> Decimal:
-    """Calculate composite score (0.0-1.0, higher = better).
+    """Calculate 6-factor composite score (0.0-1.0+, higher = better).
 
     Args:
         greenblatt_rank: Combined rank from Greenblatt (lower = better).
@@ -51,7 +62,9 @@ def composite_score(
         piotroski_score: F-Score (0-9).
         has_prior_year: Whether prior-year data was available for Piotroski.
         altman_zone: "safe", "grey", "distress", or None.
-        momentum_score: Cross-sectional momentum rank (0.0-1.0), or None if unavailable.
+        momentum_score: Cross-sectional momentum rank (0.0-1.0), or None.
+        gross_profitability: Cross-sectional gross profitability rank (0.0-1.0), or None.
+        shareholder_yield: Cross-sectional shareholder yield rank (0.0-1.0), or None.
     """
     # Greenblatt component: rank 1 of 100 = 0.99, rank 100 of 100 = 0.0
     if total_ranked > 1:
@@ -60,9 +73,7 @@ def composite_score(
         greenblatt_pct = Decimal("1.0")
     greenblatt_pct = max(Decimal("0"), min(Decimal("1"), greenblatt_pct))
 
-    # Piotroski component: always normalize against full 9-point scale.
-    # Without prior-year data, cap at 0.5 to prevent data-poor companies
-    # (scoring 3/3) from ranking equal to data-rich ones (scoring 9/9).
+    # Piotroski component
     piotroski_pct = Decimal(piotroski_score) / Decimal(PIOTROSKI_MAX_WITH_PRIOR)
     if not has_prior_year:
         piotroski_pct = min(piotroski_pct, Decimal("0.5"))
@@ -71,22 +82,33 @@ def composite_score(
     # Altman component
     altman_pct = ALTMAN_ZONE_SCORES.get(altman_zone, Decimal("0.3"))
 
-    # When momentum is available, use 4-factor weights.
-    # When unavailable, redistribute momentum weight proportionally.
+    # Build weighted components — only include factors that have data
+    components: list[tuple[Decimal, Decimal]] = [
+        (WEIGHT_GREENBLATT, greenblatt_pct),
+        (WEIGHT_PIOTROSKI, piotroski_pct),
+        (WEIGHT_ALTMAN, altman_pct),
+    ]
+
     if momentum_score is not None:
         mom_pct = Decimal(str(max(0.0, min(1.0, momentum_score))))
-        score = (
-            WEIGHT_GREENBLATT * greenblatt_pct
-            + WEIGHT_PIOTROSKI * piotroski_pct
-            + WEIGHT_ALTMAN * altman_pct
-            + WEIGHT_MOMENTUM * mom_pct
-        )
-    else:
-        base_weight = WEIGHT_GREENBLATT + WEIGHT_PIOTROSKI + WEIGHT_ALTMAN
-        score = (
-            WEIGHT_GREENBLATT / base_weight * greenblatt_pct
-            + WEIGHT_PIOTROSKI / base_weight * piotroski_pct
-            + WEIGHT_ALTMAN / base_weight * altman_pct
-        )
+        components.append((WEIGHT_MOMENTUM, mom_pct))
+
+    if gross_profitability is not None:
+        gp_pct = Decimal(str(max(0.0, min(1.0, gross_profitability))))
+        components.append((WEIGHT_GROSS_PROFITABILITY, gp_pct))
+
+    if shareholder_yield is not None:
+        sy_pct = Decimal(str(max(0.0, min(1.0, shareholder_yield))))
+        components.append((WEIGHT_SHAREHOLDER_YIELD, sy_pct))
+
+    # Redistribute unavailable weights proportionally
+    total_weight = sum(w for w, _ in components)
+    score = sum((w / total_weight) * v for w, v in components)
+
+    # Value-momentum intersection bonus: both in top quartile
+    if momentum_score is not None and greenblatt_pct >= VM_TOP_QUARTILE:
+        mom_pct_check = Decimal(str(momentum_score))
+        if mom_pct_check >= VM_TOP_QUARTILE:
+            score += VM_INTERSECTION_BONUS
 
     return round(score, 4)

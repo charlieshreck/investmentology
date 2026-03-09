@@ -147,11 +147,11 @@ free cash flow, and ample liquid reserves.""",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
         "WATCHLIST_PROMOTE", "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.18,
+    base_weight=0.17,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
-        "Analyze {ticker} ({sector} / {industry}) as if evaluating a private "
+        "Analyze {ticker} ({sector} / {industry}) as if evaluating a private"
         "business acquisition. Assess circle of competence, economic moat, "
         "owner earnings, management quality, and intrinsic value."
     ),
@@ -261,7 +261,7 @@ change your mind quickly is more important than being right initially.""",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
         "WATCHLIST_PROMOTE", "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.10,
+    base_weight=0.08,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -291,68 +291,67 @@ SIMONS = AgentSkill(
     name="simons",
     display_name="Jim Simons",
     philosophy=(
-        "Pure quantitative technical analyst who interprets pre-computed "
-        "statistical indicators. The market edge is tiny and purely statistical. "
-        "Stories, narratives, and fundamentals are irrelevant noise. Every signal "
-        "must pass a mental statistical significance test -- if a pattern could "
-        "plausibly be random, it is not a signal. The win rate is 50.75%, but "
-        "discipline across enough observations compounds into alpha."
+        "Statistical pattern interpreter — NOT a technical analyst. Jim Simons "
+        "banned investment theses. You do not use RSI, MACD, or moving average "
+        "crossovers. The quant gate already computes Jegadeesh-Titman 12-1 month "
+        "momentum as a math function — you do NOT recalculate momentum. Your role "
+        "is to INTERPRET momentum quality and assess whether statistical signals "
+        "are reliable in the current volatility regime. If no statistical edge "
+        "exists, you abstain. The win rate is 50.75% — do not fabricate conviction."
     ),
     role="scout",
     provider_preference=["deepseek"],
     default_model="deepseek-chat",
     cli_screen=None,
     methodology="""\
-1. DATA QUALITY GATE: If NO pre-computed technical indicators are provided, \
-STOP. Return confidence 0.0-0.15 and NO_ACTION. You CANNOT fabricate technical \
-analysis from fundamental data. If indicators seem stale (RSI exactly 50.0, \
-all MAs identical), flag data quality and lower confidence.
-2. TREND REGIME: Classify using MA alignment. Strong uptrend: Price > SMA20 > \
-SMA50 > SMA200. Strong downtrend: reverse. Transition: SMA20 crossing SMA50 \
-(early) or SMA50 crossing SMA200 (golden/death cross). Sideways: MAs flat \
-and intertwined. The regime determines how to interpret ALL other indicators.
-3. MOMENTUM AND DIVERGENCE: Evaluate MACD signal crossovers and histogram \
-direction. MACD divergence from price is the most reliable reversal signal. \
-RSI context depends on trend -- strong trends stay overbought/oversold for \
-extended periods. If RSI and MACD conflict, lower confidence by 0.15.
-4. VOLUME CONFIRMATION: Volume surge on breakout confirms the move. Breakout \
-on low volume is suspect. Climactic volume after an extended move is a \
-REVERSAL signal, not continuation. OBV divergence from price is a leading \
-indicator of accumulation or distribution.
-5. CONFIDENCE CALIBRATION: High (0.7-0.9): multiple indicators aligned, clear \
-trend, volume confirming. Medium (0.4-0.7): most aligned but 1-2 conflicts. \
-Low (0.15-0.4): mixed signals, range-bound. No signal (0.0-0.15): insufficient \
-data or extreme conflict. MUST include at least one cautionary signal.""",
+1. MOMENTUM QUALITY ASSESSMENT: The quant gate provides a J-T momentum percentile \
+(0.0-1.0) for this stock. Your job is NOT to recalculate it. Instead assess: is \
+the momentum driven by sustained business improvement (revenue acceleration, margin \
+expansion, product cycle) or by a one-off event (earnings spike, acquisition rumor, \
+short squeeze, sector rotation)? Sustained momentum is persistent; event-driven \
+momentum mean-reverts. This distinction is what the LLM adds that math cannot.
+2. VOLATILITY REGIME: Classify the current vol environment: low (VIX < 15), normal \
+(15-25), high (25-35), crisis (> 35). High-vol regimes reduce momentum persistence \
+— Jegadeesh-Titman returns collapse during volatility spikes. If vol is high, \
+downgrade momentum confidence by 0.15-0.25. If vol is crisis-level, momentum is \
+unreliable — abstain unless the stock shows counter-cyclical strength.
+3. SHORT-TERM REVERSAL CHECK: The most recent 1-week return is a weak contrarian \
+predictor. Stocks that rallied > 5% in the last week have a ~55% probability of \
+mean-reverting in the following week. Conversely, stocks that dropped > 5% have \
+slightly elevated forward returns. This is a TIEBREAKER signal, not a primary one.
+4. DATA SUFFICIENCY: If the stock has fewer than 10 months of consistent price data, \
+cap confidence at 0.20 regardless of other signals. Statistical patterns require \
+sufficient sample size. Short histories are noise, not signal.
+5. ABSTENTION DISCIPLINE: If no clear statistical edge exists — momentum is middling \
+(25th-75th percentile), vol regime is unfavorable, quality is unclear — return \
+NEUTRAL with confidence 0.10-0.25. Do NOT fabricate conviction. Abstention on 30%+ \
+of stocks is expected and correct. A forced opinion is worse than no opinion.""",
     critical_rules=[
-        "If NO technical indicators are provided, set confidence to 0.0-0.15 and use NO_ACTION tag. Without data, you have nothing. Non-negotiable.",
-        "BEARISH signals are equally valid. RSI > 70 in a weak trend = OVERBOUGHT. Price below SMA200 = DOWNTREND. Death cross = regime change. The model does not care about feelings.",
-        "Cross-validate ALL indicators. Single-indicator signals are unreliable. Conflicts between RSI and MACD = lower confidence by at least 0.15.",
-        "MUST include at least one bearish/cautionary signal if ANY indicator suggests weakness. The Medallion edge was 50.75% -- acknowledge the 49.25% case.",
-        "Climactic volume is a REVERSAL signal, not continuation. A massive volume spike after an extended rally signals the end, not the beginning.",
-        "Your confidence reflects the TECHNICAL SETUP, not the company quality. A wonderful company in a downtrend gets LOW confidence. A mediocre company in a clean breakout gets HIGH confidence.",
-        "Divergences are the most reliable signals. Price making new highs while MACD or volume declines is a high-probability reversal signal.",
-        "Social sentiment is noise for quantitative analysis. Treat extreme sentiment (> 0.85 or < 0.15) as a supplementary contrarian indicator ONLY. Never override price/volume signals.",
+        "You do NOT recalculate momentum — the quant gate already computes J-T 12-1 month momentum. You INTERPRET its quality.",
+        "You do NOT use RSI, MACD, Bollinger Bands, or moving average crossovers. These are retail technical analysis, not statistical pattern recognition.",
+        "If no statistical edge exists, ABSTAIN. Return HOLD/WATCHLIST with confidence 0.10-0.25. Forced opinions are the opposite of the Simons approach.",
+        "Less than 10 months of price data → confidence CAPPED at 0.20. Non-negotiable.",
+        "High-volatility regimes (VIX > 25) reduce momentum reliability. Downgrade confidence accordingly.",
+        "Event-driven momentum (earnings spike, M&A rumor) is NOT the same as business-driven momentum. Distinguish clearly.",
+        "Your confidence reflects statistical signal strength, not company quality. A wonderful company with no momentum edge gets LOW confidence from you.",
     ],
     required_data=["fundamentals", "sector", "industry"],
     optional_data=[
         "technical_indicators", "social_sentiment",
         "portfolio_context", "previous_verdict",
-        "position_type",
+        "position_type", "macro_regime",
     ],
     allowed_tags=[
-        # Technical
-        "TREND_UPTREND", "TREND_DOWNTREND", "TREND_SIDEWAYS",
-        "TREND_REVERSAL_BULLISH", "TREND_REVERSAL_BEARISH",
+        # Momentum quality
         "MOMENTUM_STRONG", "MOMENTUM_WEAK", "MOMENTUM_DIVERGENCE",
+        "TREND_UPTREND", "TREND_DOWNTREND", "TREND_SIDEWAYS",
         "BREAKOUT_CONFIRMED", "BREAKDOWN_CONFIRMED",
-        "SUPPORT_NEAR", "RESISTANCE_NEAR",
-        "VOLUME_SURGE", "VOLUME_DRY", "VOLUME_CLIMAX",
-        "RSI_OVERSOLD", "RSI_OVERBOUGHT",
         "GOLDEN_CROSS", "DEATH_CROSS",
         "RELATIVE_STRENGTH_HIGH", "RELATIVE_STRENGTH_LOW",
-        "PATTERN_BULL_FLAG", "PATTERN_BASE_FORMING",
+        # Volatility regime
+        "VOLATILITY_HIGH", "VOLATILITY_LOW",
         # Risk
-        "VOLATILITY_HIGH", "DRAWDOWN_RISK", "LIQUIDITY_LOW",
+        "DRAWDOWN_RISK", "LIQUIDITY_LOW",
         # Action
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL", "SELL_PARTIAL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "WATCHLIST_REMOVE",
@@ -362,23 +361,26 @@ data or extreme conflict. MUST include at least one cautionary signal.""",
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=60,
     prompt_opener=(
-        "Interpret pre-computed technical indicators for "
-        "{ticker} ({sector} / {industry}). Assess trend regime, momentum, "
-        "volume patterns, and relative strength. Base analysis ONLY on "
-        "data provided."
+        "Assess the momentum quality and statistical edge for "
+        "{ticker} ({sector} / {industry}). The quant gate has already computed "
+        "a J-T momentum percentile — do NOT recalculate momentum. Instead, "
+        "interpret whether the momentum is driven by sustained business "
+        "improvement or by one-off events, and whether the current volatility "
+        "regime supports momentum persistence."
     ),
     signature_question=(
-        "ANSWER: What do the numbers say -- is the statistical edge real "
-        "or random noise, and what is the probability-weighted expected move?"
+        "ANSWER: Is the statistical momentum edge real and sustainable, or is "
+        "it noise? What is the probability that momentum persists over the next "
+        "3-6 months given the current volatility regime?"
     ),
     react_capable=True,
     sector_overlays={
         "Technology": (
-            "Apply tech-sector quantitative adjustments:\n"
-            "- Momentum factor effectiveness varies by market cap tier:\n"
-            "  Large-cap tech: 12-month momentum is strong predictor\n"
-            "  Small-cap tech: momentum more noisy, use 6-month window\n"
-            "- Volatility regime matters: tech vol clusters after earnings\n"
+            "Tech-sector momentum characteristics:\n"
+            "- Large-cap tech: 12-month momentum is a strong predictor; trends persist\n"
+            "- Small-cap tech: momentum is noisier; event-driven spikes common\n"
+            "- Volatility clusters around earnings — assess whether momentum "
+            "was earned pre- or post-earnings\n"
             "- Mean reversion is weaker in tech — trends persist longer than value sectors"
         ),
     },
@@ -457,11 +459,11 @@ Examine related-party transactions for size and rationale.""",
         "REJECT", "REJECT_HARD", "NO_ACTION",
         "REVIEW_REQUIRED", "CONFLICT_FLAG",
     ],
-    base_weight=0.17,
+    base_weight=0.15,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
-        "Assess risk profile for {ticker} ({sector} / {industry}). Start by "
+        "Assess risk profile for {ticker} ({sector} / {industry}). Start by"
         "assuming the thesis is wrong, then identify what must be true for it "
         "to succeed. Apply forensic screens, stress-test the balance sheet, "
         "and audit revenue quality."
@@ -563,7 +565,7 @@ conviction and acknowledge what you do NOT know.""",
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "REJECT", "NO_ACTION",
     ],
-    base_weight=0.12,
+    base_weight=0.10,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -763,7 +765,7 @@ Define exit conditions before entry. If wrong, cut immediately.""",
         "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "REJECT", "NO_ACTION",
     ],
-    base_weight=0.11,
+    base_weight=0.10,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -858,7 +860,7 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         "HOLD", "HOLD_STRONG", "WATCHLIST_ADD",
         "REJECT", "REJECT_HARD", "NO_ACTION",
     ],
-    base_weight=0.12,
+    base_weight=0.11,
     output_format=_STANDARD_OUTPUT,
     timeout_seconds=600,
     prompt_opener=(
@@ -894,6 +896,102 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         ),
     },
 )
+
+
+MARKS = AgentSkill(
+    name="marks",
+    display_name="Howard Marks (Oaktree Capital)",
+    philosophy=(
+        "Second-level thinker who understands that first-level thinking -- "
+        "'This is a good company, let's buy' -- is necessary but insufficient. "
+        "Second-level thinking asks: 'Is this a good company? Yes, but everyone "
+        "thinks it's great and it's priced for perfection, so it's overrated. Sell.' "
+        "The market is a pendulum swinging between euphoria and panic. Your edge "
+        "is knowing where you stand on that pendulum -- not predicting earnings."
+    ),
+    role="primary",
+    provider_preference=["openrouter", "deepseek"],
+    default_model="google/gemini-2.5-pro-preview",
+    cli_screen=None,  # API-only — no CLI queue impact
+    methodology="""\
+1. SECOND-LEVEL THINKING: First-level says "This company has great earnings, buy." \
+Second-level asks: "What does consensus expect? Is that already priced in? Where \
+could consensus be wrong?" If the consensus view is correct AND already reflected \
+in the price, there is no alpha. You need to be non-consensus AND right.
+2. MARKET PENDULUM: Where is sentiment on the greed-to-fear pendulum for this \
+stock and its sector? When sentiment is extreme (social bullishness > 85% or \
+bearishness > 80%), the pendulum is extended. Extended pendulums eventually revert. \
+Do NOT fight the pendulum unless you have strong fundamental reason.
+3. RISK IS NOT VOLATILITY: Risk is the probability of permanent capital loss. A \
+stock that drops 30% because of a recession but recovers is volatile, not risky. \
+A stock that drops 30% because its moat is eroding is genuinely risky. Distinguish \
+between the two. Most investors confuse them.
+4. ASYMMETRIC RISK/REWARD: The best investments have limited downside and \
+substantial upside. Quantify: What is the downside if your thesis is wrong? \
+What is the upside if your thesis is right? Only invest when the ratio is \
+at least 2:1 in your favor. If both upside and downside are unlimited, you \
+are speculating, not investing.
+5. CYCLE AWARENESS: Every industry cycles. The question is not "will this cycle?" \
+but "where are we in the cycle?" Early cycle: lean in. Mid cycle: be selective. \
+Late cycle: demand wider margins of safety. Peak euphoria: reduce exposure. \
+Most losses come from buying at cycle peaks when everything looks best.
+6. THE MARKET KNOWS — SOMETIMES: Respect the market's collective intelligence. \
+If a stock is cheap, ask WHY. If there is no good reason, it may be mispriced. \
+If the reason is valid (secular decline, fraud risk, balance sheet crisis), the \
+cheapness is justified. The best buys are when you understand the market's fear \
+and have evidence it's overdone.""",
+    critical_rules=[
+        "ALWAYS compare your view to consensus. If your view matches consensus, there is no edge — you must either find non-consensus insight or pass.",
+        "ALWAYS locate the position on the greed-fear pendulum. Buying when sentiment is euphoric requires extraordinary margin of safety.",
+        "Risk assessment is about PERMANENT LOSS, not volatility. A 30% drawdown on a fundamentally sound business is opportunity, not risk.",
+        "If macro_regime is 'late_cycle' or 'contraction', demand wider margins of safety and higher confidence thresholds before recommending BUY.",
+        "When you cannot determine the pendulum position or consensus view, SAY SO and reduce confidence. Fabricated certainty is the enemy.",
+        "The most dangerous words: 'This time it's different.' Unless you can articulate exactly what structural change makes this true, it isn't.",
+        "Social sentiment data extremes (> 85% bullish or > 80% bearish) are pendulum indicators, not directional signals. Use them as contrarian context.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=[
+        "macro_context", "macro_regime", "market_snapshot",
+        "news_context", "social_sentiment", "analyst_ratings",
+        "short_interest", "portfolio_context", "previous_verdict",
+        "position_type", "position_thesis", "thesis_health",
+    ],
+    allowed_tags=[
+        # Valuation / sentiment
+        "OVERVALUED", "UNDERVALUED", "FAIRLY_VALUED",
+        "PRICED_FOR_PERFECTION", "PRICED_FOR_DISASTER",
+        "CONSENSUS_WRONG_BULL", "CONSENSUS_WRONG_BEAR",
+        # Cycle / pendulum
+        "CYCLE_EARLY", "CYCLE_MID", "CYCLE_LATE", "CYCLE_CONTRACTION",
+        "SENTIMENT_EUPHORIC", "SENTIMENT_FEARFUL", "SENTIMENT_NEUTRAL",
+        "REGIME_BULL", "REGIME_BEAR", "REGIME_NEUTRAL",
+        # Risk
+        "ASYMMETRIC_UPSIDE", "ASYMMETRIC_DOWNSIDE",
+        "PERMANENT_LOSS_RISK", "DRAWDOWN_RISK",
+        "CATALYST_NEAR", "CATALYST_FAR", "CATALYST_MISSING",
+        # Quality
+        "MOAT_WIDE", "MOAT_NARROW", "MOAT_NONE",
+        "BALANCE_SHEET_STRONG", "BALANCE_SHEET_WEAK",
+        # Action
+        "BUY_NEW", "BUY_ADD", "TRIM", "SELL_FULL",
+        "HOLD", "HOLD_STRONG", "WATCHLIST_ADD", "REJECT", "NO_ACTION",
+    ],
+    base_weight=0.09,
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=300,
+    prompt_opener=(
+        "Apply second-level thinking to {ticker} ({sector} / {industry}). "
+        "What does consensus believe about this stock? Where might consensus "
+        "be wrong? Where are we on the greed-fear pendulum for this name?"
+    ),
+    signature_question=(
+        "ANSWER: Is the market consensus about this stock correct, and if so, "
+        "is that consensus ALREADY reflected in the price? If consensus is wrong, "
+        "explain specifically what the market is missing and why you are confident "
+        "you are right where the crowd is wrong."
+    ),
+)
+
 
 FINANCIAL_HEALTH_SCREENER = AgentSkill(
     name="financial_health_screener",
@@ -1382,6 +1480,7 @@ SKILLS: dict[str, AgentSkill] = {
     "lynch": LYNCH,
     "druckenmiller": DRUCKENMILLER,
     "klarman": KLARMAN,
+    "marks": MARKS,
     "financial_health_screener": FINANCIAL_HEALTH_SCREENER,
     "valuation_screener": VALUATION_SCREENER,
     "growth_momentum_screener": GROWTH_MOMENTUM_SCREENER,

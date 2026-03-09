@@ -57,10 +57,10 @@ class TestCategoryGroupings:
         assert duplicates == [], f"Duplicate categorizations: {duplicates}"
 
     def test_category_sizes(self):
-        assert len(FUNDAMENTAL_TAGS) == 24
-        assert len(MACRO_TAGS) == 30
+        assert len(FUNDAMENTAL_TAGS) == 29
+        assert len(MACRO_TAGS) == 35
         assert len(TECHNICAL_TAGS) == 23
-        assert len(RISK_TAGS) == 19
+        assert len(RISK_TAGS) == 25
         assert len(SPECIAL_TAGS) == 17
         assert len(ACTION_TAGS) == 28
 

@@ -57,6 +57,12 @@ def dict_to_snapshot(ticker: str, raw: dict):
         total_liabilities=_dec(raw.get("total_liabilities")),
         shares_outstanding=int(raw.get("shares_outstanding") or 0),
         price=_dec(raw.get("price")),
+        gross_profit=_dec(raw.get("gross_profit")),
+        receivables=_dec(raw.get("receivables")),
+        depreciation=_dec(raw.get("depreciation")),
+        sga=_dec(raw.get("sga")),
+        dividends_paid=_dec(raw.get("dividends_paid")),
+        shares_repurchased=_dec(raw.get("shares_repurchased")),
     )
 
 
@@ -266,6 +272,13 @@ def build_analysis_request(
             cross_cache = state.get_latest_data_cache(db, ticker)
         return cross_cache.get(key)
 
+    # Macro regime — cycle-level, stored under ticker="__cycle__"
+    macro_regime = None
+    if cycle_id:
+        macro_regime = state.get_data_cache(
+            db, cycle_id, "__cycle__", "macro_regime",
+        )
+
     macro_context = _enrich("macro_context")
     news_raw = _enrich("news_context")
     news_context = news_raw.get("items") if isinstance(news_raw, dict) else news_raw
@@ -394,6 +407,7 @@ def build_analysis_request(
         sector=raw_fundamentals.get("sector", "Unknown"),
         industry=raw_fundamentals.get("industry", "Unknown"),
         technical_indicators=tech,
+        macro_regime=macro_regime,
         macro_context=macro_context,
         news_context=news_context,
         earnings_context=earnings_context,

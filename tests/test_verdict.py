@@ -142,7 +142,7 @@ class TestAgentWeights:
         expected = {
             "warren", "auditor", "klarman", "soros",
             "druckenmiller", "dalio", "simons", "lynch",
-            "income_analyst",
+            "marks", "income_analyst",
         }
         assert set(weights.keys()) == expected
 
