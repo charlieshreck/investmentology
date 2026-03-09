@@ -194,7 +194,7 @@ SOROS = AgentSkill(
     ),
     role="primary",
     provider_preference=["remote-soros", "gemini-cli", "xai"],
-    default_model="gemini-3.1-pro",
+    default_model="gemini-3.1-pro-preview",
     cli_screen="gemini",
     methodology="""\
 1. IDENTIFY THE PREVAILING BIAS: What is the dominant narrative driving this \
@@ -500,7 +500,7 @@ DALIO = AgentSkill(
     ),
     role="primary",
     provider_preference=["remote-dalio", "gemini-cli", "groq"],
-    default_model="gemini-3.1-pro",
+    default_model="gemini-3.1-pro-preview",
     cli_screen="gemini",
     methodology="""\
 1. MAP THE DEBT CYCLE POSITION: Where in the short-term cycle (early expansion, \
@@ -700,7 +700,7 @@ DRUCKENMILLER = AgentSkill(
     ),
     role="primary",
     provider_preference=["remote-druckenmiller", "gemini-cli", "deepseek"],
-    default_model="gemini-3.1-pro",
+    default_model="gemini-3.1-pro-preview",
     cli_screen="gemini",
     methodology="""\
 1. LIQUIDITY ASSESSMENT: What are central banks doing? Are they adding or \

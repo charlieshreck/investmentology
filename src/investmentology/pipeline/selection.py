@@ -65,16 +65,19 @@ def select_tickers(
     db: Database,
     candidates: list[str],
     max_tickers: int = MAX_TICKERS_PER_CYCLE,
+    max_watchlist: int | None = None,
 ) -> TickerSelection:
     """Score and rank candidates, return TickerSelection with portfolio-first guarantee.
 
     Portfolio tickers are ALWAYS included regardless of budget.
-    Remaining budget (MAX_WATCHLIST_TICKERS) is filled by highest-scoring
-    watchlist/QG candidates.
+    Remaining budget is filled by highest-scoring watchlist/QG candidates.
+    Use max_watchlist to override the default cap (e.g. during overnight runs).
 
     Returns TickerSelection(portfolio=[...], watchlist=[...]).
     Use .all_tickers for a flat list with portfolio first.
     """
+    budget = max_watchlist if max_watchlist is not None else MAX_WATCHLIST_TICKERS
+
     # Identify portfolio tickers from the candidate list
     portfolio_set = set(get_portfolio_tickers(db))
     portfolio_tickers = [t for t in candidates if t in portfolio_set]
@@ -84,7 +87,7 @@ def select_tickers(
     if watchlist_candidates:
         scored = _score_all(db, watchlist_candidates)
         scored.sort(key=lambda s: s.score, reverse=True)
-        watchlist_selected = scored[:MAX_WATCHLIST_TICKERS]
+        watchlist_selected = scored[:budget]
     else:
         watchlist_selected = []
 

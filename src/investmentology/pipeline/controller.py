@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -231,6 +232,11 @@ class PipelineController:
         await self.gateway.close()
         logger.info("Pipeline controller stopped")
 
+    @property
+    def _is_overnight(self) -> bool:
+        """True during overnight processing window (00:00-06:00 UTC)."""
+        return datetime.now(timezone.utc).hour < 6
+
     async def run_loop(self) -> None:
         """Main event loop — polls for work every POLL_INTERVAL seconds."""
         from investmentology.api.metrics import pipeline_cycle_duration, pipeline_cycles_total
@@ -282,6 +288,18 @@ class PipelineController:
         # 3c. Backtest calibration (once per cycle — loads latest IC data)
         self._ensure_backtest_calibration(cycle_id)
 
+        # 3d. Clear expired reentry blocks (every ~60 min)
+        if self._tick_count % 60 == 0:
+            try:
+                from investmentology.registry.reentry import check_and_clear_blocks
+                fund_map = self._get_cached_fundamentals_map()
+                if fund_map:
+                    cleared = check_and_clear_blocks(self.db, fund_map)
+                    if cleared:
+                        logger.info("Cleared %d reentry blocks", cleared)
+            except Exception:
+                logger.debug("Reentry block clearing failed", exc_info=True)
+
         # 4. Populate screening steps for tickers needing analysis
         tickers = self._get_analysis_tickers()
         for ticker in tickers:
@@ -310,6 +328,12 @@ class PipelineController:
             len(pending), cycle_id,
         )
 
+        # 5b. Bulk-process data_fetch steps in parallel
+        pending = await self._bulk_data_fetch(cycle_id, pending)
+        if not pending:
+            self._check_cycle_completion(cycle_id)
+            return
+
         # 6. Process each pending step.
         # Each CLI agent has its own queue worker, so all agents run in
         # parallel. No dispatch limit needed — workers self-serialize.
@@ -319,6 +343,7 @@ class PipelineController:
             step_id = row["id"]
 
             if step == state.STEP_DATA_FETCH:
+                # Leftovers from non-bulk path (should be rare)
                 await self._handle_data_fetch(cycle_id, ticker, step_id)
 
             elif step == state.STEP_DATA_VALIDATE:
@@ -357,6 +382,116 @@ class PipelineController:
         self._tick_count += 1
         if self._tick_count % 10 == 0:
             await self._staleness_sweep(cycle_id)
+
+    # ------------------------------------------------------------------
+    # Bulk operations
+    # ------------------------------------------------------------------
+
+    async def _bulk_data_fetch(
+        self, cycle_id: UUID, pending: list[dict],
+    ) -> list[dict]:
+        """Process all pending data_fetch steps in parallel.
+
+        Returns the remaining pending steps (non-data_fetch) for normal processing.
+        """
+        fetch_steps = [r for r in pending if r["step"] == state.STEP_DATA_FETCH]
+        other_steps = [r for r in pending if r["step"] != state.STEP_DATA_FETCH]
+
+        if not fetch_steps:
+            return pending
+
+        logger.info(
+            "Bulk data fetch: starting %d tickers in parallel",
+            len(fetch_steps),
+        )
+
+        # Mark all as running
+        for row in fetch_steps:
+            state.mark_running(self.db, row["id"])
+
+        loop = asyncio.get_event_loop()
+
+        async def _fetch_one(ticker: str, step_id: int) -> None:
+            """Fetch data for a single ticker (runs in executor)."""
+            try:
+                fundamentals = await loop.run_in_executor(
+                    None, self._yf_client.get_fundamentals, ticker,
+                )
+                if fundamentals is None:
+                    state.mark_failed(self.db, step_id, "yfinance returned None")
+                    return
+                if fundamentals.get("_validation_errors"):
+                    errors = fundamentals["_validation_errors"]
+                    state.mark_failed(
+                        self.db, step_id,
+                        f"Data quality: {'; '.join(errors)}",
+                    )
+                    return
+
+                # Cache fundamentals
+                state.store_data_cache(
+                    self.db, cycle_id, ticker, "fundamentals", fundamentals,
+                )
+
+                # Technical indicators
+                try:
+                    from investmentology.data.technical_indicators import (
+                        compute_technical_indicators,
+                    )
+                    tech = await loop.run_in_executor(
+                        None, compute_technical_indicators, ticker,
+                    )
+                    if tech:
+                        state.store_data_cache(
+                            self.db, cycle_id, ticker,
+                            "technical_indicators", tech,
+                        )
+                except Exception:
+                    logger.debug(
+                        "Technical indicators unavailable for %s", ticker,
+                    )
+
+                # Enrichment
+                if self._enricher:
+                    await loop.run_in_executor(
+                        None, self._run_enrichment, cycle_id, ticker,
+                    )
+
+                state.mark_completed(self.db, step_id)
+            except Exception as e:
+                state.mark_failed(self.db, step_id, str(e))
+
+        # Limit concurrency to avoid yfinance rate limits
+        sem = asyncio.Semaphore(5)
+
+        async def _throttled_fetch(ticker: str, step_id: int) -> None:
+            async with sem:
+                await _fetch_one(ticker, step_id)
+
+        tasks = [
+            _throttled_fetch(row["ticker"], row["id"])
+            for row in fetch_steps
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info("Bulk data fetch: %d tickers processed", len(fetch_steps))
+        return other_steps
+
+    def _get_cached_fundamentals_map(self) -> dict[str, dict]:
+        """Get cached fundamentals for all tickers with active reentry blocks."""
+        try:
+            rows = self.db.execute(
+                "SELECT DISTINCT ON (rb.ticker) rb.ticker, pdc.data "
+                "FROM invest.reentry_blocks rb "
+                "LEFT JOIN invest.pipeline_data_cache pdc "
+                "  ON pdc.ticker = rb.ticker AND pdc.data_key = 'fundamentals' "
+                "WHERE rb.is_cleared = FALSE AND pdc.data IS NOT NULL "
+                "ORDER BY rb.ticker, pdc.created_at DESC",
+            )
+            return {r["ticker"]: r["data"] for r in rows}
+        except Exception:
+            logger.debug("Failed to build fundamentals map for reentry blocks")
+            return {}
 
     # ------------------------------------------------------------------
     # Step handlers
@@ -1933,12 +2068,18 @@ class PipelineController:
             return []
 
         # L2 Selection Desk: portfolio-first selection with guaranteed slots
-        selection = select_tickers(self.db, unblocked)
+        # During overnight window, remove watchlist cap so all tickers get
+        # data_fetch + screening. CLI queue throughput is the natural throttle.
+        if self._is_overnight:
+            selection = select_tickers(self.db, unblocked, max_watchlist=999)
+        else:
+            selection = select_tickers(self.db, unblocked)
         all_tickers = selection.all_tickers
         logger.info(
-            "Analysis tickers: %d portfolio + %d watchlist from %d candidates (%d blocked)",
+            "Analysis tickers: %d portfolio + %d watchlist from %d candidates (%d blocked, overnight=%s)",
             len(selection.portfolio), len(selection.watchlist),
             len(unblocked), len(candidates) - len(unblocked),
+            self._is_overnight,
         )
         return all_tickers
 
