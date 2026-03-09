@@ -91,10 +91,10 @@ AI-powered institutional-grade investment advisory platform. A hedge fund analys
 | **Warren** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.18 |
 | **Auditor** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.17 |
 | **Klarman** | Primary | Claude CLI proxy | claude-opus-4-6 | claude | 0.12 |
-| **Soros** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.10 |
-| **Druckenmiller** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.11 |
-| **Dalio** | Primary | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.12 |
-| **Data Analyst** | Validator | Gemini CLI proxy | gemini-2.5-pro | gemini | 0.0 |
+| **Soros** | Primary | Gemini CLI proxy | gemini-3.1-pro | gemini | 0.10 |
+| **Druckenmiller** | Primary | Gemini CLI proxy | gemini-3.1-pro | gemini | 0.11 |
+| **Dalio** | Primary | Gemini CLI proxy | gemini-3.1-pro | gemini | 0.12 |
+| **Data Analyst** | Validator | Gemini CLI proxy | gemini-3.1-pro | gemini | 0.0 |
 | **Simons** | Scout | Groq API | llama-3.3-70b | None (API) | 0.07 |
 | **Lynch** | Scout | DeepSeek API | deepseek-reasoner | None (API) | 0.07 |
 | **Income Analyst** | Scout | DeepSeek API | deepseek-chat | None (API) | 0.06 |
