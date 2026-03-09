@@ -126,6 +126,7 @@ free cash flow, and ample liquid reserves.""",
         "portfolio_context", "previous_verdict", "previous_signals",
         "position_thesis", "position_type", "days_held", "thesis_health",
         "analyst_ratings", "short_interest", "research_briefing",
+        "macro_regime", "backtest_calibration",
     ],
     allowed_tags=[
         # Fundamental
@@ -237,6 +238,7 @@ change your mind quickly is more important than being right initially.""",
         "macro_context", "market_snapshot", "news_context",
         "portfolio_context", "previous_verdict", "social_sentiment",
         "position_type", "position_thesis", "thesis_health",
+        "macro_regime", "backtest_calibration",
     ],
     allowed_tags=[
         # Macro
@@ -339,7 +341,7 @@ of stocks is expected and correct. A forced opinion is worse than no opinion."""
     optional_data=[
         "technical_indicators", "social_sentiment",
         "portfolio_context", "previous_verdict",
-        "position_type", "macro_regime",
+        "position_type", "macro_regime", "backtest_calibration",
     ],
     allowed_tags=[
         # Momentum quality
@@ -440,6 +442,7 @@ Examine related-party transactions for size and rationale.""",
         "earnings_context", "news_context", "filing_context",
         "institutional_context", "previous_verdict",
         "position_thesis", "position_type", "days_held", "thesis_health",
+        "backtest_calibration",
     ],
     allowed_tags=[
         # Risk
@@ -544,6 +547,7 @@ conviction and acknowledge what you do NOT know.""",
         "news_context", "institutional_context", "portfolio_context",
         "previous_verdict",
         "position_type", "position_thesis", "thesis_health",
+        "macro_regime", "backtest_calibration",
     ],
     allowed_tags=[
         # Macro
@@ -647,6 +651,7 @@ should slope upward consistently, not look like a seismograph.""",
         "news_context", "insider_context", "institutional_context",
         "technical_indicators", "portfolio_context", "previous_verdict",
         "position_type", "position_thesis", "thesis_health",
+        "backtest_calibration",
     ],
     allowed_tags=[
         # Fundamental
@@ -739,6 +744,7 @@ Define exit conditions before entry. If wrong, cut immediately.""",
         "pnl_pct", "entry_price",
         "analyst_ratings", "short_interest", "research_briefing",
         "position_type", "position_thesis", "thesis_health",
+        "macro_regime", "backtest_calibration",
     ],
     allowed_tags=[
         # Macro
@@ -835,6 +841,7 @@ hold cash without apology. Cash is dry powder, optionality, and insurance.""",
         "institutional_context", "news_context", "previous_verdict",
         "pnl_pct", "entry_price",
         "position_type", "position_thesis", "thesis_health",
+        "backtest_calibration",
     ],
     allowed_tags=[
         # Fundamental
@@ -955,6 +962,7 @@ and have evidence it's overdone.""",
         "news_context", "social_sentiment", "analyst_ratings",
         "short_interest", "portfolio_context", "previous_verdict",
         "position_type", "position_thesis", "thesis_health",
+        "backtest_calibration",
     ],
     allowed_tags=[
         # Valuation / sentiment

@@ -57,6 +57,8 @@ class AnalysisRequest:
     thesis_type: str | None = None  # growth, income, value, momentum
     entry_price: float | None = None  # Original entry price
     pnl_pct: float | None = None  # Current unrealized P&L %
+    # Historical backtest calibration (regime-tagged factor IC data)
+    backtest_calibration: dict | None = None
 
 
 @dataclass

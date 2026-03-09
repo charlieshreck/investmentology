@@ -275,6 +275,9 @@ class PipelineController:
         # 3b. Macro regime pre-classification (once per cycle)
         await self._ensure_macro_regime(cycle_id)
 
+        # 3c. Backtest calibration (once per cycle — loads latest IC data)
+        self._ensure_backtest_calibration(cycle_id)
+
         # 4. Populate screening steps for tickers needing analysis
         tickers = self._get_analysis_tickers()
         for ticker in tickers:
@@ -1654,6 +1657,41 @@ class PipelineController:
             )
         except Exception:
             logger.warning("Macro regime classification failed", exc_info=True)
+
+    def _ensure_backtest_calibration(self, cycle_id: UUID) -> None:
+        """Load latest quant backtest IC data once per cycle.
+
+        Queries invest.quant_backtest_runs for the most recent result and
+        stores regime-conditioned IC data in the pipeline cache so agents
+        receive historical factor accuracy context.
+        """
+        existing = state.get_data_cache(
+            self.db, cycle_id, "__cycle__", "backtest_calibration",
+        )
+        if existing:
+            return
+
+        try:
+            rows = self.db.execute(
+                "SELECT regime_data, summary FROM invest.quant_backtest_runs "
+                "ORDER BY created_at DESC LIMIT 1",
+            )
+            if not rows:
+                logger.debug("No quant backtest results available for calibration")
+                return
+
+            row = rows[0]
+            calibration = {
+                "regime_ics": row.get("regime_data", {}),
+                "summary": row.get("summary", {}),
+            }
+            state.store_data_cache(
+                self.db, cycle_id, "__cycle__", "backtest_calibration",
+                calibration,
+            )
+            logger.info("Loaded backtest calibration into cycle cache")
+        except Exception:
+            logger.debug("Backtest calibration load failed", exc_info=True)
 
     def _get_or_create_cycle(self) -> UUID | None:
         """Get the active cycle or create a new one."""

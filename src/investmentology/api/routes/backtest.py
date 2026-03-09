@@ -127,3 +127,63 @@ def get_backtest_history(registry: Registry = Depends(get_registry)) -> dict:
     except Exception:
         logger.warning("Could not fetch backtest history", exc_info=True)
         return {"runs": []}
+
+
+# ── Quant Gate Historical Backtest Endpoints ────────────────────────────────
+
+
+@router.get("/backtest/quant/latest")
+def get_latest_quant_backtest(
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Return most recent quant gate historical backtest result."""
+    rows = registry._db.execute(
+        """SELECT id, run_mode, screen_years, ic_data, quintile_data,
+                  top_n_data, regime_data, summary, created_at
+           FROM invest.quant_backtest_runs
+           ORDER BY created_at DESC LIMIT 1"""
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No quant backtest results found")
+    row = rows[0]
+    return {
+        "id": row["id"],
+        "runMode": row["run_mode"],
+        "screenYears": row["screen_years"],
+        "icData": row["ic_data"],
+        "quintileData": row["quintile_data"],
+        "topNData": row["top_n_data"],
+        "regimeData": row["regime_data"],
+        "summary": row["summary"],
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
+@router.get("/backtest/quant/{run_id}")
+def get_quant_backtest(
+    run_id: int,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Return full quant backtest result including ticker_details."""
+    rows = registry._db.execute(
+        """SELECT id, run_mode, screen_years, ic_data, quintile_data,
+                  top_n_data, regime_data, ticker_details, summary, created_at
+           FROM invest.quant_backtest_runs
+           WHERE id = %s""",
+        (run_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Quant backtest run not found")
+    row = rows[0]
+    return {
+        "id": row["id"],
+        "runMode": row["run_mode"],
+        "screenYears": row["screen_years"],
+        "icData": row["ic_data"],
+        "quintileData": row["quintile_data"],
+        "topNData": row["top_n_data"],
+        "regimeData": row["regime_data"],
+        "tickerDetails": row["ticker_details"],
+        "summary": row["summary"],
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+    }

@@ -279,6 +279,13 @@ def build_analysis_request(
             db, cycle_id, "__cycle__", "macro_regime",
         )
 
+    # Backtest calibration — cycle-level, stored under ticker="__cycle__"
+    backtest_calibration = None
+    if cycle_id:
+        backtest_calibration = state.get_data_cache(
+            db, cycle_id, "__cycle__", "backtest_calibration",
+        )
+
     macro_context = _enrich("macro_context")
     news_raw = _enrich("news_context")
     news_context = news_raw.get("items") if isinstance(news_raw, dict) else news_raw
@@ -424,4 +431,5 @@ def build_analysis_request(
         piotroski_score=piotroski,
         altman_z_score=altman_z,
         research_briefing=research_briefing,
+        backtest_calibration=backtest_calibration,
     )

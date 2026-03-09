@@ -183,6 +183,9 @@ class AgentRunner:
         if "macro_regime" in opt and request.macro_regime:
             parts.extend(self._fmt_macro_regime(request.macro_regime))
 
+        if "backtest_calibration" in opt and request.backtest_calibration:
+            parts.extend(self._fmt_backtest_calibration(request.backtest_calibration))
+
         if "macro_context" in opt and request.macro_context:
             parts.extend(self._fmt_macro(request.macro_context))
 
@@ -693,6 +696,27 @@ class AgentRunner:
             briefing,
             "=" * 60,
         ]
+
+    @staticmethod
+    def _fmt_backtest_calibration(cal: dict) -> list[str]:
+        """Format historical backtest calibration data for agent context."""
+        context = cal.get("calibration_context")
+        if context:
+            return ["", context]
+        # Fallback: build from regime_data
+        regime_data = cal.get("regime_data", {})
+        if not regime_data:
+            return []
+        parts = ["", "HISTORICAL FACTOR PERFORMANCE (backtest IC, 12m horizon):"]
+        for regime, factors in regime_data.items():
+            items = []
+            for factor, horizons in factors.items():
+                ic_12 = horizons.get("12", {}).get("avg_ic")
+                if ic_12 is not None:
+                    items.append(f"{factor}={ic_12:.2f}")
+            if items:
+                parts.append(f"  {regime.replace('_', '-').title()}: {', '.join(items[:4])}")
+        return parts
 
     @staticmethod
     def _fmt_macro_regime(regime: dict) -> list[str]:
