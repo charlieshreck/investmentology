@@ -10,6 +10,7 @@ import { AgentConsensusPanel } from "../components/shared/AgentConsensusPanel";
 import { SignalTagCloud } from "../components/shared/SignalTagCloud";
 import { PriceRangeBar } from "../components/shared/PriceRangeBar";
 import { FormattedProse } from "../components/shared/FormattedProse";
+import { PortfolioHealthStrip, SECTOR_RISK_MAP } from "../components/shared/PortfolioHealthStrip";
 import { useRecommendations } from "../hooks/useRecommendations";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { verdictColor, verdictLabel, verdictBadgeVariant } from "../utils/verdictHelpers";
@@ -131,6 +132,7 @@ const CONVICTION_CONFIG: Record<string, { label: string; bg: string; fg: string;
 /* ── Sort controls ── */
 const SORT_OPTIONS = [
   { key: "default", label: "Probability" },
+  { key: "fit", label: "Portfolio Fit" },
   { key: "upside", label: "Upside %" },
   { key: "rr", label: "R:R Ratio" },
   { key: "confidence", label: "Confidence" },
@@ -157,6 +159,8 @@ function sortRecs(recs: Recommendation[], sortKey: string): Recommendation[] {
       case "conviction":
         return (CONVICTION_RANK[b.predictionCard?.convictionTier ?? ""] ?? 0)
              - (CONVICTION_RANK[a.predictionCard?.convictionTier ?? ""] ?? 0);
+      case "fit":
+        return (b.portfolioFit?.score ?? 0) - (a.portfolioFit?.score ?? 0);
       default:
         return (b.successProbability ?? 0) - (a.successProbability ?? 0);
     }
@@ -329,10 +333,12 @@ function RecCard({
   rec,
   onOpen,
   onAddToPortfolio,
+  underweightCategories,
 }: {
   rec: Recommendation;
   onOpen: () => void;
   onAddToPortfolio: () => void;
+  underweightCategories?: string[];
 }) {
   const stances = (rec.agentStances || []) as AgentStance[];
   const [expanded, setExpanded] = useState(false);
@@ -559,6 +565,20 @@ function RecCard({
           display: "flex", gap: "var(--space-xs)", marginTop: "var(--space-sm)",
           flexWrap: "wrap", alignItems: "center",
         }}>
+          {/* Fills Gap badge — highlights stocks in underweight risk categories */}
+          {(() => {
+            const riskCat = SECTOR_RISK_MAP[rec.sector] ?? "mixed";
+            const fillsGap = underweightCategories?.includes(riskCat);
+            if (!fillsGap) return null;
+            const catLabel = riskCat.charAt(0).toUpperCase() + riskCat.slice(1);
+            return (
+              <SignalPill
+                label={`Fills ${catLabel} gap`}
+                bg="rgba(99, 102, 241, 0.15)"
+                fg="var(--color-accent-bright)"
+              />
+            );
+          })()}
           {rec.riskFlags && rec.riskFlags.length > 0 && (
             <SignalPill
               label={`${rec.riskFlags.length} risk${rec.riskFlags.length > 1 ? "s" : ""}`}
@@ -972,7 +992,7 @@ function RecCard({
 }
 
 export function Recommendations() {
-  const { groupedByVerdict, totalCount, loading, error, refetch } = useRecommendations();
+  const { groupedByVerdict, totalCount, loading, error, refetch, portfolioGaps, allocationGuidance } = useRecommendations();
   const setOverlayTicker = useStore((s) => s.setOverlayTicker);
   const [portfolioTarget, setPortfolioTarget] = useState<Recommendation | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
@@ -1109,6 +1129,9 @@ export function Recommendations() {
           </div>
         </div>
 
+        {/* Portfolio health strip — 3-tier allocation guidance */}
+        <PortfolioHealthStrip gaps={portfolioGaps} guidance={allocationGuidance} />
+
         {/* Empty state */}
         {totalCount === 0 && (
           <div style={{
@@ -1212,6 +1235,7 @@ export function Recommendations() {
                       rec={rec}
                       onOpen={() => setOverlayTicker(rec.ticker)}
                       onAddToPortfolio={() => setPortfolioTarget(rec)}
+                      underweightCategories={portfolioGaps?.underweightCategories}
                     />
                   </motion.div>
                 ))}

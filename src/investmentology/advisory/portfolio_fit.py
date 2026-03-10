@@ -295,6 +295,124 @@ _DEFAULT_RULE = {
 }
 
 
+@dataclass
+class PortfolioGapAnalysis:
+    """Current portfolio allocation vs ideal targets, with gap identification."""
+
+    total_value: float
+    position_count: int
+    risk_allocations: dict[str, dict]  # category → {current_pct, ideal_pct, gap_pct, status}
+    sector_allocations: dict[str, float]  # sector → current_pct
+    underweight_categories: list[str]  # Risk categories needing more exposure
+    overweight_categories: list[str]   # Risk categories that are too concentrated
+    concentration_warnings: list[str]  # Specific warnings (sector > 40%, single pos > 10%)
+
+
+def compute_portfolio_gaps(registry: Registry) -> PortfolioGapAnalysis:
+    """Compute current vs ideal portfolio allocation by risk category.
+
+    Returns gap analysis showing where the portfolio is under/overweight
+    relative to IDEAL_RISK_TARGETS.
+    """
+    positions = registry.get_open_positions()
+    if not positions:
+        return PortfolioGapAnalysis(
+            total_value=0,
+            position_count=0,
+            risk_allocations={
+                cat: {"current_pct": 0.0, "ideal_pct": ideal, "gap_pct": ideal, "status": "empty"}
+                for cat, ideal in IDEAL_RISK_TARGETS.items()
+            },
+            sector_allocations={},
+            underweight_categories=list(IDEAL_RISK_TARGETS.keys()),
+            overweight_categories=[],
+            concentration_warnings=["Portfolio is empty"],
+        )
+
+    # Fetch sectors for held tickers
+    tickers = [p.ticker for p in positions]
+    sector_map: dict[str, str] = {}
+    try:
+        rows = registry._db.execute(
+            "SELECT ticker, sector FROM invest.stocks WHERE ticker = ANY(%s)",
+            [tickers],
+        )
+        for r in rows:
+            sector_map[r["ticker"]] = r.get("sector") or "Unknown"
+    except Exception:
+        pass
+
+    total_value = sum(float(p.current_price * p.shares) for p in positions)
+    if total_value <= 0:
+        total_value = 1.0  # Avoid division by zero
+
+    # Compute sector allocations
+    sector_values: dict[str, float] = {}
+    for p in positions:
+        sector = sector_map.get(p.ticker, "Unknown")
+        mv = float(p.current_price * p.shares)
+        sector_values[sector] = sector_values.get(sector, 0) + mv
+
+    sector_pcts = {s: round(v / total_value * 100, 1) for s, v in sector_values.items()}
+
+    # Compute risk category allocations
+    risk_values: dict[str, float] = {}
+    for p in positions:
+        sector = sector_map.get(p.ticker, "Unknown")
+        cat = SECTOR_RISK_MAP.get(sector, "mixed")
+        mv = float(p.current_price * p.shares)
+        risk_values[cat] = risk_values.get(cat, 0) + mv
+
+    risk_allocations: dict[str, dict] = {}
+    underweight: list[str] = []
+    overweight: list[str] = []
+
+    for cat, ideal_pct in IDEAL_RISK_TARGETS.items():
+        current_pct = round(risk_values.get(cat, 0) / total_value * 100, 1)
+        gap_pct = round(ideal_pct - current_pct, 1)
+
+        if gap_pct > 5:
+            status = "underweight"
+            underweight.append(cat)
+        elif gap_pct < -10:
+            status = "overweight"
+            overweight.append(cat)
+        elif gap_pct < -5:
+            status = "slightly_overweight"
+        elif gap_pct > 0:
+            status = "slightly_underweight"
+        else:
+            status = "balanced"
+
+        risk_allocations[cat] = {
+            "current_pct": current_pct,
+            "ideal_pct": ideal_pct,
+            "gap_pct": gap_pct,
+            "status": status,
+        }
+
+    # Concentration warnings
+    warnings: list[str] = []
+    for sector, pct in sector_pcts.items():
+        if pct > MAX_SINGLE_SECTOR_PCT:
+            warnings.append(f"{sector} at {pct}% exceeds {MAX_SINGLE_SECTOR_PCT}% limit")
+
+    for p in positions:
+        pos_pct = float(p.current_price * p.shares) / total_value * 100
+        if pos_pct > MAX_SINGLE_POSITION_PCT:
+            warnings.append(f"{p.ticker} at {pos_pct:.1f}% exceeds {MAX_SINGLE_POSITION_PCT}% position limit")
+
+    return PortfolioGapAnalysis(
+        total_value=round(total_value, 2),
+        position_count=len(positions),
+        risk_allocations=risk_allocations,
+        sector_allocations=sector_pcts,
+        underweight_categories=underweight,
+        overweight_categories=overweight,
+        concentration_warnings=warnings,
+    )
+
+
 def get_cash_regime_guidance(macro_regime: dict | None) -> CashRegimeGuidance:
     """Translate a MacroRegimeResult dict into portfolio allocation guidance.
 

@@ -8,7 +8,12 @@ import logging
 from fastapi import APIRouter, Depends
 
 from investmentology.api.deps import get_registry
-from investmentology.advisory.portfolio_fit import PortfolioFitScorer
+from investmentology.advisory.portfolio_fit import (
+    PortfolioFitScorer,
+    compute_portfolio_gaps,
+    get_cash_regime_guidance,
+    SECTOR_RISK_MAP,
+)
 from investmentology.advisory.prediction_card import (
     AgentTarget,
     PredictionCard,
@@ -605,6 +610,56 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
             if card:
                 row["_prediction_card"] = card
 
+    # --- Portfolio gap analysis ---
+    gaps = None
+    try:
+        gaps = compute_portfolio_gaps(registry)
+    except Exception:
+        logger.debug("Could not compute portfolio gaps")
+
+    # --- Macro regime allocation guidance ---
+    allocation_guidance = None
+    try:
+        macro_rows = registry._db.execute(
+            "SELECT data_value FROM invest.pipeline_data_cache "
+            "WHERE ticker = '__cycle__' AND data_key = 'macro_regime' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        macro_regime = macro_rows[0]["data_value"] if macro_rows else None
+        guidance = get_cash_regime_guidance(macro_regime)
+        if guidance:
+            allocation_guidance = {
+                "regime": guidance.regime,
+                "stance": guidance.stance.value,
+                "equityTargetMin": guidance.equity_min_pct,
+                "equityTargetMax": guidance.equity_max_pct,
+                "cashTargetMin": guidance.cash_min_pct,
+                "cashTargetMax": guidance.cash_max_pct,
+                "entryCriteria": guidance.entry_criteria,
+                "summary": guidance.summary,
+            }
+    except Exception:
+        logger.debug("Could not compute allocation guidance")
+
+    # --- Sort recommendations: portfolio-fit score as tiebreaker within verdict ---
+    # Primary sort: verdict strength (STRONG_BUY > BUY > ACCUMULATE)
+    # Secondary sort: portfolio fit score descending (gap-filling stocks first)
+    verdict_rank = {v: i for i, v in enumerate(VERDICT_ORDER)}
+
+    def _sort_key(row: dict) -> tuple:
+        vr = verdict_rank.get(row.get("verdict", ""), 99)
+        fit = row.get("_portfolio_fit")
+        fit_score = fit.score if fit else 0.0
+        # Boost stocks in underweight categories
+        if gaps and gaps.underweight_categories:
+            sector = row.get("sector") or ""
+            risk_cat = SECTOR_RISK_MAP.get(sector, "mixed")
+            if risk_cat in gaps.underweight_categories:
+                fit_score += 0.3  # Significant boost for gap-filling
+        return (vr, -fit_score)
+
+    positive_rows.sort(key=_sort_key)
+
     items = [_format_recommendation(r, registry) for r in positive_rows]
 
     grouped: dict[str, list[dict]] = {}
@@ -620,8 +675,26 @@ def get_recommendations(registry: Registry = Depends(get_registry)) -> dict:
         if v in grouped:
             ordered_grouped[v] = grouped[v]
 
-    return {
+    result = {
         "items": items,
         "groupedByVerdict": ordered_grouped,
         "totalCount": len(items),
     }
+
+    # Add portfolio gaps
+    if gaps:
+        result["portfolioGaps"] = {
+            "totalValue": gaps.total_value,
+            "positionCount": gaps.position_count,
+            "riskAllocations": gaps.risk_allocations,
+            "sectorAllocations": gaps.sector_allocations,
+            "underweightCategories": gaps.underweight_categories,
+            "overweightCategories": gaps.overweight_categories,
+            "concentrationWarnings": gaps.concentration_warnings,
+        }
+
+    # Add allocation guidance
+    if allocation_guidance:
+        result["allocationGuidance"] = allocation_guidance
+
+    return result

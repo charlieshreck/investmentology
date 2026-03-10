@@ -93,10 +93,40 @@ export interface AnalyseResponse {
   status: "queued" | "running" | "complete" | "error";
 }
 
+export interface RiskAllocation {
+  current_pct: number;
+  ideal_pct: number;
+  gap_pct: number;
+  status: "underweight" | "overweight" | "slightly_overweight" | "slightly_underweight" | "balanced" | "empty";
+}
+
+export interface PortfolioGaps {
+  totalValue: number;
+  positionCount: number;
+  riskAllocations: Record<string, RiskAllocation>;
+  sectorAllocations: Record<string, number>;
+  underweightCategories: string[];
+  overweightCategories: string[];
+  concentrationWarnings: string[];
+}
+
+export interface AllocationGuidance {
+  regime: string;
+  stance: string;
+  equityTargetMin: number;
+  equityTargetMax: number;
+  cashTargetMin: number;
+  cashTargetMax: number;
+  entryCriteria: string;
+  summary: string;
+}
+
 export interface RecommendationsResponse {
   items: Recommendation[];
   groupedByVerdict: Record<string, Recommendation[]>;
   totalCount: number;
+  portfolioGaps?: PortfolioGaps;
+  allocationGuidance?: AllocationGuidance;
 }
 
 export interface ClosedPositionsResponse {
