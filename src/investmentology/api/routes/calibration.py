@@ -99,6 +99,63 @@ def get_calibration(registry: Registry = Depends(get_registry)) -> dict:
     return summary
 
 
+@router.get("/calibration/leaderboard")
+def get_agent_leaderboard(registry: Registry = Depends(get_registry)) -> dict:
+    """Agent calibration leaderboard — per-agent accuracy, Brier scores, and ranking.
+
+    Returns agents sorted by accuracy (best first), with:
+    - Total settled predictions
+    - Accuracy (% correct)
+    - Average confidence
+    - Brier score (lower = better calibrated)
+    - Overconfidence flag (avg confidence > accuracy)
+    - Cross-agent correlation (if available)
+    """
+    agents: list[dict] = []
+
+    try:
+        rows = registry._db.execute(
+            """SELECT
+                 agent_name,
+                 COUNT(*) AS total,
+                 SUM(CASE WHEN was_correct THEN 1 ELSE 0 END) AS correct,
+                 AVG(raw_confidence) AS avg_confidence,
+                 AVG(CASE WHEN was_correct THEN (1 - raw_confidence)^2
+                          ELSE raw_confidence^2 END) AS brier_score
+               FROM invest.agent_calibration_data
+               WHERE settled = TRUE
+               GROUP BY agent_name
+               HAVING COUNT(*) >= 5
+               ORDER BY SUM(CASE WHEN was_correct THEN 1 ELSE 0 END)::float / COUNT(*) DESC""",
+        )
+        for rank, row in enumerate(rows or [], 1):
+            total = int(row["total"])
+            correct = int(row["correct"])
+            accuracy = correct / total if total > 0 else 0
+            avg_conf = float(row["avg_confidence"]) if row["avg_confidence"] else 0
+            brier = float(row["brier_score"]) if row["brier_score"] else 0
+
+            agents.append({
+                "rank": rank,
+                "agent": row["agent_name"],
+                "totalSettled": total,
+                "correct": correct,
+                "accuracy": round(accuracy, 3),
+                "avgConfidence": round(avg_conf, 3),
+                "brierScore": round(brier, 4),
+                "overconfident": avg_conf > accuracy + 0.05,
+                "readyForKelly": total >= 100,
+            })
+    except Exception:
+        pass
+
+    return {
+        "agents": agents,
+        "totalAgents": len(agents),
+        "minForKelly": 100,
+    }
+
+
 @router.post("/calibration/settle")
 def trigger_calibration_settlement(
     registry: Registry = Depends(get_registry),

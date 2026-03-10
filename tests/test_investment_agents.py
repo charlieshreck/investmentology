@@ -340,7 +340,7 @@ class TestSorosRunner:
 
     def test_init(self, runner: AgentRunner) -> None:
         assert runner.name == "soros"
-        assert runner.model == "gemini-2.5-pro"
+        assert runner.model == "gemini-3.1-pro-preview"
 
     def test_system_prompt_content(self, runner: AgentRunner) -> None:
         prompt = runner.build_system_prompt()
@@ -385,7 +385,7 @@ class TestSorosRunner:
     ) -> None:
         async def _run():
             runner.gateway.call.return_value = _make_llm_response(
-                SOROS_RESPONSE, provider="remote-soros", model="gemini-2.5-pro",
+                SOROS_RESPONSE, provider="remote-soros", model="gemini-3.1-pro-preview",
             )
             result = await runner.analyze(request_with_macro)
 

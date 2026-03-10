@@ -705,12 +705,35 @@ class TestPortfolioPositions:
         resp = client.post("/api/invest/portfolio/positions", json={
             "ticker": "aapl", "entry_price": 150.0, "shares": 10,
             "stop_loss": 127.5,
+            "invalidation_criteria": [
+                {"criteria_type": "roic_floor", "threshold_value": 12.0, "is_quantitative": True},
+                {"criteria_type": "custom_qualitative", "qualitative_text": "Thesis breaks if they lose DOD contract", "is_quantitative": False},
+            ],
         })
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == 1
         assert data["ticker"] == "AAPL"
         assert data["status"] == "created"
+
+    def test_create_position_requires_invalidation_criteria(self, client: TestClient, mock_db: MagicMock) -> None:
+        """BUY requires at least one quantitative AND one qualitative invalidation criterion."""
+        resp = client.post("/api/invest/portfolio/positions", json={
+            "ticker": "aapl", "entry_price": 150.0, "shares": 10,
+            "stop_loss": 127.5,
+        })
+        assert resp.status_code == 422
+        assert "invalidation" in resp.json()["detail"].lower()
+
+        # Only quantitative — still rejected
+        resp = client.post("/api/invest/portfolio/positions", json={
+            "ticker": "aapl", "entry_price": 150.0, "shares": 10,
+            "stop_loss": 127.5,
+            "invalidation_criteria": [
+                {"criteria_type": "roic_floor", "threshold_value": 12.0, "is_quantitative": True},
+            ],
+        })
+        assert resp.status_code == 422
 
     def test_close_position(self, client: TestClient, mock_db: MagicMock) -> None:
         mock_db.execute.side_effect = [

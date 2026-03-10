@@ -21,6 +21,13 @@ from investmentology.timing.sizing import PositionSizer, SizingConfig
 logger = logging.getLogger(__name__)
 
 
+class InvalidationCriterion(BaseModel):
+    criteria_type: str  # roic_floor, fscore_floor, revenue_growth_floor, debt_ceiling, dividend_cut, custom_quantitative, custom_qualitative
+    threshold_value: float | None = None  # numeric threshold (required for quantitative)
+    qualitative_text: str | None = None  # description (required for qualitative)
+    is_quantitative: bool = True
+
+
 class CreatePositionRequest(BaseModel):
     ticker: str
     entry_price: float
@@ -30,6 +37,7 @@ class CreatePositionRequest(BaseModel):
     stop_loss: float | None = None
     fair_value_estimate: float | None = None
     thesis: str = ""
+    invalidation_criteria: list[InvalidationCriterion] = []
 
 
 class ClosePositionRequest(BaseModel):
@@ -75,6 +83,31 @@ def create_position(
             detail="stop_loss is required for every position. "
             "Set a trailing stop (core: 15-20%, permanent: 25% catastrophic).",
         )
+
+    # Enforce thesis invalidation criteria at BUY time
+    has_quant = any(c.is_quantitative for c in body.invalidation_criteria)
+    has_qual = any(not c.is_quantitative for c in body.invalidation_criteria)
+    if not (has_quant and has_qual):
+        raise HTTPException(
+            status_code=422,
+            detail="At least one quantitative AND one qualitative invalidation "
+            "criterion required. Examples: quantitative='ROIC floor >= 12%', "
+            "qualitative='thesis breaks if they lose the DOD contract'. "
+            "Send invalidation_criteria with is_quantitative=true/false.",
+        )
+
+    # Validate each criterion
+    for c in body.invalidation_criteria:
+        if c.is_quantitative and c.threshold_value is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Quantitative criterion '{c.criteria_type}' requires threshold_value.",
+            )
+        if not c.is_quantitative and not c.qualitative_text:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Qualitative criterion '{c.criteria_type}' requires qualitative_text.",
+            )
 
     ticker = body.ticker.upper()
     new_shares = Decimal(str(body.shares))
@@ -188,6 +221,32 @@ def create_position(
             thesis=body.thesis,
         )
         logger.info("Created position + deducted $%.2f for %s (atomic)", float(purchase_cost), ticker)
+
+        # Store thesis invalidation criteria
+        if body.invalidation_criteria:
+            import json
+            break_conds = []
+            for c in body.invalidation_criteria:
+                registry._db.execute(
+                    "INSERT INTO invest.thesis_criteria "
+                    "(position_id, criteria_type, threshold_value, qualitative_text, "
+                    " is_quantitative, monitoring_active) "
+                    "VALUES (%s, %s, %s, %s, %s, TRUE)",
+                    (position_id, c.criteria_type, c.threshold_value,
+                     c.qualitative_text, c.is_quantitative),
+                )
+                break_conds.append({
+                    "type": c.criteria_type,
+                    "threshold": c.threshold_value,
+                    "text": c.qualitative_text,
+                    "quantitative": c.is_quantitative,
+                })
+            # Store summary on position for quick access
+            registry._db.execute(
+                "UPDATE invest.portfolio_positions SET break_conditions = %s WHERE id = %s",
+                (json.dumps(break_conds), position_id),
+            )
+
         result = {"id": position_id, "ticker": ticker, "status": "created"}
 
     # Advisory sizing suggestion (non-blocking)
@@ -216,6 +275,18 @@ def create_position(
         logger.debug("Sizing suggestion failed for %s", ticker)
 
     return result
+
+
+@router.get("/portfolio/positions/{position_id}/criteria")
+def get_position_criteria(
+    position_id: int,
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Get thesis invalidation criteria for a position."""
+    from investmentology.advisory.thesis_health import get_criteria_for_position
+
+    criteria = get_criteria_for_position(position_id, registry)
+    return {"position_id": position_id, "criteria": criteria}
 
 
 @router.post("/portfolio/positions/{position_id}/close")

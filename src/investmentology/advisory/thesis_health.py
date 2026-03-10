@@ -258,3 +258,133 @@ def apply_verdict_gating(
             f"Thesis health: {assessment.health.value}."
         ),
     )
+
+
+# ---- Thesis Criteria Monitoring ----
+
+@dataclass
+class CriteriaBreach:
+    """A thesis invalidation criterion that has been breached."""
+    position_id: int
+    ticker: str
+    criteria_type: str
+    threshold_value: float | None
+    qualitative_text: str | None
+    is_quantitative: bool
+    current_value: float | None = None
+    message: str = ""
+
+
+def check_thesis_criteria(
+    ticker: str,
+    position_id: int,
+    registry: Registry,
+    fundamentals: dict | None = None,
+) -> list[CriteriaBreach]:
+    """Check all active thesis criteria for a position against current data.
+
+    Returns list of breached criteria. Empty list = all criteria still hold.
+    """
+    try:
+        rows = registry._db.execute(
+            "SELECT id, criteria_type, threshold_value, qualitative_text, is_quantitative "
+            "FROM invest.thesis_criteria "
+            "WHERE position_id = %s AND monitoring_active = TRUE",
+            (position_id,),
+        )
+    except Exception:
+        logger.debug("Could not fetch thesis criteria for position %s", position_id)
+        return []
+
+    if not rows:
+        return []
+
+    breaches: list[CriteriaBreach] = []
+
+    for row in rows:
+        if not row["is_quantitative"]:
+            # Qualitative criteria cannot be auto-checked — they appear as
+            # reminders in the briefing for human review
+            continue
+
+        criteria_type = row["criteria_type"]
+        threshold = float(row["threshold_value"]) if row["threshold_value"] is not None else None
+        if threshold is None:
+            continue
+
+        current_value: float | None = None
+        breached = False
+
+        if fundamentals:
+            if criteria_type == "roic_floor":
+                current_value = fundamentals.get("roic")
+                if current_value is not None and current_value < threshold:
+                    breached = True
+            elif criteria_type == "fscore_floor":
+                current_value = fundamentals.get("piotroski_score")
+                if current_value is not None and current_value < threshold:
+                    breached = True
+            elif criteria_type == "revenue_growth_floor":
+                current_value = fundamentals.get("revenue_growth_pct")
+                if current_value is not None and current_value < threshold:
+                    breached = True
+            elif criteria_type == "debt_ceiling":
+                current_value = fundamentals.get("debt_to_equity")
+                if current_value is not None and current_value > threshold:
+                    breached = True
+
+        if breached:
+            msg = (
+                f"{ticker}: {criteria_type} breached — "
+                f"current {current_value:.2f} vs threshold {threshold:.2f}"
+            )
+            breaches.append(CriteriaBreach(
+                position_id=position_id,
+                ticker=ticker,
+                criteria_type=criteria_type,
+                threshold_value=threshold,
+                qualitative_text=row.get("qualitative_text"),
+                is_quantitative=True,
+                current_value=current_value,
+                message=msg,
+            ))
+            # Update status in DB
+            try:
+                registry._db.execute(
+                    "UPDATE invest.thesis_criteria "
+                    "SET last_checked_at = NOW(), last_status = 'BREACHED' "
+                    "WHERE id = %s",
+                    (row["id"],),
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                registry._db.execute(
+                    "UPDATE invest.thesis_criteria "
+                    "SET last_checked_at = NOW(), last_status = 'OK' "
+                    "WHERE id = %s",
+                    (row["id"],),
+                )
+            except Exception:
+                pass
+
+    return breaches
+
+
+def get_criteria_for_position(
+    position_id: int,
+    registry: Registry,
+) -> list[dict]:
+    """Get all thesis criteria for a position (for display in PWA)."""
+    try:
+        rows = registry._db.execute(
+            "SELECT criteria_type, threshold_value, qualitative_text, "
+            "is_quantitative, monitoring_active, last_status, last_checked_at "
+            "FROM invest.thesis_criteria "
+            "WHERE position_id = %s ORDER BY is_quantitative DESC, created_at",
+            (position_id,),
+        )
+        return [dict(r) for r in rows] if rows else []
+    except Exception:
+        return []

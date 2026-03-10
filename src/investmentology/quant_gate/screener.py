@@ -139,8 +139,8 @@ def _compute_momentum_and_liquidity(
                     last_price = float(series.iloc[-1])
                     adv_dollars[ticker] = avg_vol * last_price
 
-            # Momentum: require ≥200 trading days for meaningful J-T signal
-            if len(series) < 200:
+            # Momentum: require ≥252 trading days for meaningful J-T signal
+            if len(series) < 252:
                 continue
             # Jegadeesh-Titman skip-month: price at T-1month / price at T-12months - 1
             momentum_raw[ticker] = float((series.iloc[-22] / series.iloc[0]) - 1)
