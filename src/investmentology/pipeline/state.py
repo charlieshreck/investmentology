@@ -160,17 +160,23 @@ def reset_for_retry(db: Database, step_id: int) -> bool:
 # ---------------------------------------------------------------------------
 
 def cascade_fail_blocked_tickers(db: Database, cycle_id: UUID) -> int:
-    """Mark all pending steps as failed for tickers that have a failed upstream step.
+    """Mark all pending steps as failed for tickers that have a failed infrastructure step.
 
-    When data_fetch or data_validate fails for a ticker, downstream steps
-    (screeners, agents, debate, synthesis) would stay permanently 'pending'
-    because their handlers do a bare return when prerequisites aren't met.
-    This sweep catches those zombie steps in one pass per tick.
+    When data_fetch, data_validate, pre_filter, or gate_decision fails for a
+    ticker, downstream steps would stay permanently 'pending' because their
+    handlers do a bare return when prerequisites aren't met.  This sweep
+    catches those zombie steps in one pass per tick.
+
+    IMPORTANT: Only cascades from infrastructure steps, NOT from individual
+    agent failures.  Agent failures are independent — one agent failing should
+    not prevent other agents from running for the same ticker.
     """
+    cascade_steps = ("data_fetch", "data_validate", "pre_filter", "gate_decision")
+    placeholders = ",".join(["%s"] * len(cascade_steps))
     rows = db.execute(
         "WITH failed_tickers AS ("
         "  SELECT DISTINCT ticker FROM invest.pipeline_state "
-        "  WHERE cycle_id = %s AND status = 'failed'"
+        f"  WHERE cycle_id = %s AND status = 'failed' AND step IN ({placeholders})"
         ") "
         "UPDATE invest.pipeline_state ps "
         "SET status = 'failed', completed_at = NOW(), "
@@ -179,7 +185,7 @@ def cascade_fail_blocked_tickers(db: Database, cycle_id: UUID) -> int:
         "WHERE ps.cycle_id = %s AND ps.ticker = ft.ticker "
         "AND ps.status = 'pending' "
         "RETURNING ps.id, ps.ticker, ps.step",
-        (cycle_id, cycle_id),
+        (cycle_id, *cascade_steps, cycle_id),
     )
     if rows:
         tickers = {r["ticker"] for r in rows}

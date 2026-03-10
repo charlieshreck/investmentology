@@ -917,8 +917,8 @@ MARKS = AgentSkill(
         "is knowing where you stand on that pendulum -- not predicting earnings."
     ),
     role="primary",
-    provider_preference=["openrouter", "deepseek"],
-    default_model="google/gemini-3.1-pro-preview",
+    provider_preference=["deepseek"],
+    default_model="deepseek-chat",
     cli_screen=None,  # API-only — no CLI queue impact
     methodology="""\
 1. SECOND-LEVEL THINKING: First-level says "This company has great earnings, buy." \
