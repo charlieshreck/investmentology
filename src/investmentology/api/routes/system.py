@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import time
 
@@ -11,6 +12,8 @@ from investmentology.api.deps import get_gateway, get_registry
 from investmentology.api.schemas import SystemHealthResponse
 from investmentology.agents.gateway import LLMGateway
 from investmentology.registry.queries import Registry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -144,6 +147,68 @@ def agents_panel(
         agents.append(agent_data)
 
     return {"agents": agents}
+
+
+@router.post("/system/force-refresh")
+def force_refresh(registry: Registry = Depends(get_registry)) -> dict:
+    """Clear all caches and pipeline state so the next cycle starts fresh.
+
+    Clears:
+    - pipeline_data_cache (enrichment data, fundamentals, research)
+    - fundamentals_cache (yfinance price/market cap snapshots)
+    - pipeline_state (all step tracking — forces full re-run)
+    - In-memory caches (briefing, dividends, correlations, weights)
+    """
+    db = registry._db
+    cleared: list[str] = []
+
+    # 1. DB caches
+    db.execute("DELETE FROM invest.pipeline_data_cache")
+    cleared.append("pipeline_data_cache")
+
+    db.execute("DELETE FROM invest.fundamentals_cache")
+    cleared.append("fundamentals_cache")
+
+    # Reset pipeline state — expire all rows so controller re-runs everything
+    db.execute(
+        "UPDATE invest.pipeline_state SET status = 'expired', "
+        "updated_at = NOW() WHERE status IN ('completed', 'failed', 'running')"
+    )
+    cleared.append("pipeline_state")
+
+    # 2. In-memory caches
+    try:
+        from investmentology.api.routes import daily, shared
+        daily._cached_briefing = None
+        shared._div_cache.clear()
+        cleared.append("briefing_cache")
+        cleared.append("dividend_cache")
+    except Exception:
+        pass
+
+    try:
+        from investmentology.api.services.portfolio_service import _correlation_cache
+        _correlation_cache.clear()
+        cleared.append("correlation_cache")
+    except Exception:
+        pass
+
+    try:
+        from investmentology.timing import pendulum
+        pendulum._base_weights_cache = None
+        cleared.append("pendulum_weights")
+    except Exception:
+        pass
+
+    try:
+        from investmentology import verdict
+        verdict._agent_weights_cache = None
+        cleared.append("agent_weights")
+    except Exception:
+        pass
+
+    logger.info("Force refresh completed: cleared %s", cleared)
+    return {"status": "ok", "cleared": cleared}
 
 
 @router.get("/system/health", response_model=SystemHealthResponse)

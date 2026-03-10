@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { ViewHeader } from "../components/layout/ViewHeader";
 import { BentoCard } from "../components/shared/BentoCard";
 import { Badge } from "../components/shared/Badge";
 import { MetricCardSkeleton } from "../components/shared/SkeletonCard";
 import { useSystemHealth } from "../hooks/useSystemHealth";
+import { apiFetch } from "../utils/apiClient";
+import { queryClient } from "../utils/apiClient";
 
 function statusVariant(ok: boolean): "success" | "error" {
   return ok ? "success" : "error";
@@ -10,6 +13,23 @@ function statusVariant(ok: boolean): "success" | "error" {
 
 export function SystemHealth() {
   const { health, loading, error } = useSystemHealth();
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState<string | null>(null);
+
+  const handleForceRefresh = async () => {
+    if (!confirm("Clear all caches and pipeline state? The next pipeline cycle will re-fetch everything.")) return;
+    setRefreshing(true);
+    setRefreshResult(null);
+    try {
+      const res = await apiFetch<{ status: string; cleared: string[] }>("/api/invest/system/force-refresh", { method: "POST" });
+      setRefreshResult(`Cleared ${res.cleared.length} caches`);
+      queryClient.invalidateQueries();
+    } catch (e: any) {
+      setRefreshResult(`Error: ${e.message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -96,6 +116,41 @@ export function SystemHealth() {
             {Object.keys(health.apiKeys).length === 0 && (
               <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>No API keys configured</p>
             )}
+          </div>
+        </BentoCard>
+
+        {/* Force Refresh */}
+        <BentoCard title="Cache Management">
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+            <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", margin: 0 }}>
+              Clears all pipeline data, fundamentals, and in-memory caches. The next pipeline cycle will re-fetch everything from scratch.
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+              <button
+                onClick={handleForceRefresh}
+                disabled={refreshing}
+                style={{
+                  padding: "var(--space-sm) var(--space-lg)",
+                  background: refreshing ? "var(--color-surface-2)" : "rgba(251,191,36,0.12)",
+                  border: "1px solid rgba(251,191,36,0.3)",
+                  borderRadius: "var(--radius-sm)",
+                  color: refreshing ? "var(--color-text-muted)" : "var(--color-warning)",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: 600,
+                  cursor: refreshing ? "not-allowed" : "pointer",
+                }}
+              >
+                {refreshing ? "Clearing..." : "Force Refresh"}
+              </button>
+              {refreshResult && (
+                <span style={{
+                  fontSize: "var(--text-xs)",
+                  color: refreshResult.startsWith("Error") ? "var(--color-error)" : "var(--color-success)",
+                }}>
+                  {refreshResult}
+                </span>
+              )}
+            </div>
           </div>
         </BentoCard>
 

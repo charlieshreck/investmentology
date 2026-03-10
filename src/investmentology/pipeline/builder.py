@@ -191,6 +191,28 @@ def get_portfolio_context(db: Database, ticker: str) -> dict | None:
             if avg_cost and avg_cost > 0 and current_price:
                 pnl_pct = round((current_price - avg_cost) / avg_cost * 100, 2)
 
+            # Fetch thesis invalidation triggers
+            invalidation_triggers = []
+            try:
+                trigger_rows = db.execute(
+                    "SELECT criteria_type, threshold_value, qualitative_text, "
+                    "is_quantitative, last_status "
+                    "FROM invest.thesis_criteria "
+                    "WHERE position_id = %s AND monitoring_active = TRUE "
+                    "ORDER BY id",
+                    (r.get("id"),),
+                )
+                for tr in (trigger_rows or []):
+                    invalidation_triggers.append({
+                        "criteria_type": tr["criteria_type"],
+                        "threshold_value": float(tr["threshold_value"]) if tr.get("threshold_value") else None,
+                        "qualitative_text": tr.get("qualitative_text"),
+                        "is_quantitative": tr.get("is_quantitative", True),
+                        "last_status": tr.get("last_status", "OK"),
+                    })
+            except Exception:
+                pass
+
             return {
                 "position_id": r.get("id"),
                 "shares": float(r["shares"]) if r["shares"] else None,
@@ -205,6 +227,7 @@ def get_portfolio_context(db: Database, ticker: str) -> dict | None:
                 "stop_loss": float(r["stop_loss"]) if r.get("stop_loss") else None,
                 "days_held": days_held,
                 "pnl_pct": pnl_pct,
+                "invalidation_triggers": invalidation_triggers,
             }
     except Exception:
         pass
@@ -439,6 +462,7 @@ def build_analysis_request(
     days_held = None
     entry_price = None
     pnl_pct = None
+    invalidation_triggers = None
     if portfolio_context:
         position_thesis = portfolio_context.get("entry_thesis")
         position_type = portfolio_context.get("position_type")
@@ -447,6 +471,28 @@ def build_analysis_request(
         days_held = portfolio_context.get("days_held")
         entry_price = portfolio_context.get("avg_cost")
         pnl_pct = portfolio_context.get("pnl_pct")
+        triggers = portfolio_context.get("invalidation_triggers")
+        if triggers:
+            invalidation_triggers = triggers
+
+    # 8. Prior quarter guidance vs actual (earnings guidance comparison)
+    prior_guidance = None
+    if cycle_id:
+        prior_guidance = state.get_data_cache(
+            db, cycle_id, ticker, "prior_guidance",
+        )
+    if not prior_guidance:
+        try:
+            pg_rows = db.execute(
+                "SELECT data_value FROM invest.pipeline_data_cache "
+                "WHERE ticker = %s AND data_key = 'prior_guidance' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (ticker,),
+            )
+            if pg_rows:
+                prior_guidance = pg_rows[0]["data_value"]
+        except Exception:
+            pass
 
     return AnalysisRequest(
         ticker=ticker,
@@ -479,4 +525,6 @@ def build_analysis_request(
         days_held=days_held,
         entry_price=entry_price,
         pnl_pct=pnl_pct,
+        invalidation_triggers=invalidation_triggers,
+        prior_guidance=prior_guidance,
     )

@@ -156,6 +156,10 @@ class AgentRunner:
         if "earnings_context" in opt and request.earnings_context:
             parts.extend(self._fmt_earnings(request.earnings_context))
 
+        # Prior quarter guidance vs actual
+        if request.prior_guidance:
+            parts.extend(self._fmt_prior_guidance(request.prior_guidance))
+
         if "news_context" in opt and request.news_context:
             parts.extend(self._fmt_news(request.news_context))
 
@@ -227,6 +231,13 @@ class AgentRunner:
             parts.append(f"  Entry price: ${request.entry_price:.2f}")
             if request.pnl_pct is not None:
                 parts.append(f"  Unrealized P&L: {request.pnl_pct:+.1f}%")
+
+        # Source discipline constraint
+        parts.append("")
+        parts.append("SOURCE DISCIPLINE:")
+        parts.append("- Base ALL claims on the data provided above. Do NOT fill gaps with general knowledge.")
+        parts.append("- If data is insufficient for a claim, say so explicitly rather than guessing.")
+        parts.append("- Mark any inference clearly: '(inferred from [data point])'")
 
         # Signature question (closing line)
         if self.skill.signature_question:
@@ -575,6 +586,29 @@ class AgentRunner:
         return parts
 
     @staticmethod
+    def _fmt_prior_guidance(pg: dict) -> list[str]:
+        """Format prior quarter guidance vs actual results."""
+        parts = ["", "PRIOR GUIDANCE VS ACTUAL:"]
+        for metric in ("revenue", "eps", "operating_income", "margin"):
+            guided = pg.get(f"guided_{metric}")
+            actual = pg.get(f"actual_{metric}")
+            if guided is not None and actual is not None:
+                try:
+                    g, a = float(guided), float(actual)
+                    delta = ((a - g) / abs(g) * 100) if g != 0 else 0
+                    verdict = "BEAT" if delta > 1 else "MISS" if delta < -1 else "MET"
+                    parts.append(f"  {metric}: guided {g:,.2f} → actual {a:,.2f} ({delta:+.1f}% {verdict})")
+                except (ValueError, TypeError):
+                    pass
+        credibility = pg.get("guidance_credibility")
+        if credibility:
+            parts.append(f"  Management credibility: {credibility}")
+        if len(parts) <= 1:
+            return []
+        parts.append("  INSTRUCTION: Factor management's guidance track record into your confidence.")
+        return parts
+
+    @staticmethod
     def _fmt_news(news: list[dict]) -> list[str]:
         parts = ["", "RECENT NEWS:"]
         for item in news[:5]:
@@ -853,9 +887,24 @@ class AgentRunner:
             parts.append(f"  Held for: {request.days_held} days")
         if request.thesis_health:
             parts.append(f"  Thesis health: {request.thesis_health}")
+
+        # Thesis invalidation triggers — specific conditions that would break the thesis
+        if request.invalidation_triggers:
+            parts.append("")
+            parts.append("  THESIS INVALIDATION TRIGGERS (sell if breached):")
+            for t in request.invalidation_triggers:
+                status = t.get("last_status", "OK")
+                status_flag = " [BREACHED]" if status == "BREACHED" else " [WARNING]" if status == "WARNING" else ""
+                if t.get("is_quantitative") and t.get("threshold_value") is not None:
+                    parts.append(f"  - {t['criteria_type']}: threshold {t['threshold_value']}{status_flag}")
+                elif t.get("qualitative_text"):
+                    parts.append(f"  - {t['criteria_type']}: {t['qualitative_text']}{status_flag}")
+            parts.append("  CHECK each trigger against current data. Flag any that are breached or at risk.")
+
         parts.append("  CRITICAL: Evaluate whether this thesis remains INTACT.")
         parts.append("  Do NOT recommend selling just because of short-term noise.")
-        parts.append("  Only recommend selling if the fundamental thesis is BROKEN.")
+        parts.append("  Only recommend selling if the fundamental thesis is BROKEN")
+        parts.append("  or an invalidation trigger is clearly breached.")
         return parts
 
     @staticmethod

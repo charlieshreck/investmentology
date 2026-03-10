@@ -57,6 +57,10 @@ class AnalysisRequest:
     thesis_type: str | None = None  # growth, income, value, momentum
     entry_price: float | None = None  # Original entry price
     pnl_pct: float | None = None  # Current unrealized P&L %
+    # Thesis invalidation triggers — specific conditions that would break the thesis
+    invalidation_triggers: list[dict] | None = None  # [{criteria_type, threshold_value, qualitative_text, last_status}]
+    # Prior quarter guidance vs actual (earnings guidance comparison)
+    prior_guidance: dict | None = None  # {guided_revenue, actual_revenue, guided_eps, actual_eps, ...}
     # Historical backtest calibration (regime-tagged factor IC data)
     backtest_calibration: dict | None = None
 
