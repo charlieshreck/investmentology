@@ -211,18 +211,26 @@ def expire_stale_steps(db: Database) -> int:
     return len(rows)
 
 
-# Max time a step can stay in "running" before being reset (minutes)
-RUNNING_TIMEOUT_MINUTES = 20
+# Max time a step can stay in "running" before being reset (minutes).
+# Longest legitimate agent call is ~400s (6.7 min), proxy timeout is 600s.
+RUNNING_TIMEOUT_MINUTES = 10
 
 
-def reset_stale_running_steps(db: Database) -> int:
+def reset_stale_running_steps(
+    db: Database, cutoff_minutes: int | None = None,
+) -> int:
     """Reset steps stuck in 'running' for too long back to 'pending'.
 
     This handles cases where the controller OOMKills or crashes mid-tick,
     leaving steps in 'running' that were never completed or failed.
     Steps with retry_count >= 2 are marked 'failed' instead.
+
+    Args:
+        cutoff_minutes: Override the default timeout. Use a short value
+            (e.g. 2) on startup to recover orphans from a previous crash.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=RUNNING_TIMEOUT_MINUTES)
+    minutes = cutoff_minutes if cutoff_minutes is not None else RUNNING_TIMEOUT_MINUTES
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     # Reset retriable steps back to pending
     reset_rows = db.execute(
         "UPDATE invest.pipeline_state "
@@ -317,6 +325,17 @@ def count_agent_step_statuses(
         (cycle_id, ticker, *steps),
     )
     return {r["status"]: r["cnt"] for r in rows}
+
+
+def get_step_by_id(db: Database, step_id: int) -> dict | None:
+    """Get a single pipeline step by its row id."""
+    rows = db.execute(
+        "SELECT id, cycle_id, ticker, step, status, started_at, completed_at, "
+        "error, retry_count, result_ref "
+        "FROM invest.pipeline_state WHERE id = %s",
+        (step_id,),
+    )
+    return rows[0] if rows else None
 
 
 def get_ticker_progress(

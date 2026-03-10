@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
+import time as _time
+
 from investmentology.agents.base import AnalysisRequest, AnalysisResponse
 from investmentology.agents.gateway import LLMGateway
 from investmentology.agents.runner import AgentRunner
@@ -37,6 +39,7 @@ from investmentology.pipeline.pre_filter import deterministic_pre_filter
 from investmentology.pipeline.scheduler import AgentJob, CLIScheduler
 from investmentology.pipeline import freshness
 from investmentology.pipeline.selection import select_tickers, get_portfolio_tickers
+from investmentology.pipeline.task_registry import TaskRegistry
 from investmentology.registry.db import Database
 from investmentology.registry.reentry import create_gate_blocks, get_blocked_tickers
 
@@ -122,6 +125,15 @@ class PipelineController:
         # Track step IDs currently in CLI queues to prevent re-dispatch
         self._cli_queued_steps: set[int] = set()
 
+        # Non-blocking dispatch: track in-flight debate/adversarial/synthesis
+        self._task_registry = TaskRegistry(max_tasks=50)
+        self._inflight_steps: set[int] = set()
+        self._llm_task_sem = asyncio.Semaphore(3)  # max 3 concurrent LLM tasks
+
+        # Cache AgentCalibrator per cycle (fit once, reuse for all tickers)
+        self._calibrator_cycle_id: UUID | None = None
+        self._cached_calibrator = None
+
     def _create_tool_catalog(self):
         """Create the ReAct tool catalog with available data sources."""
         try:
@@ -163,19 +175,33 @@ class PipelineController:
             logger.warning("Failed to create ReAct tool catalog", exc_info=True)
             return None
 
-    def _get_agents_for_ticker(self, ticker: str) -> list[str]:
+    def _get_agents_for_ticker(
+        self, ticker: str, cycle_id: UUID | None = None,
+    ) -> list[str]:
         """Compute agent list for a ticker, adding conditional agents as needed.
 
         Always includes ANALYSIS_AGENT_NAMES. Conditionally adds:
         - income_analyst: for dividend-paying stocks or PERMANENT positions
         - sector_specialist: for stocks in specialist-covered sectors
+
+        Uses cached fundamentals from the pipeline data cache (already fetched
+        during data_fetch step) to avoid blocking the event loop with sync
+        yfinance calls.
         """
         agents = list(ANALYSIS_AGENT_NAMES)
 
         # Check if income_analyst should be activated
         try:
-            fundamentals = self._yf_client.get_fundamentals(ticker)
-            dividend_yield = getattr(fundamentals, "dividend_yield", 0) or 0
+            # Prefer cached fundamentals (non-blocking) over sync yfinance
+            fundamentals = None
+            if cycle_id:
+                fundamentals = state.get_data_cache(
+                    self.db, cycle_id, ticker, "fundamentals",
+                )
+            if fundamentals is None:
+                fundamentals = self._yf_client.get_fundamentals(ticker)
+            dividend_yield = fundamentals.get("dividend_yield", 0) if isinstance(fundamentals, dict) else (getattr(fundamentals, "dividend_yield", 0) or 0)
+            dividend_yield = dividend_yield or 0
 
             # Check position type from DB
             position_type = None
@@ -194,7 +220,7 @@ class PipelineController:
                 agents.append("income_analyst")
 
             # Check if sector specialist should be activated
-            sector = getattr(fundamentals, "sector", "") or ""
+            sector = fundamentals.get("sector", "") if isinstance(fundamentals, dict) else (getattr(fundamentals, "sector", "") or "")
             if sector in _SECTOR_SPECIALIST_SECTORS:
                 spec_name = f"sector_specialist_{sector.lower().replace(' ', '_')}"
                 if spec_name not in self._runners:
@@ -215,6 +241,12 @@ class PipelineController:
     async def start(self) -> None:
         """Start the controller and its workers."""
         self._running = True
+
+        # Startup recovery: reset steps stuck in 'running' from a prior crash
+        recovered = state.reset_stale_running_steps(self.db, cutoff_minutes=2)
+        if recovered:
+            logger.info("Startup recovery: reset %d orphaned running steps", recovered)
+
         await self.gateway.start()
         # Start parallel queue workers for each CLI agent.
         # 2 workers per agent = 2 concurrent tickers per agent.
@@ -228,6 +260,10 @@ class PipelineController:
     async def stop(self) -> None:
         """Stop the controller gracefully."""
         self._running = False
+        cancelled = self._task_registry.cancel_all()
+        if cancelled:
+            logger.info("Cancelled %d in-flight tasks during shutdown", cancelled)
+        self._inflight_steps.clear()
         await self.scheduler.stop()
         await self.gateway.close()
         logger.info("Pipeline controller stopped")
@@ -238,25 +274,39 @@ class PipelineController:
         return datetime.now(timezone.utc).hour < 6
 
     async def run_loop(self) -> None:
-        """Main event loop — polls for work every POLL_INTERVAL seconds."""
+        """Main event loop — polls for work every POLL_INTERVAL seconds.
+
+        Launches the reaper coroutine alongside the tick loop so orphan
+        detection and timeout enforcement run independently.
+        """
         from investmentology.api.metrics import pipeline_cycle_duration, pipeline_cycles_total
 
-        while self._running:
-            import time as _time
+        # Launch reaper as a sibling coroutine
+        reaper_task = asyncio.create_task(
+            self._reaper_loop(), name="pipeline-reaper",
+        )
 
-            start = _time.monotonic()
-            status = "success"
+        try:
+            while self._running:
+                start = _time.monotonic()
+                status = "success"
+                try:
+                    await self._tick()
+                except Exception:
+                    status = "error"
+                    logger.exception("Controller tick failed")
+                finally:
+                    pipeline_cycle_duration.labels(status=status).observe(
+                        _time.monotonic() - start,
+                    )
+                    pipeline_cycles_total.labels(status=status).inc()
+                await asyncio.sleep(POLL_INTERVAL)
+        finally:
+            reaper_task.cancel()
             try:
-                await self._tick()
-            except Exception:
-                status = "error"
-                logger.exception("Controller tick failed")
-            finally:
-                pipeline_cycle_duration.labels(status=status).observe(
-                    _time.monotonic() - start,
-                )
-                pipeline_cycles_total.labels(status=status).inc()
-            await asyncio.sleep(POLL_INTERVAL)
+                await reaper_task
+            except asyncio.CancelledError:
+                pass
 
     # ------------------------------------------------------------------
     # Single tick — one pass through the pipeline state
@@ -367,13 +417,46 @@ class PipelineController:
                 await self._handle_agent(cycle_id, ticker, step_id, agent_name)
 
             elif step == state.STEP_DEBATE:
-                await self._handle_debate(cycle_id, ticker, step_id)
+                if step_id not in self._inflight_steps:
+                    self._inflight_steps.add(step_id)
+                    task = asyncio.create_task(
+                        self._run_step_async(
+                            self._handle_debate, cycle_id, ticker, step_id,
+                            timeout=600,
+                        ),
+                        name=f"debate-{ticker}",
+                    )
+                    self._task_registry.track(
+                        step_id, task, ticker, "debate", timeout=600,
+                    )
 
             elif step == state.STEP_ADVERSARIAL:
-                await self._handle_adversarial(cycle_id, ticker, step_id)
+                if step_id not in self._inflight_steps:
+                    self._inflight_steps.add(step_id)
+                    task = asyncio.create_task(
+                        self._run_step_async(
+                            self._handle_adversarial, cycle_id, ticker, step_id,
+                            timeout=300,
+                        ),
+                        name=f"adversarial-{ticker}",
+                    )
+                    self._task_registry.track(
+                        step_id, task, ticker, "adversarial", timeout=300,
+                    )
 
             elif step == state.STEP_SYNTHESIS:
-                await self._handle_synthesis(cycle_id, ticker, step_id)
+                if step_id not in self._inflight_steps:
+                    self._inflight_steps.add(step_id)
+                    task = asyncio.create_task(
+                        self._run_step_async(
+                            self._handle_synthesis, cycle_id, ticker, step_id,
+                            timeout=660,
+                        ),
+                        name=f"synthesis-{ticker}",
+                    )
+                    self._task_registry.track(
+                        step_id, task, ticker, "synthesis", timeout=660,
+                    )
 
         # 7. Check if cycle is complete
         self._check_cycle_completion(cycle_id)
@@ -1041,7 +1124,7 @@ class PipelineController:
                     name=f"gap-fill-{ticker}",
                 )
 
-        agent_names = self._get_agents_for_ticker(ticker)
+        agent_names = self._get_agents_for_ticker(ticker, cycle_id)
         state.create_analysis_steps(
             self.db, cycle_id, ticker, agent_names,
         )
@@ -1199,6 +1282,167 @@ class PipelineController:
             # Research failure should NOT block agents — mark completed anyway
             state.mark_completed(self.db, step_id)
             logger.warning("Research failed for %s, proceeding without: %s", ticker, e)
+
+    # ------------------------------------------------------------------
+    # Non-blocking step execution + Reaper
+    # ------------------------------------------------------------------
+
+    async def _run_step_async(
+        self,
+        handler,
+        cycle_id: UUID,
+        ticker: str,
+        step_id: int,
+        timeout: float = 660,
+    ) -> None:
+        """Run a blocking step handler as a tracked background task.
+
+        Wraps debate/adversarial/synthesis handlers with:
+        - Concurrency limiting via _llm_task_sem (max 3 concurrent)
+        - Automatic cleanup of _inflight_steps and _task_registry
+        - Exception catching with DB failure recording
+        """
+        try:
+            async with self._llm_task_sem:
+                await handler(cycle_id, ticker, step_id)
+        except asyncio.CancelledError:
+            logger.warning(
+                "Step %d (%s/%s) was cancelled", step_id, handler.__name__, ticker,
+            )
+            try:
+                step_row = state.get_step_by_id(self.db, step_id)
+                if step_row and step_row["status"] == "running":
+                    state.mark_failed(self.db, step_id, "Cancelled by reaper (timeout)")
+            except Exception:
+                pass
+            raise
+        except Exception:
+            logger.exception(
+                "Async step %d (%s/%s) failed", step_id, handler.__name__, ticker,
+            )
+            try:
+                step_row = state.get_step_by_id(self.db, step_id)
+                if step_row and step_row["status"] == "running":
+                    state.mark_failed(self.db, step_id, "Uncaught exception in async wrapper")
+            except Exception:
+                pass
+        finally:
+            self._inflight_steps.discard(step_id)
+            self._task_registry.untrack(step_id)
+
+    async def _reaper_loop(self) -> None:
+        """Background coroutine that detects orphans, enforces timeouts,
+        and cleans up stale tracking state every 30 seconds.
+
+        Tiers:
+        1. TaskRegistry stale-done: task finished but DB not updated
+        2. TaskRegistry timeouts: exceeded per-step timeout → cancel + fail
+        3. DB orphans: status='running', not tracked, older than 2 min → reset
+        4. Clean _cli_queued_steps set (remove entries for completed/failed steps)
+        """
+        REAPER_INTERVAL = 30
+        logger.info("Reaper started (interval=%ds)", REAPER_INTERVAL)
+
+        while self._running:
+            try:
+                await asyncio.sleep(REAPER_INTERVAL)
+                if not self._running:
+                    break
+
+                recovered = 0
+
+                # Tier 1: Tasks that finished (success or exception) but
+                # the completion callback didn't clean up the registry
+                stale_done = self._task_registry.get_stale_done()
+                for info in stale_done:
+                    step_row = state.get_step_by_id(self.db, info.step_id)
+                    if step_row and step_row["status"] == "running":
+                        # Task finished but DB still says running → mark failed
+                        exc = info.task.exception() if not info.task.cancelled() else None
+                        error_msg = f"Orphaned (task done, exception: {exc})" if exc else "Orphaned (task done, no DB update)"
+                        state.mark_failed(self.db, info.step_id, error_msg)
+                        logger.warning(
+                            "Reaper: stale-done step %d (%s/%s) → failed",
+                            info.step_id, info.step_name, info.ticker,
+                        )
+                        recovered += 1
+                    self._inflight_steps.discard(info.step_id)
+                    self._task_registry.untrack(info.step_id)
+
+                # Tier 2: Tasks running longer than their timeout
+                timed_out = self._task_registry.get_timed_out()
+                for info in timed_out:
+                    age = int(_time.monotonic() - info.started_at)
+                    logger.warning(
+                        "Reaper: step %d (%s/%s) timed out after %ds → cancelling",
+                        info.step_id, info.step_name, info.ticker, age,
+                    )
+                    info.task.cancel()
+                    # mark_failed happens in _run_step_async's CancelledError handler
+                    recovered += 1
+
+                # Tier 3: DB orphans — status='running' but not in our tracking
+                if self._current_cycle_id:
+                    try:
+                        running_rows = self.db.execute(
+                            "SELECT id, ticker, step, started_at "
+                            "FROM invest.pipeline_state "
+                            "WHERE cycle_id = %s AND status = 'running' "
+                            "AND started_at < NOW() - INTERVAL '2 minutes'",
+                            (str(self._current_cycle_id),),
+                        )
+                        for row in running_rows:
+                            sid = row["id"]
+                            if (
+                                not self._task_registry.is_tracked(sid)
+                                and sid not in self._cli_queued_steps
+                            ):
+                                state.mark_failed(
+                                    self.db, sid,
+                                    "Reaper: DB orphan (running >2min, not tracked)",
+                                )
+                                logger.warning(
+                                    "Reaper: DB orphan step %d (%s/%s) → failed",
+                                    sid, row["step"], row["ticker"],
+                                )
+                                recovered += 1
+                    except Exception:
+                        logger.debug("Reaper tier-3 query failed", exc_info=True)
+
+                # Tier 4: Clean _cli_queued_steps — remove entries for steps
+                # that are no longer pending/running in the DB
+                if self._cli_queued_steps and self._current_cycle_id:
+                    try:
+                        stale_queued = set()
+                        for sid in self._cli_queued_steps:
+                            step_row = state.get_step_by_id(self.db, sid)
+                            if step_row and step_row["status"] not in ("pending", "running"):
+                                stale_queued.add(sid)
+                            elif not step_row:
+                                stale_queued.add(sid)
+                        if stale_queued:
+                            self._cli_queued_steps -= stale_queued
+                            logger.debug(
+                                "Reaper: cleaned %d stale CLI queue entries",
+                                len(stale_queued),
+                            )
+                    except Exception:
+                        logger.debug("Reaper tier-4 cleanup failed", exc_info=True)
+
+                # Log summary
+                summary = self._task_registry.summary()
+                if summary["tracked"] > 0 or recovered > 0:
+                    logger.info(
+                        "Reaper: tracked=%d running=%d recovered=%d cli_queued=%d",
+                        summary["tracked"], summary["running"],
+                        recovered, len(self._cli_queued_steps),
+                    )
+
+            except asyncio.CancelledError:
+                logger.info("Reaper stopped")
+                raise
+            except Exception:
+                logger.exception("Reaper iteration failed")
 
     async def _handle_debate(
         self, cycle_id: UUID, ticker: str, step_id: int,
@@ -1440,14 +1684,18 @@ class PipelineController:
             weights = self._apply_calibration_weights(weights)
 
             # 3. Verdict synthesis (deterministic vote aggregation)
-            # Optionally apply isotonic calibration if fitted models exist
+            # Use cached calibrator (fit once per cycle, reuse for all tickers)
             agent_calibrator = None
             try:
-                from investmentology.learning.calibration import AgentCalibrator
-                from investmentology.registry.queries import Registry as _Reg
-                _reg = _Reg(self.db)
-                agent_calibrator = AgentCalibrator(_reg)
-                agent_calibrator.fit_all()
+                if self._calibrator_cycle_id != cycle_id:
+                    from investmentology.learning.calibration import AgentCalibrator
+                    from investmentology.registry.queries import Registry as _Reg
+                    _reg = _Reg(self.db)
+                    cal = AgentCalibrator(_reg)
+                    cal.fit_all()
+                    self._cached_calibrator = cal
+                    self._calibrator_cycle_id = cycle_id
+                agent_calibrator = self._cached_calibrator
             except Exception:
                 pass
 
@@ -1844,9 +2092,21 @@ class PipelineController:
         return state.create_cycle(self.db)
 
     def _check_cycle_completion(self, cycle_id: UUID) -> None:
-        """Check if the cycle is complete and mark it if so."""
+        """Check if the cycle is complete and mark it if so.
+
+        Also verifies no in-flight tasks remain in the TaskRegistry
+        to prevent premature cycle completion.
+        """
         summary = state.get_cycle_summary(self.db, cycle_id)
         if summary["pending"] == 0 and summary["running"] == 0:
+            # Don't close if we still have tracked tasks (they may
+            # be between mark_running and mark_completed)
+            if self._task_registry.count > 0:
+                logger.debug(
+                    "Cycle completion deferred: %d tasks still tracked",
+                    self._task_registry.count,
+                )
+                return
             if summary["completed"] > 0 or summary["failed"] > 0:
                 state.complete_cycle(self.db, cycle_id)
                 logger.info(

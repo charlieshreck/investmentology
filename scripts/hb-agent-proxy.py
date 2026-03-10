@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -195,6 +196,7 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
 
     # Build command as a list — no shell involved (asyncio.create_subprocess_exec)
     proc_cwd = None  # Default: inherit from systemd WorkingDirectory
+    prompt_file: Path | None = None  # Track for cleanup
     if cfg["cli"] == "claude":
         # Proper system/user separation, no tools, no session persistence.
         # cwd=/tmp avoids loading the repo's CLAUDE.md (~2,900 tokens of K8s docs).
@@ -208,12 +210,15 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
         ]
         proc_cwd = "/tmp"
     elif cfg["cli"] == "gemini" and agent_name in GEMINI_SLASH_COMMANDS:
-        # Slash command mode: persona in .toml, ticker data in staged file
+        # Slash command mode: persona in .toml, ticker data in staged file.
+        # Per-job unique filename prevents data contamination when 2 workers
+        # for the same agent run concurrently (e.g. two soros calls).
         GEMINI_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        prompt_file = GEMINI_DATA_DIR / f"_prompt_{agent_name}.txt"
+        job_id = uuid.uuid4().hex[:8]
+        prompt_file = GEMINI_DATA_DIR / f"_prompt_{agent_name}_{job_id}.txt"
         prompt_file.write_text(body.user_prompt)
         slash_cmd = GEMINI_SLASH_COMMANDS[agent_name]
-        cmd = ["gemini", "-p", f"/{slash_cmd} @.gemini-data/_prompt_{agent_name}.txt", "-o", "json", "--yolo"]
+        cmd = ["gemini", "-p", f"/{slash_cmd} @.gemini-data/{prompt_file.name}", "-o", "json", "--yolo"]
     elif cfg["cli"] == "gemini":
         # Fallback for unmapped Gemini agents (e.g. researcher)
         combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
@@ -246,6 +251,9 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
                 raise HTTPException(status_code=504, detail=f"{agent_name} timed out after {cfg['timeout']}s")
         finally:
             _active_agents -= 1
+            # Clean up per-job prompt file to avoid disk buildup
+            if prompt_file is not None:
+                prompt_file.unlink(missing_ok=True)
 
     latency_ms = int((time.monotonic() - start) * 1000)
     logger.info("%s completed in %dms (exit=%d)", agent_name, latency_ms, proc.returncode)
