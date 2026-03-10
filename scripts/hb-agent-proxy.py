@@ -42,7 +42,18 @@ MAX_CONCURRENT_AGENTS = int(os.environ.get("MAX_CONCURRENT_AGENTS", "8"))
 _agent_semaphore: asyncio.Semaphore | None = None
 _active_agents = 0
 
-# Gemini quota circuit breaker — blocks all Gemini calls until quota resets
+# Gemini model cascade — try top tier first, fall back on quota exhaustion.
+# Per-model circuit breakers block exhausted models until their quota resets.
+GEMINI_MODEL_CASCADE: list[str] = [
+    "gemini-3.1-pro-preview",   # Top tier
+    "gemini-3-flash-preview",   # Fallback
+    "gemini-2.5-flash",         # Last resort
+]
+
+# Per-model quota circuit breakers: model → monotonic timestamp when block expires
+_gemini_model_blocked_until: dict[str, float] = {}
+
+# Legacy global circuit breaker — blocks ALL Gemini calls when every model is exhausted
 _gemini_quota_blocked_until: float = 0.0  # monotonic timestamp
 
 # Gemini slash command routing — agents with a mapping use /invest:{cmd}
@@ -76,6 +87,39 @@ AGENT_CONFIG = {
     # Research agent — deep research synthesis (large context)
     "researcher":     {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 900},
 }
+
+def _pick_gemini_model() -> str | None:
+    """Pick the best available Gemini model from the cascade.
+
+    Returns the first model whose quota is not exhausted,
+    or None if all models are blocked.
+    """
+    now = time.monotonic()
+    for model in GEMINI_MODEL_CASCADE:
+        if now >= _gemini_model_blocked_until.get(model, 0.0):
+            return model
+    return None
+
+
+def _block_gemini_model(model: str, seconds: int) -> None:
+    """Block a specific model after quota exhaustion."""
+    _gemini_model_blocked_until[model] = time.monotonic() + seconds
+    logger.warning(
+        "Gemini model %s quota exhausted — blocked for %ds", model, seconds,
+    )
+    # If ALL models are now blocked, set the global circuit breaker
+    now = time.monotonic()
+    if all(now < _gemini_model_blocked_until.get(m, 0.0) for m in GEMINI_MODEL_CASCADE):
+        global _gemini_quota_blocked_until
+        # Global block expires when the first model unblocks
+        _gemini_quota_blocked_until = min(
+            _gemini_model_blocked_until[m] for m in GEMINI_MODEL_CASCADE
+        )
+        logger.error(
+            "All Gemini models exhausted — global circuit breaker for %ds",
+            int(_gemini_quota_blocked_until - now),
+        )
+
 
 def _is_quota_error(text: str) -> bool:
     """Detect Gemini CLI quota exhaustion errors."""
@@ -164,6 +208,7 @@ async def _init_semaphore():
 async def health():
     now = time.monotonic()
     gemini_blocked = now < _gemini_quota_blocked_until
+    current_model = _pick_gemini_model()
     return {
         "status": "degraded" if gemini_blocked else "ok",
         "agents": list(AGENT_CONFIG.keys()),
@@ -171,7 +216,28 @@ async def health():
         "active_agents": _active_agents,
         "gemini_quota_blocked": gemini_blocked,
         "gemini_quota_reset_seconds": max(0, int(_gemini_quota_blocked_until - now)) if gemini_blocked else 0,
+        "gemini_model": current_model or "all-blocked",
+        "gemini_model_status": {
+            m: ("available" if now >= _gemini_model_blocked_until.get(m, 0.0) else f"blocked {int(_gemini_model_blocked_until[m] - now)}s")
+            for m in GEMINI_MODEL_CASCADE
+        },
     }
+
+
+def _build_gemini_cmd(agent_name: str, body: AgentRequest, model: str) -> tuple[list[str], Path | None]:
+    """Build the Gemini CLI command for a given model. Returns (cmd, prompt_file)."""
+    prompt_file: Path | None = None
+    if agent_name in GEMINI_SLASH_COMMANDS:
+        GEMINI_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        job_id = uuid.uuid4().hex[:8]
+        prompt_file = GEMINI_DATA_DIR / f"_prompt_{agent_name}_{job_id}.txt"
+        prompt_file.write_text(body.user_prompt)
+        slash_cmd = GEMINI_SLASH_COMMANDS[agent_name]
+        cmd = ["gemini", "-m", model, "-p", f"/{slash_cmd} @.gemini-data/{prompt_file.name}", "-o", "json", "--yolo"]
+    else:
+        combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
+        cmd = ["gemini", "-m", model, "-p", combined_prompt, "-o", "json", "--yolo"]
+    return cmd, prompt_file
 
 
 @app.post("/agent/{agent_name}", response_model=AgentResponse)
@@ -183,23 +249,22 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
 
     cfg = AGENT_CONFIG[agent_name]
 
-    # Circuit breaker: block Gemini calls while quota is exhausted
-    global _gemini_quota_blocked_until
+    # Circuit breaker: block Gemini calls when ALL models exhausted
     if cfg["cli"] == "gemini" and time.monotonic() < _gemini_quota_blocked_until:
         remaining = int(_gemini_quota_blocked_until - time.monotonic())
-        logger.warning("Gemini quota circuit breaker active — %s blocked (%ds remaining)", agent_name, remaining)
+        logger.warning("All Gemini models exhausted — %s blocked (%ds remaining)", agent_name, remaining)
         raise HTTPException(
             status_code=429,
-            detail=f"Gemini quota exhausted, resets in {remaining}s",
+            detail=f"All Gemini models exhausted, resets in {remaining}s",
             headers={"Retry-After": str(remaining)},
         )
 
-    # Build command as a list — no shell involved (asyncio.create_subprocess_exec)
-    proc_cwd = None  # Default: inherit from systemd WorkingDirectory
-    prompt_file: Path | None = None  # Track for cleanup
+    # Build command
+    proc_cwd = None
+    prompt_file: Path | None = None
+    used_model = cfg["model"]
+
     if cfg["cli"] == "claude":
-        # Proper system/user separation, no tools, no session persistence.
-        # cwd=/tmp avoids loading the repo's CLAUDE.md (~2,900 tokens of K8s docs).
         cmd = [
             "claude",
             "--system-prompt", body.system_prompt,
@@ -209,86 +274,98 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
             "--no-session-persistence",
         ]
         proc_cwd = "/tmp"
-    elif cfg["cli"] == "gemini" and agent_name in GEMINI_SLASH_COMMANDS:
-        # Slash command mode: persona in .toml, ticker data in staged file.
-        # Per-job unique filename prevents data contamination when 2 workers
-        # for the same agent run concurrently (e.g. two soros calls).
-        GEMINI_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        job_id = uuid.uuid4().hex[:8]
-        prompt_file = GEMINI_DATA_DIR / f"_prompt_{agent_name}_{job_id}.txt"
-        prompt_file.write_text(body.user_prompt)
-        slash_cmd = GEMINI_SLASH_COMMANDS[agent_name]
-        cmd = ["gemini", "-p", f"/{slash_cmd} @.gemini-data/{prompt_file.name}", "-o", "json", "--yolo"]
     elif cfg["cli"] == "gemini":
-        # Fallback for unmapped Gemini agents (e.g. researcher)
-        combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
-        cmd = ["gemini", "-p", combined_prompt, "-o", "json", "--yolo"]
+        model = _pick_gemini_model()
+        if model is None:
+            raise HTTPException(
+                status_code=429,
+                detail="All Gemini models exhausted",
+            )
+        used_model = model
+        cmd, prompt_file = _build_gemini_cmd(agent_name, body, model)
     else:
         raise HTTPException(status_code=500, detail=f"Bad CLI config: {cfg['cli']}")
 
     global _active_agents
-    logger.info("Running %s via %s CLI (active: %d/%d)", agent_name, cfg["cli"], _active_agents, MAX_CONCURRENT_AGENTS)
+    logger.info("Running %s via %s CLI model=%s (active: %d/%d)", agent_name, cfg["cli"], used_model, _active_agents, MAX_CONCURRENT_AGENTS)
     start = time.monotonic()
 
     assert _agent_semaphore is not None
     async with _agent_semaphore:
         _active_agents += 1
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=proc_cwd,
-            )
-
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=cfg["timeout"]
+            # Retry loop for Gemini model cascade
+            while True:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=proc_cwd,
                 )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise HTTPException(status_code=504, detail=f"{agent_name} timed out after {cfg['timeout']}s")
+
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        proc.communicate(), timeout=cfg["timeout"]
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    raise HTTPException(status_code=504, detail=f"{agent_name} timed out after {cfg['timeout']}s")
+
+                # Check for Gemini quota error → try next model in cascade
+                if proc.returncode != 0 and cfg["cli"] == "gemini":
+                    stderr_text = stderr_bytes.decode(errors="replace")[:1000]
+                    stdout_text = stdout_bytes.decode(errors="replace")[:1000]
+                    combined_error = f"{stderr_text} {stdout_text}"
+
+                    if _is_quota_error(combined_error):
+                        reset_secs = _parse_quota_reset_seconds(combined_error)
+                        _block_gemini_model(used_model, reset_secs)
+
+                        # Try next model in cascade
+                        next_model = _pick_gemini_model()
+                        if next_model is not None:
+                            logger.info(
+                                "Cascading %s from %s → %s",
+                                agent_name, used_model, next_model,
+                            )
+                            # Clean up old prompt file before building new command
+                            if prompt_file is not None:
+                                prompt_file.unlink(missing_ok=True)
+                            used_model = next_model
+                            cmd, prompt_file = _build_gemini_cmd(agent_name, body, next_model)
+                            continue  # retry with next model
+
+                        # All models exhausted
+                        raise HTTPException(
+                            status_code=429,
+                            detail=f"All Gemini models exhausted, first resets in {reset_secs}s",
+                            headers={"Retry-After": str(reset_secs)},
+                        )
+
+                break  # success or non-quota error — exit retry loop
         finally:
             _active_agents -= 1
-            # Clean up per-job prompt file to avoid disk buildup
             if prompt_file is not None:
                 prompt_file.unlink(missing_ok=True)
 
     latency_ms = int((time.monotonic() - start) * 1000)
-    logger.info("%s completed in %dms (exit=%d)", agent_name, latency_ms, proc.returncode)
+    logger.info("%s completed in %dms (exit=%d, model=%s)", agent_name, latency_ms, proc.returncode, used_model)
 
     if proc.returncode != 0:
         stderr_text = stderr_bytes.decode(errors="replace")[:1000]
-        stdout_text = stdout_bytes.decode(errors="replace")[:1000]
-        combined_error = f"{stderr_text} {stdout_text}"
-
-        # Gemini quota exhaustion → activate circuit breaker, return 429
-        if cfg["cli"] == "gemini" and _is_quota_error(combined_error):
-            reset_secs = _parse_quota_reset_seconds(combined_error)
-            _gemini_quota_blocked_until = time.monotonic() + reset_secs
-            logger.error(
-                "Gemini quota exhausted — circuit breaker activated for %ds (agent: %s)",
-                reset_secs, agent_name,
-            )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Gemini quota exhausted, resets in {reset_secs}s",
-                headers={"Retry-After": str(reset_secs)},
-            )
-
         raise HTTPException(status_code=502, detail=f"{agent_name} CLI failed: {stderr_text[:500]}")
 
     output = stdout_bytes.decode(errors="replace")
 
     if cfg["cli"] == "claude":
-        content, token_usage = _parse_claude_output(output, cfg["model"])
+        content, token_usage = _parse_claude_output(output, used_model)
     else:
-        content, token_usage = _parse_gemini_output(output, cfg["model"])
+        content, token_usage = _parse_gemini_output(output, used_model)
 
     return AgentResponse(
         content=content,
-        model=cfg["model"],
+        model=used_model,
         provider=f"{cfg['cli']}-cli",
         token_usage=token_usage,
         latency_ms=latency_ms,
