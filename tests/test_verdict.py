@@ -458,3 +458,101 @@ class TestVerdictResult:
         assert vr.risk_flags == []
         assert vr.auditor_override is False
         assert vr.munger_override is False
+
+
+# ---------------------------------------------------------------------------
+# TestVerdictStabilityDampener
+# ---------------------------------------------------------------------------
+
+class TestVerdictStabilityDampener:
+    """Tests for the verdict flip-prevention dampener.
+
+    When previous verdict was positive, sentiment must drop well below -0.10
+    (by the dampening band of 0.15) before REDUCE is allowed.
+    """
+
+    def test_no_previous_verdict_no_dampening(self) -> None:
+        """Without previous verdict, normal thresholds apply."""
+        verdict, _ = _score_to_verdict(-0.15, Decimal("0.6"), False, False, None)
+        assert verdict == Verdict.REDUCE
+
+    def test_previous_buy_prevents_reduce_on_small_drop(self) -> None:
+        """Previous BUY + sentiment -0.15 → HOLD (within dampening band)."""
+        verdict, _ = _score_to_verdict(
+            -0.15, Decimal("0.6"), False, False, None,
+            previous_verdict="BUY",
+        )
+        assert verdict == Verdict.HOLD
+
+    def test_previous_strong_buy_prevents_reduce(self) -> None:
+        """Previous STRONG_BUY + sentiment -0.20 → HOLD (within dampening band)."""
+        verdict, _ = _score_to_verdict(
+            -0.20, Decimal("0.6"), False, False, None,
+            previous_verdict="STRONG_BUY",
+        )
+        assert verdict == Verdict.HOLD
+
+    def test_previous_buy_allows_reduce_on_large_drop(self) -> None:
+        """Previous BUY + sentiment -0.30 → REDUCE (exceeds dampening band)."""
+        verdict, _ = _score_to_verdict(
+            -0.30, Decimal("0.6"), False, False, None,
+            previous_verdict="BUY",
+        )
+        assert verdict == Verdict.REDUCE
+
+    def test_previous_accumulate_prevents_reduce(self) -> None:
+        """Previous ACCUMULATE + sentiment -0.12 → HOLD."""
+        verdict, _ = _score_to_verdict(
+            -0.12, Decimal("0.6"), False, False, None,
+            previous_verdict="ACCUMULATE",
+        )
+        assert verdict == Verdict.HOLD
+
+    def test_previous_hold_no_dampening(self) -> None:
+        """HOLD is neutral, no dampening applied."""
+        verdict, _ = _score_to_verdict(
+            -0.15, Decimal("0.6"), False, False, None,
+            previous_verdict="HOLD",
+        )
+        assert verdict == Verdict.REDUCE
+
+    def test_previous_reduce_no_dampening_on_sell_side(self) -> None:
+        """Previous REDUCE → no dampening when already on sell side."""
+        verdict, _ = _score_to_verdict(
+            -0.35, Decimal("0.6"), False, False, None,
+            previous_verdict="REDUCE",
+        )
+        # Sentiment -0.35 with confidence 0.6 → SELL (past -0.30, conf >= 0.50)
+        assert verdict == Verdict.SELL
+
+    def test_munger_override_bypasses_dampener(self) -> None:
+        """Hard overrides still work even with previous positive verdict."""
+        verdict, _ = _score_to_verdict(
+            -0.15, Decimal("0.6"), False, True, None,
+            previous_verdict="STRONG_BUY",
+        )
+        assert verdict == Verdict.AVOID
+
+    def test_auditor_override_bypasses_dampener(self) -> None:
+        """Auditor override still works even with previous positive verdict."""
+        verdict, _ = _score_to_verdict(
+            -0.15, Decimal("0.6"), True, False, None,
+            previous_verdict="BUY",
+        )
+        assert verdict == Verdict.AVOID
+
+    def test_positive_verdict_still_possible(self) -> None:
+        """Even with previous AVOID, positive sentiment → BUY (no dampening needed)."""
+        verdict, _ = _score_to_verdict(
+            0.40, Decimal("0.6"), False, False, None,
+            previous_verdict="AVOID",
+        )
+        assert verdict == Verdict.BUY
+
+    def test_previous_verdict_as_string(self) -> None:
+        """Previous verdict works as string (not just Verdict enum)."""
+        verdict, _ = _score_to_verdict(
+            -0.15, Decimal("0.6"), False, False, None,
+            previous_verdict="STRONG_BUY",
+        )
+        assert verdict == Verdict.HOLD

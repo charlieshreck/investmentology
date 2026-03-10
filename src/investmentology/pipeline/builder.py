@@ -164,9 +164,9 @@ def get_portfolio_context(db: Database, ticker: str) -> dict | None:
     """Get portfolio context for a ticker if it's a held position."""
     try:
         rows = db.execute(
-            "SELECT shares, avg_cost, entry_date, entry_thesis, "
+            "SELECT id, shares, avg_cost, entry_date, entry_thesis, "
             "thesis_type, thesis_health, current_price, "
-            "highest_price_since_entry "
+            "highest_price_since_entry, position_type, stop_loss "
             "FROM invest.portfolio_positions "
             "WHERE ticker = %s AND is_closed = FALSE "
             "ORDER BY entry_date DESC LIMIT 1",
@@ -174,15 +174,37 @@ def get_portfolio_context(db: Database, ticker: str) -> dict | None:
         )
         if rows:
             r = rows[0]
+            entry_date = r.get("entry_date")
+            days_held = None
+            if entry_date:
+                from datetime import date, datetime
+                if isinstance(entry_date, str):
+                    entry_date = datetime.fromisoformat(entry_date).date()
+                elif isinstance(entry_date, datetime):
+                    entry_date = entry_date.date()
+                if isinstance(entry_date, date):
+                    days_held = (date.today() - entry_date).days
+
+            avg_cost = float(r["avg_cost"]) if r["avg_cost"] else None
+            current_price = float(r["current_price"]) if r.get("current_price") else None
+            pnl_pct = None
+            if avg_cost and avg_cost > 0 and current_price:
+                pnl_pct = round((current_price - avg_cost) / avg_cost * 100, 2)
+
             return {
+                "position_id": r.get("id"),
                 "shares": float(r["shares"]) if r["shares"] else None,
-                "avg_cost": float(r["avg_cost"]) if r["avg_cost"] else None,
-                "entry_date": str(r["entry_date"]) if r["entry_date"] else None,
+                "avg_cost": avg_cost,
+                "entry_date": str(r.get("entry_date")) if r.get("entry_date") else None,
                 "entry_thesis": r.get("entry_thesis"),
                 "thesis_type": r.get("thesis_type"),
                 "thesis_health": r.get("thesis_health"),
-                "current_price": float(r["current_price"]) if r.get("current_price") else None,
+                "current_price": current_price,
                 "highest_price": float(r["highest_price_since_entry"]) if r.get("highest_price_since_entry") else None,
+                "position_type": r.get("position_type"),
+                "stop_loss": float(r["stop_loss"]) if r.get("stop_loss") else None,
+                "days_held": days_held,
+                "pnl_pct": pnl_pct,
             }
     except Exception:
         pass
@@ -408,6 +430,24 @@ def build_analysis_request(
     except Exception:
         pass
 
+    # 7. Extract position-level fields from portfolio context
+    # These drive _TYPE_GUIDANCE overlays and _fmt_thesis in the prompt builder.
+    position_thesis = None
+    position_type = None
+    thesis_type = None
+    thesis_health = None
+    days_held = None
+    entry_price = None
+    pnl_pct = None
+    if portfolio_context:
+        position_thesis = portfolio_context.get("entry_thesis")
+        position_type = portfolio_context.get("position_type")
+        thesis_type = portfolio_context.get("thesis_type")
+        thesis_health = portfolio_context.get("thesis_health")
+        days_held = portfolio_context.get("days_held")
+        entry_price = portfolio_context.get("avg_cost")
+        pnl_pct = portfolio_context.get("pnl_pct")
+
     return AnalysisRequest(
         ticker=ticker,
         fundamentals=fundamentals,
@@ -432,4 +472,11 @@ def build_analysis_request(
         altman_z_score=altman_z,
         research_briefing=research_briefing,
         backtest_calibration=backtest_calibration,
+        position_thesis=position_thesis,
+        position_type=position_type,
+        thesis_type=thesis_type,
+        thesis_health=thesis_health,
+        days_held=days_held,
+        entry_price=entry_price,
+        pnl_pct=pnl_pct,
     )

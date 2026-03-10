@@ -1733,11 +1733,26 @@ class PipelineController:
             except Exception:
                 pass
 
+            # Fetch previous verdict for stability dampener
+            prev_verdict_str = None
+            try:
+                from investmentology.registry.queries import Registry as _VReg
+                _vreg = _VReg(self.db)
+                prev = _vreg.get_latest_verdict(ticker)
+                if prev:
+                    prev_verdict_str = (
+                        prev.get("verdict") if isinstance(prev, dict)
+                        else getattr(prev, "verdict", None)
+                    )
+            except Exception:
+                pass
+
             from investmentology.verdict import synthesize
             verdict_result = synthesize(
                 agent_signal_sets,
                 weights=weights,
                 calibrator=agent_calibrator,
+                previous_verdict=prev_verdict_str,
             )
             logger.info(
                 "Verdict for %s: %s (conf=%.2f, consensus=%.2f)",

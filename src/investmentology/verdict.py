@@ -259,6 +259,7 @@ def synthesize(
     position_type: str | None = None,
     regime_label: str | None = None,
     calibrator: object | None = None,
+    previous_verdict: str | None = None,
 ) -> VerdictResult:
     """Synthesize all agent outputs into a single verdict.
 
@@ -335,6 +336,7 @@ def synthesize(
         compatibility,
         position_type=position_type,
         regime_label=regime_label,
+        previous_verdict=previous_verdict,
     )
 
     # --- Conviction gap detection ---
@@ -503,6 +505,17 @@ def _get_thresholds(
     return base
 
 
+_POSITIVE_VERDICTS = {Verdict.STRONG_BUY, Verdict.BUY, Verdict.ACCUMULATE}
+_NEGATIVE_VERDICTS = {Verdict.REDUCE, Verdict.SELL, Verdict.AVOID}
+
+# Verdict stability dampener — prevents rapid flip-flopping.
+# When the previous verdict was positive, the sentiment must drop below this
+# (more negative) threshold before the new verdict can flip to sell-side.
+# Without this, a sentiment of -0.11 (barely past the -0.10 HOLD boundary)
+# would flip STRONG_BUY → REDUCE in one cycle.
+_FLIP_DAMPENING_BAND = Decimal("0.15")  # Extra sentiment required to flip direction
+
+
 def _score_to_verdict(
     sentiment: float,
     confidence: Decimal,
@@ -511,13 +524,18 @@ def _score_to_verdict(
     compatibility: CompatibilityResult | None,
     position_type: str | None = None,
     regime_label: str | None = None,
+    previous_verdict: "Verdict | str | None" = None,
 ) -> tuple[Verdict, float]:
     """Map consensus score + overrides to a verdict.
 
     Returns (verdict, margin_to_boundary) where margin is distance to
     nearest threshold boundary.
+
+    Includes verdict stability dampener: when flipping direction (positive →
+    negative or vice versa), requires extra conviction (the dampening band)
+    to prevent small sentiment fluctuations from causing whipsaw verdicts.
     """
-    # Hard overrides first
+    # Hard overrides first — these bypass stability dampener
     if munger_override:
         return Verdict.AVOID, 0.0
 
@@ -535,6 +553,21 @@ def _score_to_verdict(
 
     sent = Decimal(str(round(sentiment, 4)))
 
+    # Resolve previous verdict direction for stability dampener
+    prev_positive = False
+    prev_negative = False
+    if previous_verdict:
+        prev_v = previous_verdict if isinstance(previous_verdict, Verdict) else None
+        if prev_v is None:
+            try:
+                prev_v = Verdict(str(previous_verdict))
+            except (ValueError, KeyError):
+                pass
+        if prev_v in _POSITIVE_VERDICTS:
+            prev_positive = True
+        elif prev_v in _NEGATIVE_VERDICTS:
+            prev_negative = True
+
     # Score-based with margin tracking
     if sent >= t["strong_buy_sentiment"] and confidence >= t["strong_buy_confidence"]:
         margin = float(min(sent - t["strong_buy_sentiment"], confidence - t["strong_buy_confidence"]))
@@ -546,11 +579,24 @@ def _score_to_verdict(
         margin = float(min(sent - t["accumulate_sentiment"], confidence - t["accumulate_confidence"]))
         return Verdict.ACCUMULATE, margin
     if sent >= t["watchlist_sentiment"] and confidence < t["accumulate_confidence"]:
+        # Stability dampener: previously negative → require extra conviction to flip positive
+        if prev_negative and sent < t["watchlist_sentiment"] + _FLIP_DAMPENING_BAND:
+            return Verdict.HOLD, float(sent - Decimal("-0.10"))
         margin = float(sent - t["watchlist_sentiment"])
         return Verdict.WATCHLIST, margin
     if sent >= Decimal("-0.10"):
         margin = float(sent - Decimal("-0.10"))
         return Verdict.HOLD, margin
+
+    # --- Sell-side verdicts ---
+
+    # Stability dampener: previously positive → sentiment must exceed the HOLD
+    # boundary by the dampening band before we allow REDUCE/SELL/AVOID.
+    # This is the core flip-prevention: a STRONG_BUY with sentiment dropping
+    # to -0.12 stays HOLD instead of flipping to REDUCE.
+    if prev_positive and sent >= Decimal("-0.10") - _FLIP_DAMPENING_BAND:
+        return Verdict.HOLD, float(sent - Decimal("-0.10"))
+
     # Sell-side confidence gates mirror buy-side: low confidence → HOLD
     if confidence < Decimal("0.40"):
         return Verdict.HOLD, float(sent - Decimal("-0.10"))
