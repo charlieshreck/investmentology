@@ -274,6 +274,76 @@ function stateBadge(state: string) {
   return <Badge variant={map[state] ?? "neutral"}>{state.replace(/_/g, " ")}</Badge>;
 }
 
+function ThesisCriteriaPanel({ positionId }: { positionId: string }) {
+  const [criteria, setCriteria] = useState<Array<{
+    criteria_type: string;
+    threshold_value: number | null;
+    qualitative_text: string | null;
+    is_quantitative: boolean;
+    monitoring_active: boolean;
+    last_status: string | null;
+  }> | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/invest/portfolio/positions/${positionId}/criteria`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setCriteria(d?.criteria ?? []))
+      .catch(() => setCriteria([]));
+  }, [positionId]);
+
+  if (!criteria || criteria.length === 0) return null;
+
+  const statusColor = (s: string | null) =>
+    s === "BREACHED" ? "var(--color-error)" : s === "WARNING" ? "var(--color-warning)" : "var(--color-success)";
+
+  const typeLabel = (t: string) => t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+  return (
+    <CollapsiblePanel title="Thesis Criteria" preview="Invalidation conditions" defaultOpen>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+        {criteria.map((c, i) => (
+          <div key={i} style={{
+            display: "flex", alignItems: "center", gap: "var(--space-sm)",
+            padding: "var(--space-xs) var(--space-sm)",
+            background: c.last_status === "BREACHED" ? "rgba(248,113,113,0.08)" : "var(--color-surface-0)",
+            borderRadius: "var(--radius-sm)",
+            border: `1px solid ${c.last_status === "BREACHED" ? "rgba(248,113,113,0.3)" : "var(--glass-border)"}`,
+          }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: statusColor(c.last_status), flexShrink: 0,
+            }} />
+            <div style={{ flex: 1, fontSize: "var(--text-xs)" }}>
+              {c.is_quantitative ? (
+                <span>
+                  <span style={{ fontWeight: 600 }}>{typeLabel(c.criteria_type)}</span>
+                  {c.threshold_value != null && (
+                    <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)", marginLeft: 4 }}>
+                      {c.criteria_type.includes("ceiling") ? "≤" : "≥"} {c.threshold_value}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span style={{ color: "var(--color-text-secondary)" }}>
+                  {c.qualitative_text}
+                </span>
+              )}
+            </div>
+            {c.last_status && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, textTransform: "uppercase",
+                color: statusColor(c.last_status), letterSpacing: "0.05em",
+              }}>
+                {c.last_status}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </CollapsiblePanel>
+  );
+}
+
 export function StockDeepDive({ ticker }: { ticker: string }) {
   const navigate = useNavigate();
   const [data, setData] = useState<StockResponse | null>(null);
@@ -539,6 +609,9 @@ export function StockDeepDive({ ticker }: { ticker: string }) {
           <PositionTile position={data.position} />
         </CollapsiblePanel>
       )}
+
+      {/* Thesis Invalidation Criteria */}
+      {data.position && <ThesisCriteriaPanel positionId={data.position.id} />}
 
       {/* Signal Pill Badges */}
       {(data.consensusTier || data.stabilityLabel || data.buzz || data.earningsMomentum) && (

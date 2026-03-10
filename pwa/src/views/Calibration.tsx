@@ -116,14 +116,36 @@ function ReliabilityDiagram({ points }: { points: ReliabilityPoint[] }) {
   );
 }
 
+interface LeaderboardAgent {
+  rank: number;
+  agent: string;
+  totalSettled: number;
+  correct: number;
+  accuracy: number;
+  avgConfidence: number;
+  brierScore: number;
+  overconfident: boolean;
+  readyForKelly: boolean;
+}
+
+interface LeaderboardData {
+  agents: LeaderboardAgent[];
+  totalAgents: number;
+  minForKelly: number;
+}
+
 export function Calibration() {
   const [data, setData] = useState<CalibrationData | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<CalibrationData>("/api/invest/calibration")
-      .then(setData)
+    Promise.all([
+      apiFetch<CalibrationData>("/api/invest/calibration"),
+      apiFetch<LeaderboardData>("/api/invest/calibration/leaderboard").catch(() => null),
+    ])
+      .then(([cal, lb]) => { setData(cal); setLeaderboard(lb); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -222,6 +244,60 @@ export function Calibration() {
             ))
           )}
         </BentoCard>
+
+        {/* Agent Leaderboard */}
+        {leaderboard && leaderboard.agents.length > 0 && (
+          <BentoCard title="Agent Leaderboard">
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                    <th style={{ textAlign: "left", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>#</th>
+                    <th style={{ textAlign: "left", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Agent</th>
+                    <th style={{ textAlign: "right", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Accuracy</th>
+                    <th style={{ textAlign: "right", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Avg Conf</th>
+                    <th style={{ textAlign: "right", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Brier</th>
+                    <th style={{ textAlign: "right", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Settled</th>
+                    <th style={{ textAlign: "center", padding: "var(--space-xs) var(--space-sm)", color: "var(--color-text-muted)", fontWeight: 500 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaderboard.agents.map((a) => {
+                    const accColor = a.accuracy >= 0.6 ? "var(--color-success)" : a.accuracy >= 0.45 ? "var(--color-warning)" : "var(--color-error)";
+                    const brierColor = a.brierScore < 0.2 ? "var(--color-success)" : a.brierScore < 0.3 ? "var(--color-warning)" : "var(--color-error)";
+                    return (
+                      <tr key={a.agent} style={{ borderBottom: "1px solid var(--glass-border)" }}>
+                        <td style={{ padding: "var(--space-sm)", color: "var(--color-text-muted)" }}>{a.rank}</td>
+                        <td style={{ padding: "var(--space-sm)", fontWeight: 600, textTransform: "capitalize" }}>{a.agent}</td>
+                        <td style={{ padding: "var(--space-sm)", textAlign: "right", color: accColor, fontWeight: 700 }}>
+                          {Math.round(a.accuracy * 100)}%
+                        </td>
+                        <td style={{ padding: "var(--space-sm)", textAlign: "right", color: "var(--color-text-secondary)" }}>
+                          {Math.round(a.avgConfidence * 100)}%
+                        </td>
+                        <td style={{ padding: "var(--space-sm)", textAlign: "right", color: brierColor }}>
+                          {a.brierScore.toFixed(3)}
+                        </td>
+                        <td style={{ padding: "var(--space-sm)", textAlign: "right", color: "var(--color-text-secondary)" }}>
+                          {a.totalSettled}
+                        </td>
+                        <td style={{ padding: "var(--space-sm)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center" }}>
+                          {a.overconfident && <Badge variant="warning">Overconf</Badge>}
+                          {a.readyForKelly && <Badge variant="success">Kelly</Badge>}
+                          {!a.readyForKelly && <Badge variant="neutral">{a.totalSettled}/{leaderboard.minForKelly}</Badge>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-sm)" }}>
+              Kelly sizing activates after {leaderboard.minForKelly}+ settled predictions per agent.
+              Lower Brier score = better calibrated.
+            </div>
+          </BentoCard>
+        )}
 
         {/* Isotonic calibration curves */}
         {Object.keys(data.calibration_curves).length > 0 && (

@@ -44,13 +44,21 @@ export function AddToPortfolioModal({
   const [thesis, setThesis] = useState(defaultThesis.slice(0, 200));
   const [submitting, setSubmitting] = useState(false);
 
+  // Thesis invalidation criteria
+  const [quantType, setQuantType] = useState("roic_floor");
+  const [quantThreshold, setQuantThreshold] = useState("");
+  const [qualText, setQualText] = useState("");
+
   const price = parseFloat(entryPrice) || 0;
   const qty = parseFloat(shares) || 0;
   const totalCost = price * qty;
   const stopLoss = price > 0 ? price * (1 - (parseFloat(stopPct) || 15) / 100) : 0;
 
+  const quantVal = parseFloat(quantThreshold) || 0;
+  const criteriaValid = quantVal > 0 && qualText.trim().length > 0;
+
   const handleSubmit = async () => {
-    if (price <= 0 || qty <= 0) return;
+    if (price <= 0 || qty <= 0 || !criteriaValid) return;
     setSubmitting(true);
     try {
       const res = await fetch("/api/invest/portfolio/positions", {
@@ -63,6 +71,10 @@ export function AddToPortfolioModal({
           position_type: posType,
           stop_loss: Math.round(stopLoss * 100) / 100,
           thesis,
+          invalidation_criteria: [
+            { criteria_type: quantType, threshold_value: quantVal, is_quantitative: true },
+            { criteria_type: "custom_qualitative", qualitative_text: qualText.trim(), is_quantitative: false },
+          ],
         }),
       });
       if (!res.ok) {
@@ -210,6 +222,80 @@ export function AddToPortfolioModal({
           />
         </label>
 
+        {/* Thesis invalidation criteria — required */}
+        <div style={{
+          padding: "var(--space-md)", background: "var(--color-surface-0)",
+          borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)",
+          display: "flex", flexDirection: "column", gap: "var(--space-sm)",
+        }}>
+          <div style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>
+            Invalidation Criteria
+            <span style={{ color: "var(--color-error)", marginLeft: 4 }}>*</span>
+          </div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: 4 }}>
+            What would break this thesis? One quantitative + one qualitative required.
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-sm)" }}>
+            <label style={{ fontSize: "var(--text-xs)", fontWeight: 500 }}>
+              Metric
+              <select
+                value={quantType}
+                onChange={(e) => setQuantType(e.target.value)}
+                style={{
+                  width: "100%", marginTop: 2, padding: "var(--space-xs) var(--space-sm)",
+                  background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+                  fontSize: "var(--text-xs)",
+                }}
+              >
+                <option value="roic_floor">ROIC floor (%)</option>
+                <option value="fscore_floor">Piotroski F-Score floor</option>
+                <option value="revenue_growth_floor">Revenue growth floor (%)</option>
+                <option value="debt_ceiling">Debt/Equity ceiling</option>
+              </select>
+            </label>
+            <label style={{ fontSize: "var(--text-xs)", fontWeight: 500 }}>
+              Threshold
+              <input
+                type="number"
+                step="0.1"
+                value={quantThreshold}
+                onChange={(e) => setQuantThreshold(e.target.value)}
+                placeholder={quantType === "fscore_floor" ? "e.g. 6" : "e.g. 12"}
+                style={{
+                  width: "100%", marginTop: 2, padding: "var(--space-xs) var(--space-sm)",
+                  background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                  borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+                  fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)",
+                }}
+              />
+            </label>
+          </div>
+
+          <label style={{ fontSize: "var(--text-xs)", fontWeight: 500 }}>
+            Qualitative break condition
+            <input
+              type="text"
+              value={qualText}
+              onChange={(e) => setQualText(e.target.value)}
+              placeholder="e.g. Thesis breaks if they lose the DOD contract"
+              style={{
+                width: "100%", marginTop: 2, padding: "var(--space-xs) var(--space-sm)",
+                background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                borderRadius: "var(--radius-sm)", color: "var(--color-text-primary)",
+                fontSize: "var(--text-xs)",
+              }}
+            />
+          </label>
+
+          {!criteriaValid && (quantThreshold || qualText) && (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-warning)" }}>
+              Both a numeric threshold and a qualitative condition are required.
+            </div>
+          )}
+        </div>
+
         <div style={{ display: "flex", gap: "var(--space-md)", marginTop: "var(--space-sm)" }}>
           <button
             onClick={onClose}
@@ -224,14 +310,14 @@ export function AddToPortfolioModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={price <= 0 || qty <= 0 || submitting}
+            disabled={price <= 0 || qty <= 0 || !criteriaValid || submitting}
             style={{
               flex: 1, padding: "var(--space-sm) var(--space-md)",
-              background: price > 0 && qty > 0 && !submitting ? "var(--gradient-active)" : "var(--color-surface-2)",
+              background: price > 0 && qty > 0 && criteriaValid && !submitting ? "var(--gradient-active)" : "var(--color-surface-2)",
               border: "none",
               borderRadius: "var(--radius-sm)",
-              color: price > 0 && qty > 0 && !submitting ? "#fff" : "var(--color-text-muted)",
-              cursor: price > 0 && qty > 0 && !submitting ? "pointer" : "default",
+              color: price > 0 && qty > 0 && criteriaValid && !submitting ? "#fff" : "var(--color-text-muted)",
+              cursor: price > 0 && qty > 0 && criteriaValid && !submitting ? "pointer" : "default",
               fontWeight: 600,
             }}
           >

@@ -2123,6 +2123,81 @@ class PipelineController:
                 logger.info(
                     "Pipeline cycle %s completed: %s", cycle_id, summary,
                 )
+                # Post-cycle: update thesis health + check criteria for portfolio positions
+                self._update_thesis_health()
+
+    def _update_thesis_health(self) -> None:
+        """Post-cycle: assess thesis health and check invalidation criteria for all held positions."""
+        try:
+            from investmentology.advisory.thesis_health import (
+                assess_thesis_health,
+                check_thesis_criteria,
+            )
+
+            positions = self.db.execute(
+                "SELECT id, ticker, thesis_health, position_type "
+                "FROM invest.portfolio_positions "
+                "WHERE is_closed = FALSE"
+            )
+            if not positions:
+                return
+
+            from investmentology.registry.queries import Registry
+            registry = Registry(self.db)
+
+            for pos in positions:
+                ticker = pos["ticker"]
+                position_id = pos["id"]
+                old_health = pos.get("thesis_health", "INTACT")
+
+                # Assess thesis health from verdict history
+                assessment = assess_thesis_health(
+                    ticker, registry, pos.get("position_type", "tactical"),
+                )
+                new_health = assessment.health.value
+
+                # Update position if health changed
+                if new_health != old_health:
+                    self.db.execute(
+                        "UPDATE invest.portfolio_positions "
+                        "SET thesis_health = %s, thesis_state = %s "
+                        "WHERE id = %s",
+                        (new_health, assessment.health.value, position_id),
+                    )
+                    # Log thesis event
+                    self.db.execute(
+                        "INSERT INTO invest.thesis_events "
+                        "(ticker, event_type, thesis_state, position_type, created_at) "
+                        "VALUES (%s, %s, %s, %s, NOW())",
+                        (ticker, "HEALTH_CHANGE", new_health, pos.get("position_type")),
+                    )
+                    logger.info(
+                        "Thesis health changed for %s: %s -> %s",
+                        ticker, old_health, new_health,
+                    )
+
+                # Check quantitative criteria breaches
+                # Get latest fundamentals from pipeline data cache
+                fund_rows = self.db.execute(
+                    "SELECT data_value FROM invest.pipeline_data_cache "
+                    "WHERE ticker = %s AND data_key = 'fundamentals' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (ticker,),
+                )
+                fundamentals = fund_rows[0]["data_value"] if fund_rows else None
+                if fundamentals and isinstance(fundamentals, dict):
+                    breaches = check_thesis_criteria(
+                        ticker, position_id, registry, fundamentals,
+                    )
+                    if breaches:
+                        logger.warning(
+                            "Thesis criteria breached for %s: %s",
+                            ticker,
+                            "; ".join(b.message for b in breaches),
+                        )
+
+        except Exception:
+            logger.debug("Thesis health update failed", exc_info=True)
 
     async def _staleness_sweep(self, cycle_id: UUID) -> None:
         """Check portfolio tickers for stale data and auto-queue refreshes.
