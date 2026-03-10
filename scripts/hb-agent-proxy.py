@@ -4,6 +4,10 @@ Runs on HB LXC (10.10.0.101:9100). The K8s pod calls this to access
 Gemini CLI (subscription) and Claude CLI (subscription) without needing
 the CLI tools installed in the container.
 
+Gemini agents use custom slash commands (/invest:soros, etc.) defined in
+~/.gemini/commands/invest/*.toml. Ticker data is staged to .gemini-data/
+and loaded via @file references, keeping personas separate from data.
+
 Usage:
     HB_PROXY_TOKEN=<token> python3 scripts/hb-agent-proxy.py
 """
@@ -16,6 +20,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
@@ -34,6 +39,20 @@ _active_agents = 0
 
 # Gemini quota circuit breaker — blocks all Gemini calls until quota resets
 _gemini_quota_blocked_until: float = 0.0  # monotonic timestamp
+
+# Gemini slash command routing — agents with a mapping use /invest:{cmd}
+# instead of concatenating system_prompt + user_prompt as a single -p arg.
+# Persona lives in the .toml file; ticker data is staged to a file.
+GEMINI_SLASH_COMMANDS: dict[str, str] = {
+    "soros": "invest:soros",
+    "druckenmiller": "invest:druckenmiller",
+    "dalio": "invest:dalio",
+    "data-analyst": "invest:data-analyst",
+    "board-gemini": "invest:board",
+}
+
+# Directory for staging ticker data files (one per concurrent agent)
+GEMINI_DATA_DIR = Path("/home/investmentology/.gemini-data")
 
 AGENT_CONFIG = {
     # Claude CLI screen agents
@@ -152,7 +171,6 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
         raise HTTPException(status_code=400, detail=f"Unknown agent: {agent_name}")
 
     cfg = AGENT_CONFIG[agent_name]
-    combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
 
     # Circuit breaker: block Gemini calls while quota is exhausted
     global _gemini_quota_blocked_until
@@ -167,8 +185,18 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
 
     # Build command as a list — no shell involved (asyncio.create_subprocess_exec)
     if cfg["cli"] == "claude":
+        combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
         cmd = ["claude", "-p", combined_prompt, "--output-format", "json"]
+    elif cfg["cli"] == "gemini" and agent_name in GEMINI_SLASH_COMMANDS:
+        # Slash command mode: persona in .toml, ticker data in staged file
+        GEMINI_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        prompt_file = GEMINI_DATA_DIR / f"_prompt_{agent_name}.txt"
+        prompt_file.write_text(body.user_prompt)
+        slash_cmd = GEMINI_SLASH_COMMANDS[agent_name]
+        cmd = ["gemini", "-p", f"/{slash_cmd} @.gemini-data/_prompt_{agent_name}.txt", "-o", "json", "--yolo"]
     elif cfg["cli"] == "gemini":
+        # Fallback for unmapped Gemini agents (e.g. researcher)
+        combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
         cmd = ["gemini", "-p", combined_prompt, "-o", "json", "--yolo"]
     else:
         raise HTTPException(status_code=500, detail=f"Bad CLI config: {cfg['cli']}")

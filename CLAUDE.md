@@ -133,6 +133,8 @@ Controller (K8s, 60s poll) monitors invest.pipeline_state:
 
 - **Claude screen**: warren, auditor, klarman, debate, synthesis, board-claude
 - **Gemini screen**: soros, druckenmiller, dalio, data-analyst, board-gemini
+- **Gemini slash commands**: 5 mapped agents use `/invest:{name}` commands defined in `scripts/gemini-commands/invest/*.toml`. Persona lives in .toml; ticker data staged to `.gemini-data/_prompt_{agent}.txt` via @file reference. Unmapped agents (researcher) fall back to concatenated prompt.
+- Symlink: `~/.gemini/commands/invest` → `/home/investmentology/scripts/gemini-commands/invest/` on HB LXC
 - All agent timeouts: 600s. Board timeouts: 360s.
 - Provider preference: remote CLI proxy > local CLI > HTTP API fallback
 - `HB_PROXY_URL` + `HB_PROXY_TOKEN` env vars on K8s pod
