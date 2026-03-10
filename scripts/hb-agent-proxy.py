@@ -1,12 +1,16 @@
-"""HB LXC Agent Proxy — delegates CLI-based LLM calls for Soros & Auditor.
+"""HB LXC Agent Proxy — delegates CLI-based LLM calls for investment agents.
 
 Runs on HB LXC (10.10.0.101:9100). The K8s pod calls this to access
 Gemini CLI (subscription) and Claude CLI (subscription) without needing
 the CLI tools installed in the container.
 
-Gemini agents use custom slash commands (/invest:soros, etc.) defined in
-~/.gemini/commands/invest/*.toml. Ticker data is staged to .gemini-data/
-and loaded via @file references, keeping personas separate from data.
+Claude agents: --system-prompt for persona, -p for ticker data, --tools ""
+to disable tools, cwd=/tmp to avoid loading the repo's CLAUDE.md (~2,900
+tokens of irrelevant K8s architecture docs).
+
+Gemini agents: custom slash commands (/invest:soros, etc.) defined in
+~/.gemini/commands/invest/*.toml. Ticker data staged to .gemini-data/
+and loaded via @file references.
 
 Usage:
     HB_PROXY_TOKEN=<token> python3 scripts/hb-agent-proxy.py
@@ -121,7 +125,13 @@ def _parse_claude_output(output: str, model: str) -> tuple[str, dict]:
         data = json.loads(output)
         content = data.get("result", output)
         cost = data.get("cost_usd", 0)
-        return content, {"cost_usd": cost, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage = data.get("usage", {})
+        return content, {
+            "cost_usd": cost,
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+        }
     except json.JSONDecodeError:
         return output, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
@@ -184,9 +194,19 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
         )
 
     # Build command as a list — no shell involved (asyncio.create_subprocess_exec)
+    proc_cwd = None  # Default: inherit from systemd WorkingDirectory
     if cfg["cli"] == "claude":
-        combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
-        cmd = ["claude", "-p", combined_prompt, "--output-format", "json"]
+        # Proper system/user separation, no tools, no session persistence.
+        # cwd=/tmp avoids loading the repo's CLAUDE.md (~2,900 tokens of K8s docs).
+        cmd = [
+            "claude",
+            "--system-prompt", body.system_prompt,
+            "-p", body.user_prompt,
+            "--output-format", "json",
+            "--tools", "",
+            "--no-session-persistence",
+        ]
+        proc_cwd = "/tmp"
     elif cfg["cli"] == "gemini" and agent_name in GEMINI_SLASH_COMMANDS:
         # Slash command mode: persona in .toml, ticker data in staged file
         GEMINI_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -209,11 +229,11 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
     async with _agent_semaphore:
         _active_agents += 1
         try:
-            # Safe: uses execvp (no shell), combined_prompt is a single arg
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=proc_cwd,
             )
 
             try:

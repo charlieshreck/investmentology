@@ -132,6 +132,7 @@ Controller (K8s, 60s poll) monitors invest.pipeline_state:
 `scripts/hb-agent-proxy.py` on HB LXC:9100. Routes CLI calls to claude/gemini screens:
 
 - **Claude screen**: warren, auditor, klarman, debate, synthesis, board-claude
+- **Claude CLI flags**: `--system-prompt` (persona), `-p` (ticker data only), `--tools ""` (no tools), `--no-session-persistence`, `--output-format json`. Runs from `cwd=/tmp` to avoid loading repo CLAUDE.md (~2,900 tokens of K8s docs).
 - **Gemini screen**: soros, druckenmiller, dalio, data-analyst, board-gemini
 - **Gemini slash commands**: 5 mapped agents use `/invest:{name}` commands defined in `scripts/gemini-commands/invest/*.toml`. Persona lives in .toml; ticker data staged to `.gemini-data/_prompt_{agent}.txt` via @file reference. Unmapped agents (researcher) fall back to concatenated prompt.
 - Symlink: `~/.gemini/commands/invest` → `/home/investmentology/scripts/gemini-commands/invest/` on HB LXC
