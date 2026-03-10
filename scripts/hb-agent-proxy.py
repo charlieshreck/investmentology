@@ -32,6 +32,9 @@ MAX_CONCURRENT_AGENTS = int(os.environ.get("MAX_CONCURRENT_AGENTS", "8"))
 _agent_semaphore: asyncio.Semaphore | None = None
 _active_agents = 0
 
+# Gemini quota circuit breaker — blocks all Gemini calls until quota resets
+_gemini_quota_blocked_until: float = 0.0  # monotonic timestamp
+
 AGENT_CONFIG = {
     # Claude CLI screen agents
     "warren":       {"cli": "claude", "model": "claude-opus-4-6", "timeout": 600},
@@ -49,6 +52,28 @@ AGENT_CONFIG = {
     # Research agent — deep research synthesis (large context)
     "researcher":     {"cli": "gemini", "model": "gemini-2.5-pro", "timeout": 900},
 }
+
+def _is_quota_error(text: str) -> bool:
+    """Detect Gemini CLI quota exhaustion errors."""
+    markers = [
+        "exhausted your capacity",
+        "No capacity available",
+        "quota will reset",
+        "RESOURCE_EXHAUSTED",
+    ]
+    return any(m.lower() in text.lower() for m in markers)
+
+
+def _parse_quota_reset_seconds(text: str) -> int:
+    """Extract reset duration from 'quota will reset after 8h18m48s' style messages."""
+    m = re.search(r"reset after\s+(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", text)
+    if not m:
+        return 3600  # default 1 hour if we can't parse
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0)
+    seconds = int(m.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
 
 app = FastAPI(title="HB Agent Proxy", docs_url=None, redoc_url=None)
 
@@ -107,11 +132,15 @@ async def _init_semaphore():
 
 @app.get("/health")
 async def health():
+    now = time.monotonic()
+    gemini_blocked = now < _gemini_quota_blocked_until
     return {
-        "status": "ok",
+        "status": "degraded" if gemini_blocked else "ok",
         "agents": list(AGENT_CONFIG.keys()),
         "max_concurrent": MAX_CONCURRENT_AGENTS,
         "active_agents": _active_agents,
+        "gemini_quota_blocked": gemini_blocked,
+        "gemini_quota_reset_seconds": max(0, int(_gemini_quota_blocked_until - now)) if gemini_blocked else 0,
     }
 
 
@@ -124,6 +153,17 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
 
     cfg = AGENT_CONFIG[agent_name]
     combined_prompt = f"{body.system_prompt}\n\n{body.user_prompt}"
+
+    # Circuit breaker: block Gemini calls while quota is exhausted
+    global _gemini_quota_blocked_until
+    if cfg["cli"] == "gemini" and time.monotonic() < _gemini_quota_blocked_until:
+        remaining = int(_gemini_quota_blocked_until - time.monotonic())
+        logger.warning("Gemini quota circuit breaker active — %s blocked (%ds remaining)", agent_name, remaining)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Gemini quota exhausted, resets in {remaining}s",
+            headers={"Retry-After": str(remaining)},
+        )
 
     # Build command as a list — no shell involved (asyncio.create_subprocess_exec)
     if cfg["cli"] == "claude":
@@ -163,8 +203,25 @@ async def run_agent(agent_name: str, body: AgentRequest, request: Request):
     logger.info("%s completed in %dms (exit=%d)", agent_name, latency_ms, proc.returncode)
 
     if proc.returncode != 0:
-        stderr_text = stderr_bytes.decode(errors="replace")[:500]
-        raise HTTPException(status_code=502, detail=f"{agent_name} CLI failed: {stderr_text}")
+        stderr_text = stderr_bytes.decode(errors="replace")[:1000]
+        stdout_text = stdout_bytes.decode(errors="replace")[:1000]
+        combined_error = f"{stderr_text} {stdout_text}"
+
+        # Gemini quota exhaustion → activate circuit breaker, return 429
+        if cfg["cli"] == "gemini" and _is_quota_error(combined_error):
+            reset_secs = _parse_quota_reset_seconds(combined_error)
+            _gemini_quota_blocked_until = time.monotonic() + reset_secs
+            logger.error(
+                "Gemini quota exhausted — circuit breaker activated for %ds (agent: %s)",
+                reset_secs, agent_name,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Gemini quota exhausted, resets in {reset_secs}s",
+                headers={"Retry-After": str(reset_secs)},
+            )
+
+        raise HTTPException(status_code=502, detail=f"{agent_name} CLI failed: {stderr_text[:500]}")
 
     output = stdout_bytes.decode(errors="replace")
 
