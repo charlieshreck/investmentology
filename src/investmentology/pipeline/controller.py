@@ -1546,9 +1546,9 @@ class PipelineController:
         dangerous disagreement, or conviction buy patterns). If triggered,
         runs bias check, Kill the Company, and pre-mortem via DeepSeek.
         """
-        if not state.is_step_completed(
-            self.db, cycle_id, ticker, state.STEP_DEBATE,
-        ):
+        # Proceed if debate is completed OR failed (failed debate shouldn't block)
+        debate_row = state.get_step_status(self.db, cycle_id, ticker, state.STEP_DEBATE)
+        if not debate_row or debate_row["status"] not in ("completed", "failed"):
             return
 
         state.mark_running(self.db, step_id)
@@ -1651,9 +1651,9 @@ class PipelineController:
         self, cycle_id: UUID, ticker: str, step_id: int,
     ) -> None:
         """Run verdict synthesis + advisory board + CIO narrative."""
-        if not state.is_step_completed(
-            self.db, cycle_id, ticker, state.STEP_ADVERSARIAL,
-        ):
+        # Proceed if adversarial is completed OR failed (failure shouldn't block verdict)
+        adv_row = state.get_step_status(self.db, cycle_id, ticker, state.STEP_ADVERSARIAL)
+        if not adv_row or adv_row["status"] not in ("completed", "failed"):
             return
 
         state.mark_running(self.db, step_id)
