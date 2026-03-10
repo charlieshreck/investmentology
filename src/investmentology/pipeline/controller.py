@@ -1135,6 +1135,29 @@ class PipelineController:
                     name=f"gap-fill-{ticker}",
                 )
 
+        # Incremental analysis: skip re-analysis for watchlist tickers with
+        # no material change in fundamentals since the last completed cycle.
+        # Portfolio tickers ALWAYS get full analysis.
+        if ticker not in self._portfolio_tickers:
+            current_fund = state.get_data_cache(
+                self.db, cycle_id, ticker, "fundamentals",
+            )
+            if current_fund:
+                prev_fund = freshness.get_previous_fundamentals(
+                    self.db, ticker, str(cycle_id),
+                )
+                if prev_fund:
+                    mc_report = freshness.check_material_change(
+                        current_fund, prev_fund, ticker,
+                    )
+                    if not mc_report.has_material_change:
+                        state.mark_completed(self.db, step_id)
+                        logger.info(
+                            "Gate PASS for %s — SKIPPED analysis (no material change). %s",
+                            ticker, mc_report.reason,
+                        )
+                        return
+
         agent_names = self._get_agents_for_ticker(ticker, cycle_id)
         state.create_analysis_steps(
             self.db, cycle_id, ticker, agent_names,

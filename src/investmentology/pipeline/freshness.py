@@ -131,3 +131,120 @@ def should_auto_refresh(stale_keys: list[str], is_portfolio: bool) -> bool:
     if is_portfolio:
         return True
     return bool(set(stale_keys) & CRITICAL_KEYS)
+
+
+# ------------------------------------------------------------------
+# Material change detection — skip re-analysis when fundamentals
+# haven't moved meaningfully between cycles.
+# ------------------------------------------------------------------
+
+# Fundamental fields to compare, with relative change threshold.
+# A change exceeding ANY of these triggers full re-analysis.
+MATERIAL_CHANGE_FIELDS: dict[str, float] = {
+    "total_revenue": 0.05,       # 5% revenue change
+    "operating_income": 0.10,    # 10% OpInc (more volatile)
+    "net_income": 0.10,          # 10% net income
+    "total_debt": 0.10,          # 10% debt change
+    "total_equity": 0.10,        # 10% equity change
+    "eps": 0.10,                 # 10% EPS change
+}
+
+# Absolute thresholds — if values are near zero, relative % is misleading.
+# Skip relative check when both old and new are below this floor.
+_NEAR_ZERO_FLOOR = 1_000_000  # $1M
+
+
+@dataclass
+class MaterialChangeReport:
+    """Result of comparing fundamentals between cycles."""
+
+    ticker: str
+    has_material_change: bool
+    changed_fields: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    reason: str = ""
+
+
+def _safe_float(val) -> float | None:
+    """Convert a value to float, handling Decimal/str/None."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_material_change(
+    current_fundamentals: dict,
+    previous_fundamentals: dict,
+    ticker: str = "",
+) -> MaterialChangeReport:
+    """Compare two fundamentals dicts for material changes.
+
+    Returns a report indicating whether any tracked metric changed by more
+    than its threshold. Used to skip expensive agent re-analysis for watchlist
+    tickers with stable fundamentals.
+    """
+    changed: dict[str, tuple[float, float, float]] = {}
+
+    for field_name, threshold in MATERIAL_CHANGE_FIELDS.items():
+        cur = _safe_float(current_fundamentals.get(field_name))
+        prev = _safe_float(previous_fundamentals.get(field_name))
+
+        if cur is None or prev is None:
+            continue
+
+        # Both near zero — no meaningful comparison possible
+        if abs(cur) < _NEAR_ZERO_FLOOR and abs(prev) < _NEAR_ZERO_FLOOR:
+            continue
+
+        # Avoid division by zero
+        if prev == 0:
+            if cur != 0:
+                changed[field_name] = (prev, cur, float("inf"))
+            continue
+
+        pct_change = abs(cur - prev) / abs(prev)
+        if pct_change >= threshold:
+            changed[field_name] = (prev, cur, round(pct_change, 4))
+
+    has_change = bool(changed)
+    reason = ""
+    if has_change:
+        parts = [f"{k}: {v[2]:.1%}" for k, v in changed.items()]
+        reason = f"Material change in {', '.join(parts)}"
+    else:
+        reason = "No material change in tracked fundamentals"
+
+    return MaterialChangeReport(
+        ticker=ticker,
+        has_material_change=has_change,
+        changed_fields=changed,
+        reason=reason,
+    )
+
+
+def get_previous_fundamentals(
+    db: Database,
+    ticker: str,
+    current_cycle_id: str,
+) -> dict | None:
+    """Fetch the most recent fundamentals from a PREVIOUS completed cycle.
+
+    Returns None if no previous data exists (first analysis).
+    """
+    rows = db.execute(
+        "SELECT pdc.data_value "
+        "FROM invest.pipeline_data_cache pdc "
+        "JOIN invest.pipeline_cycles pc ON pc.id = pdc.cycle_id "
+        "WHERE pdc.ticker = %s "
+        "  AND pdc.data_key = 'fundamentals' "
+        "  AND pdc.cycle_id != %s "
+        "  AND pc.completed_at IS NOT NULL "
+        "ORDER BY pdc.created_at DESC "
+        "LIMIT 1",
+        (ticker, current_cycle_id),
+    )
+    if not rows:
+        return None
+    return rows[0]["data_value"]
