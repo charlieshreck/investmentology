@@ -410,7 +410,18 @@ class PipelineController:
                 await self._handle_gate_decision(cycle_id, ticker, step_id)
 
             elif step == state.STEP_RESEARCH:
-                await self._handle_research(cycle_id, ticker, step_id)
+                if step_id not in self._inflight_steps:
+                    self._inflight_steps.add(step_id)
+                    task = asyncio.create_task(
+                        self._run_step_async(
+                            self._handle_research, cycle_id, ticker, step_id,
+                            timeout=300,
+                        ),
+                        name=f"research-{ticker}",
+                    )
+                    self._task_registry.track(
+                        step_id, task, ticker, "research", timeout=300,
+                    )
 
             elif step.startswith(state.STEP_AGENT_PREFIX):
                 agent_name = step[len(state.STEP_AGENT_PREFIX):]
