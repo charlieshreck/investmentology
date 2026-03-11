@@ -24,13 +24,13 @@ import { useCorrelations } from "../hooks/useCorrelations";
 import { useConfetti } from "../hooks/useConfetti";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAnalysis } from "../contexts/AnalysisContext";
-import { useThesisSummary, usePortfolioRisk } from "../hooks/useToday";
+import { useThesisSummary, usePortfolioRisk, useRiskAssessment } from "../hooks/useToday";
 import type { Position } from "../types/models";
 import { useStore } from "../stores/useStore";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
   AlertTriangle, BarChart3,
-  ShieldAlert, Sparkles, PieChart,
+  ShieldAlert, Sparkles, PieChart, RefreshCw, Zap,
 } from "lucide-react";
 
 
@@ -67,6 +67,7 @@ export function Portfolio() {
   const [activeTab, setActiveTab] = useState("positions");
   const { positions: thesisPositions, loading: thesisLoading } = useThesisSummary();
   const { data: riskData, loading: riskLoading } = usePortfolioRisk();
+  const { data: riskAssessment, loading: assessmentLoading, run: runAssessment } = useRiskAssessment();
   const { data: balance } = usePortfolioBalance(positions.length);
   const scrollRef = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
@@ -1419,6 +1420,207 @@ export function Portfolio() {
                   </div>
                 </div>
               )}
+
+              {/* ═══════ AI Risk Assessment ═══════ */}
+              <div style={{
+                padding: "var(--space-lg)",
+                background: "var(--color-surface-0)", borderRadius: "var(--radius-lg)",
+                border: "1px solid var(--glass-border)",
+              }}>
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  marginBottom: "var(--space-md)",
+                }}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-text-secondary)",
+                    textTransform: "uppercase", letterSpacing: "0.06em",
+                  }}>
+                    <Zap size={12} />
+                    AI Risk Assessment
+                  </div>
+                  <button
+                    onClick={() => runAssessment()}
+                    disabled={assessmentLoading}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      padding: "4px 10px", borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--glass-border)",
+                      background: assessmentLoading ? "var(--color-surface-2)" : "var(--color-surface-1)",
+                      color: "var(--color-text-secondary)",
+                      fontSize: 10, fontWeight: 600, cursor: assessmentLoading ? "wait" : "pointer",
+                    }}
+                  >
+                    <RefreshCw size={10} style={{ animation: assessmentLoading ? "spin 1s linear infinite" : "none" }} />
+                    {assessmentLoading ? "Analysing..." : riskAssessment?.assessment ? "Re-run" : "Run Assessment"}
+                  </button>
+                </div>
+
+                {!riskAssessment?.assessment && !assessmentLoading && (
+                  <div style={{
+                    padding: "var(--space-lg)", textAlign: "center",
+                    color: "var(--color-text-muted)", fontSize: "var(--text-sm)",
+                    lineHeight: 1.6,
+                  }}>
+                    Run the AI risk assessment to get portfolio-level analysis including
+                    stress scenarios, correlation clusters, and rebalancing suggestions.
+                    {riskAssessment?.cached === false && riskAssessment?.error && (
+                      <div style={{ marginTop: 8, color: "var(--color-error)", fontSize: "var(--text-xs)" }}>
+                        Error: {riskAssessment.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {riskAssessment?.assessment && (() => {
+                  const a = riskAssessment.assessment;
+                  const scoreColor = (a.risk_score ?? 5) <= 3 ? "var(--color-success)" :
+                    (a.risk_score ?? 5) <= 6 ? "var(--color-warning)" : "var(--color-error)";
+                  return (<>
+                    {/* Risk score + summary */}
+                    <div style={{ display: "flex", gap: "var(--space-md)", alignItems: "flex-start", marginBottom: "var(--space-md)" }}>
+                      <div style={{
+                        width: 48, height: 48, borderRadius: "50%",
+                        background: `color-mix(in srgb, ${scoreColor} 15%, transparent)`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 20, fontWeight: 900, fontFamily: "var(--font-mono)",
+                        color: scoreColor, flexShrink: 0,
+                      }}>
+                        {a.risk_score}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: scoreColor, marginBottom: 4 }}>
+                          {a.risk_label}
+                        </div>
+                        <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+                          {a.summary}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Key risks */}
+                    {a.key_risks && a.key_risks.length > 0 && (
+                      <div style={{ marginBottom: "var(--space-md)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                          Key Risks
+                        </div>
+                        {a.key_risks.map((r, i) => (
+                          <div key={i} style={{
+                            display: "flex", gap: 6, alignItems: "flex-start",
+                            fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+                            marginBottom: 4, lineHeight: 1.4,
+                          }}>
+                            <AlertTriangle size={10} color="var(--color-warning)" style={{ flexShrink: 0, marginTop: 2 }} />
+                            {r}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Stress scenarios */}
+                    {a.stress_scenarios && a.stress_scenarios.length > 0 && (
+                      <div style={{ marginBottom: "var(--space-md)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                          Stress Scenarios
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {a.stress_scenarios.map((s, i) => (
+                            <div key={i} style={{
+                              padding: "8px 10px", borderRadius: "var(--radius-sm)",
+                              background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                            }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span style={{ fontSize: 11, color: "var(--color-text-secondary)", flex: 1 }}>{s.scenario}</span>
+                                <span style={{
+                                  fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700,
+                                  color: Math.abs(s.estimated_impact_pct) > 15 ? "var(--color-error)" :
+                                    Math.abs(s.estimated_impact_pct) > 8 ? "var(--color-warning)" : "var(--color-text-muted)",
+                                }}>
+                                  {s.estimated_impact_pct > 0 ? "+" : ""}{s.estimated_impact_pct?.toFixed(1)}%
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Regime alignment */}
+                    {a.regime_alignment && a.regime_alignment.alignment && (
+                      <div style={{ marginBottom: "var(--space-md)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                          Regime Alignment
+                        </div>
+                        <div style={{
+                          padding: "8px 10px", borderRadius: "var(--radius-sm)",
+                          background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                          fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5,
+                        }}>
+                          <span style={{
+                            fontWeight: 700,
+                            color: a.regime_alignment.alignment === "ALIGNED" ? "var(--color-success)" :
+                              a.regime_alignment.alignment === "MISALIGNED" ? "var(--color-error)" : "var(--color-warning)",
+                          }}>
+                            {a.regime_alignment.alignment}
+                          </span>
+                          {a.regime_alignment.current_regime && (
+                            <span style={{ color: "var(--color-text-muted)" }}> — {a.regime_alignment.current_regime}</span>
+                          )}
+                          {a.regime_alignment.comment && (
+                            <div style={{ marginTop: 4 }}>{a.regime_alignment.comment}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Rebalancing suggestions */}
+                    {a.rebalancing_suggestions && a.rebalancing_suggestions.length > 0 && (
+                      <div style={{ marginBottom: "var(--space-sm)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                          Rebalancing Suggestions
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {a.rebalancing_suggestions.map((s, i) => (
+                            <div key={i} style={{
+                              display: "flex", gap: 8, alignItems: "flex-start",
+                              padding: "6px 10px", borderRadius: "var(--radius-sm)",
+                              background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                            }}>
+                              <span style={{
+                                fontSize: 9, fontWeight: 800, padding: "1px 5px",
+                                borderRadius: 3, flexShrink: 0, marginTop: 1,
+                                background: s.action === "TRIM" || s.action === "REDUCE"
+                                  ? "rgba(239, 68, 68, 0.15)" : "rgba(52, 211, 153, 0.15)",
+                                color: s.action === "TRIM" || s.action === "REDUCE"
+                                  ? "var(--color-error)" : "var(--color-success)",
+                              }}>
+                                {s.action}
+                              </span>
+                              <div>
+                                <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{s.ticker}</span>
+                                <span style={{ fontSize: 11, color: "var(--color-text-muted)", marginLeft: 6 }}>{s.reason}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Meta */}
+                    <div style={{
+                      display: "flex", gap: "var(--space-md)", justifyContent: "flex-end",
+                      fontSize: 9, color: "var(--color-text-muted)", fontFamily: "var(--font-mono)",
+                      marginTop: "var(--space-sm)",
+                    }}>
+                      {riskAssessment.cached && <span>cached</span>}
+                      {riskAssessment.latency_ms && <span>{(riskAssessment.latency_ms / 1000).toFixed(1)}s</span>}
+                      {riskAssessment.assessed_at && (
+                        <span>{new Date(riskAssessment.assessed_at).toLocaleTimeString()}</span>
+                      )}
+                    </div>
+                  </>);
+                })()}
+              </div>
             </>)}
           </div>
         )}

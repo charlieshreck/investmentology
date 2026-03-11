@@ -371,6 +371,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         calibration,
         pipeline,
         portfolio,
+        portfolio_risk,
         push,
         quant_gate,
         recommendations,
@@ -400,6 +401,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(pipeline.router, prefix=prefix, tags=["pipeline"])
     app.include_router(push.router, prefix=prefix, tags=["push"])
     app.include_router(calibration.router, prefix=prefix, tags=["calibration"])
+    app.include_router(portfolio_risk.router, prefix=prefix, tags=["portfolio-risk"])
     app.include_router(ws.router, prefix=prefix, tags=["websocket"])
 
     return app

@@ -1568,8 +1568,10 @@ SKILLS: dict[str, AgentSkill] = {
     "quality_position_screener": QUALITY_POSITION_SCREENER,
     "data_analyst": DATA_ANALYST,
     "income_analyst": INCOME_ANALYST,
-    "portfolio_risk": PORTFOLIO_RISK,
 }
+
+# Portfolio Risk is a standalone tool (not per-ticker pipeline agent).
+# Access via PORTFOLIO_RISK constant directly.
 
 # Convenience subsets
 PRIMARY_SKILLS = {k: v for k, v in SKILLS.items() if v.role == "primary"}

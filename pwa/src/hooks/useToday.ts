@@ -147,6 +147,79 @@ export function usePortfolioRisk() {
   };
 }
 
+// --- LLM Risk Assessment ---
+
+export interface StressScenario {
+  scenario: string;
+  estimated_impact_pct: number;
+  severity: string;
+}
+
+export interface RebalancingSuggestion {
+  action: string;
+  ticker: string;
+  reason: string;
+}
+
+export interface RiskAssessment {
+  risk_score: number;
+  risk_label: string;
+  summary: string;
+  concentration_analysis: {
+    top_position_pct?: number;
+    top_sector_pct?: number;
+    correlated_clusters?: string[];
+    flags?: string[];
+  };
+  stress_scenarios: StressScenario[];
+  regime_alignment: {
+    current_regime?: string;
+    alignment?: string;
+    comment?: string;
+  };
+  rebalancing_suggestions: RebalancingSuggestion[];
+  key_risks: string[];
+}
+
+export interface RiskAssessmentResponse {
+  assessment: RiskAssessment | null;
+  cached: boolean;
+  portfolio_hash?: string;
+  assessed_at?: string;
+  position_count?: number;
+  total_value?: number;
+  latency_ms?: number;
+  error?: string;
+}
+
+export function useRiskAssessment() {
+  const query = useQuery({
+    queryKey: ["portfolio", "risk-assessment"],
+    queryFn: () => apiFetch<RiskAssessmentResponse>("/api/invest/portfolio/risk-assessment"),
+    staleTime: 5 * 60 * 1000, // 5 min — backend handles real caching via hash
+    enabled: false, // Only fetch on demand
+  });
+
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading || query.isFetching,
+    error: query.error?.message ?? null,
+    run: () => query.refetch(),
+  };
+}
+
+export function useForceRiskAssessment() {
+  return {
+    run: async () => {
+      const res = await apiFetch<RiskAssessmentResponse>(
+        "/api/invest/portfolio/risk-assessment/refresh",
+        { method: "POST" },
+      );
+      return res;
+    },
+  };
+}
+
 // --- Learning Attribution ---
 
 export interface AgentAttribution {

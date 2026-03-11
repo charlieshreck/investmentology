@@ -321,21 +321,6 @@ def synthesize(
         if auditor.sentiment < -0.3 and auditor.confidence >= Decimal("0.6"):
             auditor_override = True
 
-    # Portfolio Risk Manager veto check
-    risk_agent = stance_map.get("portfolio_risk")
-    if risk_agent:
-        risk_ss = next((ss for ss in agent_signals if ss.agent_name == "portfolio_risk"), None)
-        if risk_ss:
-            from investmentology.models.signal import SignalTag
-            for sig in risk_ss.signals.signals:
-                if sig.tag.value == "VETO":
-                    risk_flags.append(f"PORTFOLIO_RISK_VETO: {sig.detail}")
-                    auditor_override = True  # Cap verdict like auditor veto
-                elif sig.tag.value in ("REVIEW_REQUIRED", "CONCENTRATION",
-                                       "CORRELATION_HIGH", "DRAWDOWN_RISK",
-                                       "REGIME_MISALIGNED"):
-                    risk_flags.append(f"PORTFOLIO_RISK: {sig.tag.value} — {sig.detail}")
-
     # Adversarial (Munger) override
     munger_override = False
     if adversarial:
