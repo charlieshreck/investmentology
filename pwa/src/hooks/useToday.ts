@@ -149,13 +149,19 @@ export function usePortfolioRisk() {
 
 // --- LLM Risk Assessment ---
 
+export interface PortfolioRole {
+  ticker: string;
+  role: string;
+  comment: string;
+}
+
 export interface StressScenario {
   scenario: string;
   estimated_impact_pct: number;
-  severity: string;
+  comment?: string;
 }
 
-export interface RebalancingSuggestion {
+export interface Suggestion {
   action: string;
   ticker: string;
   reason: string;
@@ -164,21 +170,13 @@ export interface RebalancingSuggestion {
 export interface RiskAssessment {
   risk_score: number;
   risk_label: string;
-  summary: string;
-  concentration_analysis: {
-    top_position_pct?: number;
-    top_sector_pct?: number;
-    correlated_clusters?: string[];
-    flags?: string[];
-  };
+  overview: string;
+  portfolio_roles: PortfolioRole[];
+  what_id_change: string;
+  watch_out_for: string[];
   stress_scenarios: StressScenario[];
-  regime_alignment: {
-    current_regime?: string;
-    alignment?: string;
-    comment?: string;
-  };
-  rebalancing_suggestions: RebalancingSuggestion[];
-  key_risks: string[];
+  regime_comment: string;
+  suggestions: Suggestion[];
 }
 
 export interface RiskAssessmentResponse {

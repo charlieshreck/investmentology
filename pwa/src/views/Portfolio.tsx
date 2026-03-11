@@ -1476,9 +1476,18 @@ export function Portfolio() {
                   const a = riskAssessment.assessment;
                   const scoreColor = (a.risk_score ?? 5) <= 3 ? "var(--color-success)" :
                     (a.risk_score ?? 5) <= 6 ? "var(--color-warning)" : "var(--color-error)";
+                  const roleColors: Record<string, string> = {
+                    "Growth Engine": "var(--color-accent-bright)",
+                    "Income Generator": "var(--color-success)",
+                    "Defensive Anchor": "#60a5fa",
+                    "Core Holding": "var(--color-text-secondary)",
+                    "Cash Cow": "var(--color-success)",
+                    "Speculative Bet": "var(--color-warning)",
+                    "Turnaround Play": "#f59e0b",
+                  };
                   return (<>
-                    {/* Risk score + summary */}
-                    <div style={{ display: "flex", gap: "var(--space-md)", alignItems: "flex-start", marginBottom: "var(--space-md)" }}>
+                    {/* Risk score + overview */}
+                    <div style={{ display: "flex", gap: "var(--space-md)", alignItems: "flex-start", marginBottom: "var(--space-lg)" }}>
                       <div style={{
                         width: 48, height: 48, borderRadius: "50%",
                         background: `color-mix(in srgb, ${scoreColor} 15%, transparent)`,
@@ -1489,29 +1498,85 @@ export function Portfolio() {
                         {a.risk_score}
                       </div>
                       <div>
-                        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: scoreColor, marginBottom: 4 }}>
+                        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: scoreColor, marginBottom: 6 }}>
                           {a.risk_label}
                         </div>
-                        <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-                          {a.summary}
+                        <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+                          {a.overview}
                         </div>
                       </div>
                     </div>
 
-                    {/* Key risks */}
-                    {a.key_risks && a.key_risks.length > 0 && (
+                    {/* Portfolio roles — what each stock does for you */}
+                    {a.portfolio_roles && a.portfolio_roles.length > 0 && (
+                      <div style={{ marginBottom: "var(--space-lg)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                          Your Portfolio Lineup
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {a.portfolio_roles.map((p) => (
+                            <div key={p.ticker} style={{
+                              display: "flex", gap: 10, alignItems: "flex-start",
+                              padding: "8px 10px", borderRadius: "var(--radius-sm)",
+                              background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                              cursor: "pointer",
+                            }}
+                              onClick={() => setOverlayTicker(p.ticker)}
+                            >
+                              <div style={{ minWidth: 44 }}>
+                                <div style={{ fontWeight: 800, fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+                                  {p.ticker}
+                                </div>
+                                <div style={{
+                                  fontSize: 8, fontWeight: 700, textTransform: "uppercase",
+                                  letterSpacing: "0.04em", marginTop: 2,
+                                  color: roleColors[p.role] || "var(--color-text-muted)",
+                                }}>
+                                  {p.role}
+                                </div>
+                              </div>
+                              <div style={{
+                                fontSize: 11, color: "var(--color-text-secondary)",
+                                lineHeight: 1.5, flex: 1,
+                              }}>
+                                {p.comment}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* What I'd change */}
+                    {a.what_id_change && (
+                      <div style={{
+                        padding: "var(--space-md)", marginBottom: "var(--space-md)",
+                        borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--color-accent)",
+                        background: "rgba(99, 102, 241, 0.06)",
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-accent-bright)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                          If I could change one thing
+                        </div>
+                        <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text)", lineHeight: 1.6 }}>
+                          {a.what_id_change}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Watch out for */}
+                    {a.watch_out_for && a.watch_out_for.length > 0 && (
                       <div style={{ marginBottom: "var(--space-md)" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                          Key Risks
+                          Things to watch
                         </div>
-                        {a.key_risks.map((r, i) => (
+                        {a.watch_out_for.map((w, i) => (
                           <div key={i} style={{
-                            display: "flex", gap: 6, alignItems: "flex-start",
+                            display: "flex", gap: 8, alignItems: "flex-start",
                             fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
-                            marginBottom: 4, lineHeight: 1.4,
+                            marginBottom: 6, lineHeight: 1.5,
                           }}>
-                            <AlertTriangle size={10} color="var(--color-warning)" style={{ flexShrink: 0, marginTop: 2 }} />
-                            {r}
+                            <span style={{ color: "var(--color-warning)", flexShrink: 0, marginTop: 1 }}>&#x25cf;</span>
+                            {w}
                           </div>
                         ))}
                       </div>
@@ -1521,7 +1586,7 @@ export function Portfolio() {
                     {a.stress_scenarios && a.stress_scenarios.length > 0 && (
                       <div style={{ marginBottom: "var(--space-md)" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                          Stress Scenarios
+                          What-if scenarios
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {a.stress_scenarios.map((s, i) => (
@@ -1529,76 +1594,69 @@ export function Portfolio() {
                               padding: "8px 10px", borderRadius: "var(--radius-sm)",
                               background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
                             }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: s.comment ? 4 : 0 }}>
                                 <span style={{ fontSize: 11, color: "var(--color-text-secondary)", flex: 1 }}>{s.scenario}</span>
                                 <span style={{
-                                  fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700,
+                                  fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 800, marginLeft: 8,
                                   color: Math.abs(s.estimated_impact_pct) > 15 ? "var(--color-error)" :
                                     Math.abs(s.estimated_impact_pct) > 8 ? "var(--color-warning)" : "var(--color-text-muted)",
                                 }}>
                                   {s.estimated_impact_pct > 0 ? "+" : ""}{s.estimated_impact_pct?.toFixed(1)}%
                                 </span>
                               </div>
+                              {s.comment && (
+                                <div style={{ fontSize: 10, color: "var(--color-text-muted)", lineHeight: 1.4 }}>
+                                  {s.comment}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* Regime alignment */}
-                    {a.regime_alignment && a.regime_alignment.alignment && (
-                      <div style={{ marginBottom: "var(--space-md)" }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                          Regime Alignment
+                    {/* Regime comment */}
+                    {a.regime_comment && (
+                      <div style={{
+                        padding: "var(--space-md)", marginBottom: "var(--space-md)",
+                        borderRadius: "var(--radius-sm)",
+                        background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                          Market environment
                         </div>
-                        <div style={{
-                          padding: "8px 10px", borderRadius: "var(--radius-sm)",
-                          background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
-                          fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.5,
-                        }}>
-                          <span style={{
-                            fontWeight: 700,
-                            color: a.regime_alignment.alignment === "ALIGNED" ? "var(--color-success)" :
-                              a.regime_alignment.alignment === "MISALIGNED" ? "var(--color-error)" : "var(--color-warning)",
-                          }}>
-                            {a.regime_alignment.alignment}
-                          </span>
-                          {a.regime_alignment.current_regime && (
-                            <span style={{ color: "var(--color-text-muted)" }}> — {a.regime_alignment.current_regime}</span>
-                          )}
-                          {a.regime_alignment.comment && (
-                            <div style={{ marginTop: 4 }}>{a.regime_alignment.comment}</div>
-                          )}
+                        <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+                          {a.regime_comment}
                         </div>
                       </div>
                     )}
 
-                    {/* Rebalancing suggestions */}
-                    {a.rebalancing_suggestions && a.rebalancing_suggestions.length > 0 && (
+                    {/* Suggestions */}
+                    {a.suggestions && a.suggestions.length > 0 && (
                       <div style={{ marginBottom: "var(--space-sm)" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                          Rebalancing Suggestions
+                          Suggestions
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {a.rebalancing_suggestions.map((s, i) => (
+                          {a.suggestions.map((s, i) => (
                             <div key={i} style={{
                               display: "flex", gap: 8, alignItems: "flex-start",
-                              padding: "6px 10px", borderRadius: "var(--radius-sm)",
+                              padding: "8px 10px", borderRadius: "var(--radius-sm)",
                               background: "var(--color-surface-1)", border: "1px solid var(--glass-border)",
                             }}>
                               <span style={{
-                                fontSize: 9, fontWeight: 800, padding: "1px 5px",
-                                borderRadius: 3, flexShrink: 0, marginTop: 1,
-                                background: s.action === "TRIM" || s.action === "REDUCE"
-                                  ? "rgba(239, 68, 68, 0.15)" : "rgba(52, 211, 153, 0.15)",
-                                color: s.action === "TRIM" || s.action === "REDUCE"
+                                fontSize: 9, fontWeight: 800, padding: "2px 6px",
+                                borderRadius: 3, flexShrink: 0, whiteSpace: "nowrap",
+                                background: /trim|profit|reduce/i.test(s.action)
+                                  ? "rgba(239, 68, 68, 0.12)" : "rgba(52, 211, 153, 0.12)",
+                                color: /trim|profit|reduce/i.test(s.action)
                                   ? "var(--color-error)" : "var(--color-success)",
                               }}>
                                 {s.action}
                               </span>
-                              <div>
-                                <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)" }}>{s.ticker}</span>
-                                <span style={{ fontSize: 11, color: "var(--color-text-muted)", marginLeft: 6 }}>{s.reason}</span>
+                              <div style={{ fontSize: 11, lineHeight: 1.5 }}>
+                                <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)" }}>{s.ticker}</span>
+                                <span style={{ color: "var(--color-text-muted)", marginLeft: 6 }}>{s.reason}</span>
                               </div>
                             </div>
                           ))}
