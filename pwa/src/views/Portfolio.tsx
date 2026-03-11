@@ -531,6 +531,32 @@ export function Portfolio() {
                   })}
               </div>
             )}
+            {/* Performance chart inline */}
+            {positions.length > 0 && (
+              <div style={{
+                padding: "var(--space-md) var(--space-lg)",
+                background: "var(--color-surface-0)",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--glass-border)",
+                marginTop: "var(--space-sm)",
+              }}>
+                <PortfolioPerformanceChart />
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* Performance chart fallback — show if no metrics but positions exist */}
+        {!performance && positions.length > 0 && (
+          <Section title="Performance" icon={TrendingUp} defaultOpen={false}>
+            <div style={{
+              padding: "var(--space-md) var(--space-lg)",
+              background: "var(--color-surface-0)",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--glass-border)",
+            }}>
+              <PortfolioPerformanceChart />
+            </div>
           </Section>
         )}
 
@@ -657,20 +683,6 @@ export function Portfolio() {
             </div>
 
           </motion.div>
-        )}
-
-        {/* ═══════ Performance Chart ═══════ */}
-        {positions.length > 0 && (
-          <Section title="Performance" icon={TrendingUp} defaultOpen={false}>
-            <div style={{
-              padding: "var(--space-md) var(--space-lg)",
-              background: "var(--color-surface-0)",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--glass-border)",
-            }}>
-              <PortfolioPerformanceChart />
-            </div>
-          </Section>
         )}
 
         {/* ═══════ Positions (with Dividends tab) ═══════ */}
