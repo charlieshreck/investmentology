@@ -30,6 +30,16 @@ EXCLUDED_NAME_KEYWORDS = frozenset({
     "merger",
 })
 
+# Preferred shares / debt instruments — yfinance has no fundamentals for these
+EXCLUDED_NAME_PREFERRED = frozenset({
+    "preferred",
+    "depositary shares",
+    "subordinated notes",
+    "cumulative trust",
+    "fixed-rate reset",
+    "perpetual preferred",
+})
+
 _NASDAQ_SCREENER_URL = (
     "https://api.nasdaq.com/api/screener/stocks"
     "?tableType=earnings&limit=25000&country=united%20states"
@@ -154,6 +164,11 @@ def _is_excluded(
     # Exclude by name keywords (SPACs, etc.)
     name = (row.get("name", "") or "").lower()
     for kw in EXCLUDED_NAME_KEYWORDS:
+        if kw in name:
+            return True
+
+    # Exclude preferred shares and debt instruments (no yfinance fundamentals)
+    for kw in EXCLUDED_NAME_PREFERRED:
         if kw in name:
             return True
 
