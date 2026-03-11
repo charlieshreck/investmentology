@@ -360,7 +360,8 @@ class PortfolioService:
                 "measurementDays": perf.measurement_days,
             }
         except Exception:
-            logger.debug("Performance metrics computation failed", exc_info=True)
+            logger.warning("Performance metrics computation failed", exc_info=True)
+            # Don't let a bad calculation hide the rest of the portfolio response
 
         return {
             "positions": items,

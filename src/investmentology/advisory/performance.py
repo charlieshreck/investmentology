@@ -194,7 +194,11 @@ class PerformanceCalculator:
                    FROM invest.portfolio_positions
                    WHERE is_closed = TRUE AND exit_date IS NOT NULL"""
             )
-            avg_hold_days = float(hold_rows[0]["avg_hold"].days) if hold_rows and hold_rows[0]["avg_hold"] else 30
+            avg_hold_raw = hold_rows[0]["avg_hold"] if hold_rows else None
+            if avg_hold_raw is not None:
+                avg_hold_days = float(avg_hold_raw.days if hasattr(avg_hold_raw, "days") else avg_hold_raw)
+            else:
+                avg_hold_days = 30
 
             trades_per_year = 365.25 / max(avg_hold_days, 1)
 
@@ -242,8 +246,8 @@ class PerformanceCalculator:
             if not rows:
                 return None, None, None
 
-            winner_days = [r["hold_days"].days for r in rows if r["is_winner"] and r["hold_days"]]
-            loser_days = [r["hold_days"].days for r in rows if not r["is_winner"] and r["hold_days"]]
+            winner_days = [int(r["hold_days"].days if hasattr(r["hold_days"], "days") else r["hold_days"]) for r in rows if r["is_winner"] and r["hold_days"]]
+            loser_days = [int(r["hold_days"].days if hasattr(r["hold_days"], "days") else r["hold_days"]) for r in rows if not r["is_winner"] and r["hold_days"]]
 
             avg_winner = sum(winner_days) / len(winner_days) if winner_days else None
             avg_loser = sum(loser_days) / len(loser_days) if loser_days else None
