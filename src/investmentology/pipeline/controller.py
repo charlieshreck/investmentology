@@ -2321,7 +2321,7 @@ class PipelineController:
             ),
         }
 
-        return registry.insert_agent_signals(
+        signal_id = registry.insert_agent_signals(
             ticker=ticker,
             agent_name=response.agent_name,
             model=response.model,
@@ -2331,6 +2331,57 @@ class PipelineController:
             token_usage=response.token_usage,
             latency_ms=response.latency_ms,
         )
+
+        # Record for agent accuracy tracking (30d/90d settlement)
+        try:
+            from investmentology.learning.agent_accuracy import record_agent_signal
+            from investmentology.models.signal import SignalTag
+
+            tags = response.signal_set.signals.tags
+            buy_tags = {SignalTag.BUY_NEW, SignalTag.BUY_ADD}
+            sell_tags = {SignalTag.SELL_FULL, SignalTag.SELL_PARTIAL, SignalTag.TRIM}
+
+            if tags & buy_tags:
+                signal_type = "BUY"
+            elif tags & sell_tags:
+                signal_type = "SELL"
+            else:
+                signal_type = "HOLD"
+
+            # Get current price from fundamentals cache
+            price = None
+            try:
+                request = self._build_request(ticker)
+                price = float(
+                    getattr(request.fundamentals, "current_price", 0)
+                    or getattr(request.fundamentals, "price", 0) or 0
+                ) or None
+            except Exception:
+                pass
+
+            # Get macro regime
+            regime = None
+            if self._current_cycle_id:
+                regime_data = state.get_data_cache(
+                    self.db, self._current_cycle_id, "__cycle__", "macro_regime",
+                )
+                if regime_data and isinstance(regime_data, dict):
+                    regime = regime_data.get("regime")
+
+            record_agent_signal(
+                db=self.db,
+                agent_name=response.agent_name,
+                ticker=ticker,
+                signal_type=signal_type,
+                confidence=float(response.signal_set.confidence),
+                price_at_signal=price,
+                regime=regime,
+            )
+        except Exception:
+            logger.debug("Agent accuracy recording failed for %s/%s",
+                         response.agent_name, ticker, exc_info=True)
+
+        return signal_id
 
     def _apply_calibration_weights(
         self, weights: dict[str, Decimal],

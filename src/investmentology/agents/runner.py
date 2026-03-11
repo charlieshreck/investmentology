@@ -160,6 +160,9 @@ class AgentRunner:
         if request.prior_guidance:
             parts.extend(self._fmt_prior_guidance(request.prior_guidance))
 
+        if request.event_context:
+            parts.extend(self._fmt_event_context(request.event_context))
+
         if "news_context" in opt and request.news_context:
             parts.extend(self._fmt_news(request.news_context))
 
@@ -606,6 +609,31 @@ class AgentRunner:
         if len(parts) <= 1:
             return []
         parts.append("  INSTRUCTION: Factor management's guidance track record into your confidence.")
+        return parts
+
+    @staticmethod
+    def _fmt_event_context(events: list[dict]) -> list[str]:
+        """Format event-driven historical context for agent prompts."""
+        parts = ["", "EVENT-DRIVEN HISTORICAL CONTEXT:"]
+        for e in events:
+            cat = e.get("event_category", "")
+            etype = e.get("event_type", "").replace("_", " ").title()
+            avg30 = e.get("avg_return_30d")
+            avg90 = e.get("avg_return_90d")
+            wr = e.get("win_rate_30d")
+            n = e.get("n_observations", 0)
+            desc = e.get("description", "")
+            line = f"  {etype} ({cat})"
+            if avg30 is not None:
+                line += f": avg 30d return {avg30:+.1%}"
+            if avg90 is not None:
+                line += f", 90d {avg90:+.1%}"
+            if wr is not None:
+                line += f" (win rate {wr:.0%}, n={n})"
+            if desc:
+                line += f" — {desc}"
+            parts.append(line)
+        parts.append("  INSTRUCTION: Use these historical base rates to calibrate your confidence.")
         return parts
 
     @staticmethod

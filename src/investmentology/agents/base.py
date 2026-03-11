@@ -63,6 +63,8 @@ class AnalysisRequest:
     prior_guidance: dict | None = None  # {guided_revenue, actual_revenue, guided_eps, actual_eps, ...}
     # Historical backtest calibration (regime-tagged factor IC data)
     backtest_calibration: dict | None = None
+    # Event-driven historical context (statistical outcomes for detected events)
+    event_context: list[dict] | None = None  # [{event_type, category, avg_return_30d, win_rate, n_obs}]
 
 
 @dataclass

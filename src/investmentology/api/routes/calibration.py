@@ -193,3 +193,35 @@ def trigger_calibration_fit(
         "fitted_agents": fitted,
         "total_fitted": len(fitted),
     }
+
+
+@router.get("/calibration/agent-accuracy")
+def get_agent_accuracy(registry: Registry = Depends(get_registry)) -> dict:
+    """Per-agent directional signal accuracy by regime.
+
+    Returns accuracy at 30d and 90d horizons, broken down by market regime.
+    Also returns dynamically adjusted weights based on historical accuracy.
+    """
+    from investmentology.learning.agent_accuracy import (
+        get_agent_accuracy_stats,
+        get_dynamic_weights,
+    )
+
+    stats = get_agent_accuracy_stats(registry._db)
+    weights = get_dynamic_weights(registry._db)
+
+    return {
+        "stats": stats,
+        "dynamicWeights": {k: round(v, 4) for k, v in weights.items()},
+    }
+
+
+@router.post("/calibration/settle-accuracy")
+def trigger_accuracy_settlement(
+    registry: Registry = Depends(get_registry),
+) -> dict:
+    """Settle agent accuracy records that have matured (30d and 90d)."""
+    from investmentology.learning.agent_accuracy import settle_accuracy
+
+    settled = settle_accuracy(registry._db)
+    return {"settled": settled}

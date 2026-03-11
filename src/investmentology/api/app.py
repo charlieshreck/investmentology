@@ -363,6 +363,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     # Import and mount route modules
     from investmentology.api.routes import (
         analyse,
+        assistant,
         auth,
         backtest,
         decisions,
@@ -382,6 +383,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     from investmentology.api import ws
 
     prefix = "/api/invest"
+    app.include_router(assistant.router, prefix=prefix, tags=["assistant"])
     app.include_router(auth.router, prefix=prefix, tags=["auth"])
     app.include_router(portfolio.router, prefix=prefix, tags=["portfolio"])
     app.include_router(quant_gate.router, prefix=prefix, tags=["quant-gate"])

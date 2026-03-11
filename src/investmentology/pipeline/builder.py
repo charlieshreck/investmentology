@@ -494,6 +494,58 @@ def build_analysis_request(
         except Exception:
             pass
 
+    # 9. Event-driven historical context — match detected events against taxonomy
+    event_context = None
+    try:
+        sector_name = raw_fundamentals.get("sector", "")
+        event_rows = db.execute(
+            "SELECT event_category, event_type, description, "
+            "avg_return_30d, avg_return_90d, win_rate_30d, n_observations "
+            "FROM invest.event_taxonomy "
+            "WHERE sector IS NULL OR sector = %s "
+            "ORDER BY n_observations DESC",
+            (sector_name,),
+        )
+        if event_rows and news_context:
+            # Simple keyword matching: check if any news headlines mention event types
+            headlines_lower = " ".join(
+                (n.get("headline", "") + " " + n.get("summary", "")).lower()
+                for n in (news_context or [])
+            )
+            matched = []
+            _EVENT_KEYWORDS = {
+                "ceo_departure": ["ceo depart", "ceo resign", "ceo step", "ceo fired", "ceo exit"],
+                "ceo_appointment": ["new ceo", "ceo appoint", "ceo named", "ceo hired"],
+                "cfo_departure": ["cfo depart", "cfo resign", "cfo step", "cfo exit"],
+                "buyback_announced": ["buyback", "repurchase", "share repurchase"],
+                "secondary_offering": ["secondary offering", "stock offering", "equity offering"],
+                "dividend_increase": ["dividend increase", "dividend raise", "dividend hike"],
+                "dividend_cut": ["dividend cut", "dividend suspend", "dividend reduc"],
+                "fda_approval": ["fda approv", "fda clear"],
+                "fda_rejection": ["fda reject", "complete response letter", "crl"],
+                "earnings_beat": ["beat estimate", "beat expect", "topped estimate", "surpass"],
+                "earnings_miss": ["miss estimate", "miss expect", "fell short", "disappoint"],
+                "guidance_raise": ["guidance raise", "raised guidance", "raised outlook", "raised forecast"],
+                "guidance_cut": ["guidance cut", "lowered guidance", "lowered outlook", "cut forecast"],
+                "acquisition_announced": ["acquire", "acquisition", "merger", "buyout", "takeover"],
+                "spinoff_announced": ["spin-off", "spinoff", "divestiture"],
+                "activist_entry": ["activist", "stake", "13d filing"],
+                "index_inclusion": ["added to s&p", "index inclusion", "added to index"],
+                "analyst_upgrade": ["upgrade", "raised target"],
+                "analyst_downgrade": ["downgrade", "lowered target", "cut target"],
+            }
+            for event_type, keywords in _EVENT_KEYWORDS.items():
+                if any(kw in headlines_lower for kw in keywords):
+                    # Find matching taxonomy row
+                    for row in event_rows:
+                        if row["event_type"] == event_type:
+                            matched.append(dict(row))
+                            break
+            if matched:
+                event_context = matched[:5]  # Max 5 events
+    except Exception:
+        logger.debug("Event context lookup failed", exc_info=True)
+
     return AnalysisRequest(
         ticker=ticker,
         fundamentals=fundamentals,
@@ -527,4 +579,5 @@ def build_analysis_request(
         pnl_pct=pnl_pct,
         invalidation_triggers=invalidation_triggers,
         prior_guidance=prior_guidance,
+        event_context=event_context,
     )

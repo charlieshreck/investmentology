@@ -34,6 +34,7 @@ const Backtest = lazy(() => import("./views/Backtest").then(m => ({ default: m.B
 const SettingsView = lazy(() => import("./views/SettingsView").then(m => ({ default: m.SettingsView })));
 const StockDeepDive = lazy(() => import("./views/StockDeepDive").then(m => ({ default: m.StockDeepDive })));
 const ResearchReport = lazy(() => import("./views/ResearchReport").then(m => ({ default: m.ResearchReport })));
+const Assistant = lazy(() => import("./views/Assistant").then(m => ({ default: m.Assistant })));
 
 function ViewLoader() {
   return (
@@ -215,6 +216,7 @@ function AppShell({ offline }: { offline: boolean }) {
             <Route path="/backtest" element={<ViewErrorBoundary viewName="Backtest"><Suspense fallback={<ViewLoader />}><PageTransition><Backtest /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/health" element={<ViewErrorBoundary viewName="System Health"><Suspense fallback={<ViewLoader />}><PageTransition><SystemHealth /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/settings" element={<ViewErrorBoundary viewName="Settings"><Suspense fallback={<ViewLoader />}><PageTransition><SettingsView /></PageTransition></Suspense></ViewErrorBoundary>} />
+            <Route path="/assistant" element={<ViewErrorBoundary viewName="Assistant"><Suspense fallback={<ViewLoader />}><PageTransition><Assistant /></PageTransition></Suspense></ViewErrorBoundary>} />
             <Route path="/report/:ticker" element={<ViewErrorBoundary viewName="Research Report"><Suspense fallback={<ViewLoader />}><PageTransition><ResearchReport /></PageTransition></Suspense></ViewErrorBoundary>} />
           </Routes>
         </AnimatePresence>

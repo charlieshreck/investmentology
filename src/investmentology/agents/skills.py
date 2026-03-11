@@ -1476,6 +1476,79 @@ def build_sector_specialist(sector: str) -> AgentSkill | None:
     )
 
 
+PORTFOLIO_RISK = AgentSkill(
+    name="portfolio_risk",
+    display_name="Portfolio Risk Manager",
+    philosophy=(
+        "You are a portfolio-level risk manager. You do NOT evaluate individual "
+        "stock quality — other agents do that. Your sole focus is how the PORTFOLIO "
+        "as a whole behaves under stress. You evaluate correlation, concentration, "
+        "liquidity, beta exposure, and systemic fragility. You have veto authority "
+        "over proposed actions that would increase portfolio risk beyond acceptable bounds."
+    ),
+    role="validator",
+    provider_preference=["deepseek", "groq"],
+    default_model="deepseek-chat",
+    cli_screen=None,
+    methodology="""\
+1. CORRELATION ANALYSIS: Identify clusters of highly correlated positions. \
+If 3+ positions would all decline together in a market shock (same sector, \
+same macro driver, same customer base), flag as correlated cluster. \
+Combined weight of correlated cluster > 30% is CRITICAL.
+2. CONCENTRATION RISK: Single position > 10% of portfolio: WARNING. \
+Single sector > 35%: WARNING. Top 3 positions > 50%: WARNING. \
+Any of these + high correlation: ESCALATE.
+3. STRESS SCENARIOS: Model portfolio impact under: (a) broad market -15%, \
+(b) sector rotation (growth→value or vice versa), (c) rate shock +100bps, \
+(d) single largest position -30%. Report estimated portfolio drawdown.
+4. LIQUIDITY ASSESSMENT: Flag positions where average daily volume < 500K shares \
+or market cap < $1B. In a drawdown, these become exit traps. Combined illiquid \
+weight > 20% is CRITICAL.
+5. BETA EXPOSURE: Calculate effective portfolio beta from position types and sectors. \
+All-growth portfolio in late-cycle regime: WARNING. Portfolio beta > 1.3: WARNING.
+6. REGIME ALIGNMENT: Compare portfolio composition to current macro regime guidance. \
+If regime says "cautious" but portfolio is 95% equity with high beta: ESCALATE. \
+Flag misalignment between regime stance and actual positioning.""",
+    critical_rules=[
+        "Correlated cluster > 30% of portfolio: VETO new additions to the cluster.",
+        "Portfolio estimated drawdown > 25% in any stress scenario: ESCALATE immediately.",
+        "Illiquid positions > 20% of portfolio: ESCALATE — exit capacity insufficient.",
+        "Adding to a position that's already > 8% of portfolio: VETO unless thesis is permanent.",
+        "Portfolio equity exposure exceeds regime guidance max by > 10%: ESCALATE.",
+        "All positions in same risk category (growth/cyclical/defensive): ESCALATE — no diversification.",
+    ],
+    required_data=["fundamentals", "sector", "industry"],
+    optional_data=[
+        "portfolio_context", "macro_regime", "market_snapshot",
+        "position_type", "thesis_health",
+    ],
+    allowed_tags=[
+        "CONCENTRATION", "CORRELATION_HIGH", "CORRELATION_LOW",
+        "LIQUIDITY_LOW", "LIQUIDITY_OK", "DRAWDOWN_RISK",
+        "SECTOR_OVERWEIGHT", "SECTOR_UNDERWEIGHT",
+        "PORTFOLIO_OVER_EXPOSED", "PORTFOLIO_UNDERWEIGHT_CASH",
+        "VOLATILITY_HIGH", "VOLATILITY_LOW",
+        "REGIME_MISALIGNED", "REGIME_ALIGNED",
+        "HOLD", "TRIM", "SELL_PARTIAL", "NO_ACTION",
+        "VETO", "REVIEW_REQUIRED",
+    ],
+    base_weight=0.0,  # Not weighted in synthesis — advisory/veto only
+    output_format=_STANDARD_OUTPUT,
+    timeout_seconds=120,
+    prompt_opener=(
+        "Evaluate PORTFOLIO-LEVEL RISK for {ticker} ({sector} / {industry}). "
+        "You are NOT assessing business quality — other agents do that. "
+        "Your focus: does ADDING or HOLDING this position create unacceptable "
+        "portfolio-level risk given current allocations, correlations, and regime?"
+    ),
+    signature_question=(
+        "VETO DECISION: Would adding to or maintaining this position push the "
+        "portfolio past any risk threshold? If yes, state the specific threshold "
+        "breached and the required action (trim, rebalance, or veto). ANSWER:"
+    ),
+)
+
+
 # ---------------------------------------------------------------------------
 # Skills Registry
 # ---------------------------------------------------------------------------
@@ -1495,6 +1568,7 @@ SKILLS: dict[str, AgentSkill] = {
     "quality_position_screener": QUALITY_POSITION_SCREENER,
     "data_analyst": DATA_ANALYST,
     "income_analyst": INCOME_ANALYST,
+    "portfolio_risk": PORTFOLIO_RISK,
 }
 
 # Convenience subsets

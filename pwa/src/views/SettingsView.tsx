@@ -8,7 +8,7 @@ import { useThemeStore, themes } from "../stores/useThemeStore";
 import {
   Palette, Search, Plus, ScrollText,
   GraduationCap, Bot, BarChart3, Heart, LogOut,
-  ChevronRight, Check, Activity,
+  ChevronRight, Check, Activity, MessageCircle,
 } from "lucide-react";
 
 export function SettingsView() {
@@ -212,6 +212,7 @@ export function SettingsView() {
               { label: "Analysis", icon: Plus, path: "/analyze" },
               { label: "Screener", icon: Search, path: "/screener" },
               { label: "Decision Log", icon: ScrollText, path: "/log" },
+              { label: "Assistant", icon: MessageCircle, path: "/assistant" },
               { label: "Agents", icon: Bot, path: "/agents" },
               { label: "Pipeline", icon: Activity, path: "/pipeline" },
               { label: "Backtest", icon: BarChart3, path: "/backtest" },
