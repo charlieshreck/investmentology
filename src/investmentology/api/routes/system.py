@@ -172,7 +172,7 @@ def force_refresh(registry: Registry = Depends(get_registry)) -> dict:
     # Reset pipeline state — expire all rows so controller re-runs everything
     db.execute(
         "UPDATE invest.pipeline_state SET status = 'expired', "
-        "updated_at = NOW() WHERE status IN ('completed', 'failed', 'running')"
+        "completed_at = NOW() WHERE status IN ('completed', 'failed', 'running')"
     )
     cleared.append("pipeline_state")
 
