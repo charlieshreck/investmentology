@@ -16,7 +16,10 @@ from datetime import datetime
 
 import httpx
 
+from investmentology.config import load_config
+
 logger = logging.getLogger(__name__)
+_config = load_config()
 
 # Neo4j access via knowledge MCP's graph tools
 NEO4J_BOLT_URL = "bolt://neo4j.ai-platform.svc.cluster.local:7687"
@@ -112,7 +115,10 @@ async def record_verdict_node(
                             "name": "query_graph",
                             "arguments": {"query": cypher},
                         },
-                        headers={"Content-Type": "application/json"},
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {_config.internal_api_token}",
+                        },
                     )
                     if resp.status_code not in (200, 201):
                         logger.debug("Neo4j query failed: %s", resp.text[:200])
@@ -160,7 +166,10 @@ async def record_thesis_node(
             resp = await client.post(
                 "http://knowledge-mcp.ai-platform.svc.cluster.local:8000/api/call",
                 json={"name": "query_graph", "arguments": {"query": cypher}},
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {_config.internal_api_token}",
+                },
             )
             return resp.status_code in (200, 201)
     except Exception:
@@ -185,7 +194,10 @@ async def get_verdict_chain(ticker: str, limit: int = 20) -> list[VerdictChainEn
             resp = await client.post(
                 "http://knowledge-mcp.ai-platform.svc.cluster.local:8000/api/call",
                 json={"name": "query_graph", "arguments": {"query": cypher}},
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {_config.internal_api_token}",
+                },
             )
             if resp.status_code != 200:
                 return []
@@ -241,7 +253,10 @@ async def get_flip_accuracy(
             resp = await client.post(
                 "http://knowledge-mcp.ai-platform.svc.cluster.local:8000/api/call",
                 json={"name": "query_graph", "arguments": {"query": cypher}},
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {_config.internal_api_token}",
+                },
             )
             if resp.status_code == 200:
                 data = resp.json()

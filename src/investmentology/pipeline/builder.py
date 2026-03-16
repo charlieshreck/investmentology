@@ -11,10 +11,12 @@ import logging
 from decimal import Decimal
 
 from investmentology.agents.base import AnalysisRequest
+from investmentology.config import load_config
 from investmentology.pipeline import state
 from investmentology.registry.db import Database
 
 logger = logging.getLogger(__name__)
+_config = load_config()
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +378,10 @@ def build_analysis_request(
                         f"ORDER BY v.created_at DESC LIMIT 5"
                     ),
                 },
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {_config.internal_api_token}",
             },
             timeout=5.0,
         )
