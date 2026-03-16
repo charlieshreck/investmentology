@@ -30,7 +30,7 @@ spec:
             - name: HB_PROXY_URL
               value: "http://10.10.0.101:9100"
             - name: INTERNAL_API_TOKEN
-              value: "qf86quAL_B-X9wvuH4nCFU-9Wtfx4oHx-CqXqMmVeEc"
+              value: "d64bd8532d7ce3d6cd07c3ed927907b6a0c9503257e0130b56ab76ecf7186790"
           resources:
             requests:
               memory: "256Mi"
