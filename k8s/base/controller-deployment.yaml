@@ -29,6 +29,8 @@ spec:
           env:
             - name: HB_PROXY_URL
               value: "http://10.10.0.101:9100"
+            - name: A2A_API_TOKEN
+              value: "qf86quAL_B-X9wvuH4nCFU-9Wtfx4oHx-CqXqMmVeEc"
           resources:
             requests:
               memory: "256Mi"
