@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: investmentology-controller
     app.kubernetes.io/component: pipeline-controller
 spec:
-  replicas: 1
+  replicas: 0  # Scaled down with main deployment
   strategy:
     type: Recreate  # Only one controller instance at a time
   selector:

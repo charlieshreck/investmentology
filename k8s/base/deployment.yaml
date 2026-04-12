@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: investmentology
 spec:
-  replicas: 1
+  replicas: 0  # Scaled down — pod crash-looping (43 restarts). Investigate before re-enabling.
   selector:
     matchLabels:
       app.kubernetes.io/name: investmentology
