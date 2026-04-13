@@ -25,7 +25,31 @@ spec:
           containers:
             - name: daily-monitor
               image: ghcr.io/charlieshreck/investmentology-api:latest
-              command: ["python3", "-m", "investmentology", "cron", "daily-monitor"]
+              command: ["/bin/sh", "-c"]
+              args:
+              - |
+                RUN_ID=$(python3 -c "
+                import json, urllib.request
+                try:
+                    req = urllib.request.Request('http://estate-triage.kernow.io/api/automation/preflight',
+                        data=json.dumps({'name':'invest-daily-monitor','tenant_id':'kernow','triggered_by':'cronjob'}).encode(),
+                        headers={'Content-Type':'application/json'}, method='POST')
+                    resp = urllib.request.urlopen(req, timeout=5)
+                    print(json.loads(resp.read()).get('run_id',''))
+                except: print('')
+                " 2>/dev/null)
+                python3 -m investmentology cron daily-monitor
+                EXIT=$?
+                [ -n "$RUN_ID" ] && python3 -c "
+                import json, urllib.request
+                try:
+                    req = urllib.request.Request('http://estate-triage.kernow.io/api/automation/complete',
+                        data=json.dumps({'run_id':int('$RUN_ID'),'exit_code':$EXIT,'tenant_id':'kernow'}).encode(),
+                        headers={'Content-Type':'application/json'}, method='POST')
+                    urllib.request.urlopen(req, timeout=10)
+                except: pass
+                " 2>/dev/null || true
+                exit $EXIT
               envFrom:
                 - secretRef:
                     name: investmentology-secrets
