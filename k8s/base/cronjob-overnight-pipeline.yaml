@@ -16,6 +16,7 @@ spec:
     spec:
       # 5 hour max (pipeline can be slow with 30+ tickers and CLI agents)
       activeDeadlineSeconds: 18000
+      ttlSecondsAfterFinished: 86400  # GC Failed/Completed jobs after 24h
       backoffLimit: 1
       template:
         metadata:
